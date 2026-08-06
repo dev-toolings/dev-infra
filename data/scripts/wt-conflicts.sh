@@ -90,6 +90,7 @@ branches=()
 owns_specs=()
 mig_slugs=()
 
+# shellcheck disable=SC2034 # port and app_ports are lane-record fields we skip
 while IFS='|' read -r slug port branch path app_ports group owns; do
   [ -n "$slug" ] || continue
   [ -z "$GROUP" ] || [ "$group" = "$GROUP" ] || continue
