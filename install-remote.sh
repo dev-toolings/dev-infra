@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO_SLUG="MakFly/dev-infra"
+REPO_SLUG="dev-toolings/dev-infra"
 REPO_URL="https://github.com/${REPO_SLUG}.git"
 # Which version to install: "latest" (newest release, default), "vX.Y.Z", or "main".
 DEVHUB_VERSION="${DEVHUB_VERSION:-latest}"
