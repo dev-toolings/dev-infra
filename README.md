@@ -124,12 +124,12 @@ files. Runtime containers use the shared Docker network to reach DevHub services
 | Profile | Services | Default |
 |---|---|---|
 | `core` | PostgreSQL, MySQL, Redis, Meilisearch, Mailpit, Adminer, Dozzle | Yes |
-| `async` | RabbitMQ | No |
+| `async` | RabbitMQ | Yes |
 | `node` | Node.js 22 LTS | No |
 
 ```bash
-devhub up                  # core only
-devhub up --with async     # core + RabbitMQ
+devhub up                  # core + async (RabbitMQ)
+devhub up --with node      # core + async + Node.js
 ```
 
 ## Requirements
@@ -187,7 +187,7 @@ To skip shell integration, run the CLI directly:
 ## Quick Start
 
 ```bash
-devhub up               # start core services
+devhub up               # start core + async services
 devhub ps               # show container status
 devhub doctor           # health, network, and port diagnostics
 devhub open adminer     # open Adminer in browser
@@ -346,7 +346,7 @@ lock on the project port registry.
 
 | Command | Description |
 |---|---|
-| `devhub up [--with profile,...]` | Start shared services (default: `core`) |
+| `devhub up [--with profile,...]` | Start shared services (default: `core,async`) |
 | `devhub down` | Stop and remove all shared containers |
 | `devhub restart [--with profile,...]` | Restart services |
 | `devhub ps` | Show service status |
@@ -372,8 +372,8 @@ lock on the project port registry.
 **Make shortcuts:**
 
 ```bash
-make up                          # start core
-make up-async                    # start core + async
+make up                          # start core + async
+make up-async                    # same as `make up` (kept for compat)
 make down                        # stop all
 make ps                          # status
 make doctor                      # diagnostics

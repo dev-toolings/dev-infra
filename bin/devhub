@@ -26,7 +26,7 @@ WT_RM_SCRIPT="$SCRIPTS_DIR/wt-rm.sh"
 WT_STATUS_SCRIPT="$SCRIPTS_DIR/wt-status.sh"
 WT_CONFLICTS_SCRIPT="$SCRIPTS_DIR/wt-conflicts.sh"
 NETWORK_NAME="${DEVHUB_NETWORK:-dev-shared-net}"
-DEFAULT_PROFILES=(core)
+DEFAULT_PROFILES=(core async)
 ALL_PROFILES="core,async,node"
 STARTABLE_PROFILES="$ALL_PROFILES"
 POSTGRES_CONTAINER="${POSTGRES_CONTAINER:-infra-postgres}"
@@ -335,9 +335,9 @@ cmd_help() {
 Usage: devhub <command> [options]
 
 Commands:
-  up [--with profile[,profile]]        Start shared services (default: core)
+  up [--with profile[,profile]]        Start shared services (default: core,async)
   down                                Stop/remove shared services
-  restart                             Restart shared services (core)
+  restart                             Restart shared services (core,async)
   ps                                  Show service status
   logs [service]                      Follow logs
   open <target>                       Open service URL

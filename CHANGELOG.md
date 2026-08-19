@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- `devhub up` / `devhub restart` now start the `async` profile (RabbitMQ) by
+  default alongside `core`. Projects relying on AMQP no longer crash-loop after
+  a plain `devhub up`. Use `--with node` to add Node.js on top; `make up-async`
+  is kept as an alias of `make up`.
+
 ## [0.0.3] - 2026-07-18
 
 ### Added
