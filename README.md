@@ -144,17 +144,17 @@ devhub up --with node      # core + async + Node.js
 **One-liner** (installs the latest release to `~/.local/share/devhub`, no sudo):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/MakFly/dev-infra/main/install-remote.sh | bash
+curl -fsSL https://raw.githubusercontent.com/dev-toolings/dev-infra/main/install-remote.sh | bash
 ```
 
 Pin a specific version, or track the bleeding-edge `main` branch:
 
 ```bash
 # exact release
-DEVHUB_VERSION=v0.0.1 curl -fsSL https://raw.githubusercontent.com/MakFly/dev-infra/main/install-remote.sh | bash
+DEVHUB_VERSION=v0.0.1 curl -fsSL https://raw.githubusercontent.com/dev-toolings/dev-infra/main/install-remote.sh | bash
 
 # always-latest development branch (unpinned, not reproducible)
-DEVHUB_VERSION=main  curl -fsSL https://raw.githubusercontent.com/MakFly/dev-infra/main/install-remote.sh | bash
+DEVHUB_VERSION=main  curl -fsSL https://raw.githubusercontent.com/dev-toolings/dev-infra/main/install-remote.sh | bash
 ```
 
 `DEVHUB_VERSION` defaults to `latest` (newest published GitHub Release). If no
@@ -163,13 +163,13 @@ release exists yet, the installer falls back to `main` with a warning.
 Custom install path:
 
 ```bash
-DEVHUB_DIR=~/tools/devhub curl -fsSL https://raw.githubusercontent.com/MakFly/dev-infra/main/install-remote.sh | bash
+DEVHUB_DIR=~/tools/devhub curl -fsSL https://raw.githubusercontent.com/dev-toolings/dev-infra/main/install-remote.sh | bash
 ```
 
 **Manual** (if you prefer git clone):
 
 ```bash
-git clone git@github.com:MakFly/dev-infra.git dev-infra
+git clone git@github.com:dev-toolings/dev-infra.git dev-infra
 cd dev-infra
 cp .env.example .env
 make install
