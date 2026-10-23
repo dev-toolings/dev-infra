@@ -132,8 +132,14 @@ services:
       - dev-shared-net
 
   rabbitmq:
-    image: rabbitmq:3-management-alpine
+    # 4.x line: 3.13 left community support and carries CVE-2026-57212/57213/44839.
+    # Upgrading across minors needs every stable feature flag enabled first
+    # (rabbitmqctl enable_feature_flag all after each upgrade).
+    image: rabbitmq:4-management-alpine
     container_name: infra-rabbitmq
+    # Fixed hostname: RabbitMQ keeps its state under mnesia/rabbit@<hostname>,
+    # so a container-id hostname restarts on an empty node after every recreate.
+    hostname: infra-rabbitmq
     profiles: [async]
     restart: unless-stopped
     environment:
