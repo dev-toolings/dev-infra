@@ -131,3 +131,12 @@ test("initialization rejects the infrastructure checkout before invoking Git", a
   await expect(gitRun(fake, ["init"], { cwd: resolve(import.meta.dir, "..") })).rejects.toThrow("protected");
   expect(calls).toBe(0);
 });
+
+test("initialization refuses an existing forged Git pointer without following it", async () => {
+  const path = mkdtempSync(join(tmpdir(), "devhub-git-init-pointer-")); fixtures.push(path);
+  writeFileSync(join(path, ".git"), "gitdir: /outside/metadata\n");
+  let calls = 0;
+  const fake: Executor = async () => { calls++; return { code: 0, stdout: "", stderr: "" }; };
+  await expect(gitRun(fake, ["-C", path, "init"])).rejects.toThrow("reinitialization");
+  expect(calls).toBe(0);
+});

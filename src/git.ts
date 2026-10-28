@@ -40,6 +40,12 @@ export async function gitRun(run: Executor, argv: string[], options: ExecOptions
   const protectedPaths = [resolve(import.meta.dir, ".."), resolve(homedir(), ".local/share/devhub"), ...(process.env.DEVHUB_DIR ? [resolve(process.env.DEVHUB_DIR)] : [])].map((path) => existsSync(path) ? realpathSync(path) : path);
   if (protectedPaths.some((base) => requested === base || requested.startsWith(base + sep))) throw new DevHubError("Infrastructure checkout is protected", "unsafe_git", 409);
   if (verb === "init" && argv.length !== offset + 1) throw new DevHubError("Git initialization requires an explicit approved working directory", "unsafe_git", 409);
+  if (verb === "init") {
+    let found = false;
+    try { lstatSync(join(requested, ".git")); found = true; }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+    if (found) throw new DevHubError("Git reinitialization requires manual review", "unsafe_git", 409);
+  }
   if (verb !== "init") {
     let root = resolve(options.cwd ?? process.cwd());
     for (let index = 0; index < location.length; index += 2) root = resolve(root, location[index + 1]!);
