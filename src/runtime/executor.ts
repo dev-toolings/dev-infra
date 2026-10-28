@@ -39,6 +39,9 @@ function commandEnvironment(options: Parameters<Executor>[1]): Record<string, st
 /** Run argv directly with an allowlisted parent environment and finite output/time. */
 export const execCommand: Executor = async (argv, options = {}) => {
   if (!argv.length || argv.some((value) => typeof value !== "string" || value.includes("\0"))) throw new DevHubError("Invalid command arguments");
+  for (const value of [options.maxOutputBytes, options.timeoutMs]) {
+    if (value !== undefined && (!Number.isSafeInteger(value) || value < 1)) throw new DevHubError("Command limits must be positive finite integers");
+  }
   const env = commandEnvironment(options);
   const limit = Math.min(Math.max(options.maxOutputBytes ?? 2_097_152, 1), 16_777_216);
   const timeout = Math.min(Math.max(options.timeoutMs ?? 30_000, 1), 900_000);

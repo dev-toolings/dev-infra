@@ -54,6 +54,7 @@ function optionValueFlagsContain(args: string[], start: number, longFlags: Set<s
 
 function dockerRunHasMountOrNoAutoRemove(args: string[], start: number): string | undefined {
   let hasAutoRemove = false;
+  let hasIsolatedNetwork = false;
   const mountOptions = new Set(["--mount", "--volume", "--volumes-from"]);
 
   for (let index = start; index < args.length;) {
@@ -62,6 +63,11 @@ function dockerRunHasMountOrNoAutoRemove(args: string[], start: number): string 
     if (!token.startsWith("-")) break; // The image name ends Docker option parsing.
 
     const name = optionName(token);
+    if (name === "--network") {
+      const network = token.includes("=") ? token.slice(token.indexOf("=") + 1) : args[index + 1];
+      if (network !== "none") return "Docker candidate runs require --network none";
+      hasIsolatedNetwork = true;
+    }
     if (name && mountOptions.has(name)) return "Docker run mounts are not permitted";
     if (token.startsWith("--rm=") && token !== "--rm=true") return "Docker run must use --rm";
     if (token === "--rm" || token === "--rm=true") hasAutoRemove = true;
@@ -79,7 +85,8 @@ function dockerRunHasMountOrNoAutoRemove(args: string[], start: number): string 
     else index += 1;
   }
 
-  return hasAutoRemove ? undefined : "Docker run must use --rm";
+  if (!hasAutoRemove) return "Docker run must use --rm";
+  return hasIsolatedNetwork ? undefined : "Docker candidate runs require --network none";
 }
 
 function composeCommandError(rootArgs: string[]): string | undefined {
@@ -120,11 +127,11 @@ function dockerCommandError(argv: string[]): string | undefined {
 
   const subcommand = rootArgs[0]?.toLowerCase();
   if (root === "prune" || subcommand === "prune") return "Docker prune is not permitted";
-  if ((root === "volume" || root === "network") && subcommand === "rm") {
+  if ((root === "volume" || root === "network") && (subcommand === "rm" || subcommand === "remove")) {
     return `Docker ${root} removal is not permitted`;
   }
 
-  if ((root === "rm" || (root === "container" && subcommand === "rm")) && optionValueFlagsContain(rootArgs, root === "container" ? 1 : 0, new Set(["--volumes"]), "v")) {
+  if (((root === "rm" || root === "remove") || (root === "container" && (subcommand === "rm" || subcommand === "remove"))) && optionValueFlagsContain(rootArgs, root === "container" ? 1 : 0, new Set(["--volumes"]), "v")) {
     return "Docker container volume removal is not permitted";
   }
 

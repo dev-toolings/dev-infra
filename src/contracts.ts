@@ -67,11 +67,18 @@ export interface DiscoveryPort {
 export interface Finding { id: string; package: string; installedVersion: string; fixedVersion?: string; severity: string; title: string; target: string }
 export interface Scan { id: string; imageId: string; state: "succeeded"|"failed"; scannedAt: string; scanner: string; databaseUpdatedAt?: string; findings: Finding[]; error?: string }
 export interface RemediationInput { projectId: string; componentId: string; file: string; replacement: string; service?: string; stage?: string }
+export interface ValidationEvidence {
+ baselineImageId: string; candidateImageId: string; baselineScanId: string; candidateScanId: string;
+ sourceHash: string; runtimeHash: string; containerIds: string[];
+ volumes: { name: string; destination: string }[];
+ checksPassed: boolean; findingsImproved: boolean; validatedAt: string;
+}
 export interface Change {
  id: string; projectId: string; componentId: string; file: string; sourceHash: string;
  original: string; proposed: string; replacement: string; branch?: string;
  state: "preview"|"applied"|"validated"|"failed"|"activated";
  createdAt: string; imageId?: string; scanId?: string; error?: string;
+ evidence?: ValidationEvidence;
 }
 export interface MaintenancePort {
  scan(imageId: string): Promise<Scan>; listScans(): Scan[]; getScan(id: string): Scan;
@@ -92,4 +99,4 @@ export interface ApiError { error: { code: string; message: string } }
 export type PublicDetection = Omit<Detection,"components"> & { components: PublicComponent[] };
 export type PublicSetupPlan = Omit<SetupPlan,"project"> & { project: Omit<PublicProject,"createdAt"> };
 
-export type PublicChange = Omit<Change,"original"|"proposed"> & { changedLine: { line: number; before: string; after: string } };
+export type PublicChange = Omit<Change,"original"|"proposed"|"evidence"> & { changedLine: { line: number; before: string; after: string } };

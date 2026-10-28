@@ -63,6 +63,14 @@ test("guard denies Docker destruction and mounted candidate containers before ex
     ["docker", "run", "--rm", "-v/tmp:/mnt", "image"],
     ["docker", "container", "run", "--rm", "--volumes-from", "other", "image"],
     ["docker", "run", "image"],
+    ["docker", "network", "remove", "dev-shared-net"],
+    ["docker", "volume", "remove", "data"],
+    ["docker", "container", "remove", "--volumes", "container"],
+    ["docker", "remove", "-v", "container"],
+    ["docker", "run", "--rm", "image"],
+    ["docker", "run", "--rm", "--network=host", "image"],
+    ["docker", "run", "--rm", "--network=none", "--network", "bridge", "image"],
+    ["docker", "run", "--rm", "image", "--network=none"],
     ["docker", "run", "--rm", "--rm=false", "image"],
     ["docker", "compose", "run", "service"],
   ];
@@ -78,7 +86,7 @@ test("guard permits Docker read, config, up, and an ephemeral unmounted run", as
     ["docker", "ps", "--all", "--format", "json"],
     ["docker", "compose", "--project-name", "project", "config", "--format", "json", "--volumes"],
     ["docker", "compose", "--project-name", "project", "up", "-d", "web"],
-    ["docker", "run", "--rm", "--network", "bridge", "image", "scan"],
+    ["docker", "run", "--rm", "--network", "none", "image", "scan"],
   ];
 
   for (const argv of permitted) await guarded(argv);

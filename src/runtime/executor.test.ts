@@ -26,3 +26,9 @@ test("executor passes only inherited safe values and explicit locale/color value
   expect(childEnv.noColor).toBe("1");
   expect(childEnv.lang).toBe("C");
 });
+
+ test("executor rejects non-finite and fractional limits before spawning", async () => {
+  for (const value of [NaN, Infinity, -1, 0, 0.5]) {
+    for (const key of ["timeoutMs", "maxOutputBytes"]) await expect(execCommand(["never-spawn"], { [key]: value })).rejects.toThrow("positive finite integers");
+  }
+});

@@ -6,6 +6,7 @@ import type { AppServices, CatalogPort, DiscoveryPort, RuntimePort, OperationsPo
 
 export const LISTEN_HOST = "127.0.0.1" as const;
 export const DEFAULT_PORT = 8040;
+export const CONTROLLER_PORTS = [8040, 5175];
 export function stateDirectory(): string {
   const configured = process.env.XDG_STATE_HOME;
   return join(configured && isAbsolute(configured) ? configured : join(homedir(), ".local", "state"), "devhub");
@@ -25,16 +26,16 @@ export interface ManagerModules {
   Operations: new (options: {catalog:CatalogPort;runtime:RuntimePort}) => OperationsPort;
   Maintenance: new (options: {catalog:CatalogPort;runtime:RuntimePort;run:Executor;stateDir:string}) => MaintenancePort;
 }
-export function composeServices(modules: ManagerModules, executor: Executor, stateDir: string, infraDir: string, reservedPorts = [DEFAULT_PORT]): AppServices {
+export function composeServices(modules: ManagerModules, executor: Executor, stateDir: string, infraDir: string, reservedPorts = CONTROLLER_PORTS): AppServices {
   const run = guardExecutor(executor);
-  const catalog = new modules.Catalog({ stateDir, infraDir, reservedPorts });
+  const catalog = new modules.Catalog({ stateDir, infraDir, reservedPorts: [...new Set([...CONTROLLER_PORTS, ...reservedPorts])] });
   const runtime = new modules.Runtime({ run, stateDir, assertAllowedPath: catalog.assertAllowedPath.bind(catalog) });
   const discovery = new modules.Discovery({ catalog, run });
   const operations = new modules.Operations({ catalog, runtime });
   const maintenance = new modules.Maintenance({ catalog, runtime, run, stateDir });
   return { catalog, discovery, operations, maintenance };
 }
-export async function services(stateDir = stateDirectory(), reservedPorts = [DEFAULT_PORT]): Promise<AppServices> {
+export async function services(stateDir = stateDirectory(), reservedPorts = CONTROLLER_PORTS): Promise<AppServices> {
   const [catalogModule, discoveryModule, runtimeModule, operationsModule, securityModule] = await Promise.all(["catalog", "discovery", "runtime", "operations", "security"].map(moduleAt));
   const { execCommand } = await import("./runtime/" + "executor.ts") as { execCommand: Executor };
   return composeServices({ Catalog: catalogModule.Catalog, Runtime: runtimeModule.Runtime, Discovery: discoveryModule.Discovery, Operations: operationsModule.Operations, Maintenance: securityModule.Maintenance }, execCommand, stateDir, resolve(import.meta.dir, ".."), reservedPorts);
@@ -64,7 +65,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     process.stdout.write(`Pairing code: ${pairing.code}\nExpires: ${pairing.expiresAt}\n`);
     return 0;
   }
-  const reservedPorts = [serveOptions?.port ?? DEFAULT_PORT, ...(serveOptions?.devOrigin ? [Number(new URL(serveOptions.devOrigin).port || 80)] : [])];
+  const reservedPorts = [...CONTROLLER_PORTS, serveOptions?.port ?? DEFAULT_PORT, ...(serveOptions?.devOrigin ? [Number(new URL(serveOptions.devOrigin).port || 80)] : [])];
   const appServices = await services(stateDir, reservedPorts);
   if (argv[0] === "serve") {
     const { port, devOrigin } = serveOptions!;
