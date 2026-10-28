@@ -84,7 +84,7 @@ export class DevHubError extends Error {
  constructor(message: string, public readonly code = "invalid", public readonly status = 400) { super(message); this.name = "DevHubError"; }
 }
 
-export type PublicComponent = Pick<Component,"id"|"name"|"kind"|"cwd"|"argv"|"compose"|"dependsOn"|"url"|"health"|"limits">;
+export type PublicComponent = Pick<Component,"id"|"name"|"kind"|"cwd"|"compose"|"dependsOn"|"url"|"health"|"limits">;
 export type PublicProject = Omit<Project,"components"> & { components: PublicComponent[] };
 
 export interface ApiSuccess<T> { data: T }
