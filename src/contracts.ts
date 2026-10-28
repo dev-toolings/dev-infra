@@ -20,6 +20,7 @@ export interface Operation {
  state: "queued" | "running" | "succeeded" | "failed" | "unknown";
  createdAt: string; updatedAt: string; error?: string; idempotencyKey?: string;
 }
+export interface OperationClaim { operation: Operation; acquired: boolean }
 export interface LogEntry { seq: number; time: string; projectId: string; componentId: string; stream: "stdout" | "stderr"; message: string; sourceId?: string }
 export interface LogOptions { componentId?: string; cursor?: number; limit?: number }
 export interface ContainerInfo {
@@ -34,7 +35,7 @@ export interface CatalogPort {
  listRoots(): Root[]; addRoot(path: string, label?: string): Root; removeRoot(id: string): void;
  assertAllowedPath(path: string, mustExist?: boolean): string;
  listProjects(): Project[]; getProject(id: string): Project; saveProject(input: ProjectInput): Project; removeProject(id: string): void;
- claimOperation(projectId: string, action: Action, componentIds: string[], idempotencyKey?: string): Operation;
+ claimOperation(projectId: string, action: Action, componentIds: string[], idempotencyKey?: string): OperationClaim;
  updateOperation(id: string, patch: Partial<Pick<Operation,"state"|"error">>): Operation;
  getOperation(id: string): Operation; listOperations(projectId?: string): Operation[]; recoverOperations(): void;
  putRecord<T>(namespace: string, id: string, value: T): void; getRecord<T>(namespace: string, id: string): T | undefined; listRecords<T>(namespace: string): T[];
