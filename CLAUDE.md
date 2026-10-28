@@ -7,7 +7,7 @@ Merge these with the current user request and with `AGENTS.md`.
 
 Do not assume hidden project intent. Surface tradeoffs before changing behavior
 that affects Docker services, ports, credentials, persisted volumes, or project
-runtime overrides.
+configuration.
 
 Before implementation:
 - State the concrete goal and the files likely involved.
@@ -40,8 +40,8 @@ Every changed line should trace back to the user request.
 Turn work into checks:
 
 ```bash
-bash -n bin/devhub data/scripts/*.sh
-COMPOSE_PROFILES=core,async,node docker compose --env-file .env.example -f compose.yml config
+for script in bin/devhub data/scripts/*.sh; do bash -n "$script"; done
+COMPOSE_PROFILES=core,async docker compose --env-file .env.example -f compose.yml config
 ./bin/devhub help
 ```
 
@@ -54,15 +54,13 @@ developer data without explicit permission.
 - Main CLI: `bin/devhub`
 - Main Compose file: `compose.yml`
 - Helper scripts: `data/scripts/`
-- Local override convention: `overrides/<project>-app.override.yml`
 - Shared network: `dev-shared-net`
-- Default profile: `core`
-- Optional profiles: `async`, `node`
+- Default profiles: `core`, `async`
 
 ## Releasing
 
 Version lives in `VERSION` (single source of truth); `devhub version` prints it.
-Cut a release from a clean `main` with `make release BUMP=...` — it bumps
+Cut a release from a clean `main` with `make release BUMP=...`: it bumps
 `VERSION`, commits `chore(release): vX.Y.Z`, tags, and pushes; the tag triggers
 the `Release` workflow (`.github/workflows/release.yml`) that publishes the
 GitHub Release. Full docs: README "Releasing".
@@ -78,7 +76,7 @@ Pick the bump from the commits shipped since the last tag:
 Pre-1.0 rule: while the version is `0.0.x`, ship **everything as `patch`**
 (0.0.1 → 0.0.2 → … → 0.0.11 → 0.0.12). Only jump to `1.0.0` when the CLI and
 compose contract is declared stable, and do it explicitly
-(`make release BUMP=1.0.0`) — never automatically.
+(`make release BUMP=1.0.0`): never automatically.
 
 Rules:
 - Never tag or push a release without explicit user confirmation.

@@ -2,7 +2,7 @@
 
 ## Product
 
-DevHub is a local development infrastructure hub for developers who work across several projects, branches, and framework stacks. It provides shared Docker Compose services once, then lets each project add a lightweight runtime and one localhost port per Git worktree.
+DevHub provides eight shared local Docker Compose services for applications: PostgreSQL, MySQL, Redis, Meilisearch, Mailpit, Adminer, Dozzle and RabbitMQ. Applications connect through localhost ports or the shared network.
 
 ## Register
 
@@ -15,21 +15,18 @@ The public documentation page is a brand and documentation landing surface. Its 
 - Solo developers managing multiple local projects.
 - Teams who want consistent local infrastructure without duplicating Compose files in every repository.
 - Developers using Symfony, Laravel, Next.js, TanStack Start, Hono, or FastAPI DDD.
-- Power users who use Git worktrees and want one clean local URL per branch.
 
 ## Product Purpose
 
 DevHub replaces repeated per-project infrastructure with one shared local hub. It should make the mental model obvious:
 
 - Start shared services once.
-- Register a project from the current directory or an existing repository.
-- Add worktrees as needed.
-- Run each worktree at the root of its own localhost port.
-- Keep local databases, env files, and overrides private to the machine.
+- Connect applications using stable container names or configured host ports.
+- Keep persistent data and credentials private to the machine.
 
 ## Positioning
 
-DevHub is not a cloud platform, orchestration suite, or heavy developer portal. It is a pragmatic local tool that keeps Docker infrastructure boring and branch runtimes predictable.
+DevHub is not a cloud platform, orchestration suite, or heavy developer portal. It is a pragmatic local tool that keeps Docker infrastructure boring and service configuration reproducible.
 
 ## Voice
 
@@ -53,4 +50,4 @@ Calm, direct, precise. The copy should sound like a senior engineer explaining t
 
 ## Core Message
 
-DevHub gives you one shared local infrastructure stack and clean localhost runtimes for every project worktree.
+DevHub gives your applications one shared local infrastructure stack with persistent data and predictable addresses.

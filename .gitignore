@@ -24,17 +24,5 @@ Thumbs.db
 # Package managers
 node_modules/
 
-# Docker generated files (never push content)
-/docker/*
-!/docker/.gitkeep
-
-# Local overrides (never push content)
-/overrides/*
-!/overrides/.gitkeep
-
-# Local project registry (never push project paths/ports)
-/data/projects/*.env
-!/data/projects/.gitkeep
-
 # Scripts (private - never push)
 /scripts/

@@ -1,100 +1,63 @@
-.PHONY: help install uninstall up up-async down restart ps logs doctor db-create db-list runtime down-runtime adopt project-list wt-list wt-add wt-rm wt-status test version release
+.PHONY: help install uninstall up up-async down restart ps logs doctor db-create db-list test version release
 
 DEVHUB := ./bin/devhub
 BUMP ?= patch
 
-help:
-	@echo "Targets:"
-	@echo "  make install              Install devhub globally (symlink + zsh aliases)"
-	@echo "  make up                   Start core"
-	@echo "  make up-async             Start core+async"
-	@echo "  make down                 Stop all"
-	@echo "  make restart              Restart core"
-	@echo "  make ps                   Show status"
-	@echo "  make doctor               Health/network/ports"
-	@echo "  make runtime PROJECT=x    Start project runtime override"
-	@echo "  make down-runtime PROJECT=x  Stop project runtime"
-	@echo "  make adopt SRC=~/path     One-shot adoption of an existing checkout"
-	@echo "  make project-list         List registered projects"
-	@echo "  make wt-list PROJECT=x    List project worktrees"
-	@echo "  make wt-add PROJECT=x BRANCH=feat/y [BASE=main]  Create a worktree"
-	@echo "  make wt-rm PROJECT=x SLUG=feat-y                 Remove a worktree"
-	@echo "  make wt-status PROJECT=x  Worktree http/db status"
-	@echo "  make test                 Run the bats test suites"
-	@echo "  make version              Show installed version"
-	@echo "  make release BUMP=patch   Cut a release (patch|minor|major|X.Y.Z)"
+.DEFAULT_GOAL := help
+C_SECTION := \033[1;33m
+C_TARGET := \033[36m
+C_OK := \033[32m
+C_WARN := \033[33m
+C_ERR := \033[31m
+C_RESET := \033[0m
 
-install:
+# --- Help ---
+help: ## Show grouped targets
+	@awk -v section='$(C_SECTION)' -v target='$(C_TARGET)' -v reset='$(C_RESET)' '/^# --- / { title=$$0; sub(/^# --- /,"",title); sub(/ ---$$/,"",title); printf "\n%s%s%s\n", section,title,reset } /^[a-zA-Z0-9_-]+:.*## / { name=$$1; sub(/:$$/,"",name); sub(/^.*## /,"",$$0); printf "  %s%-16s%s %s\n",target,name,reset,$$0 }' $(MAKEFILE_LIST)
+
+# --- Install ---
+install: ## Install CLI and shell shortcuts
 	@./data/scripts/install.sh
 
-uninstall:
+uninstall: ## Remove CLI and shell shortcuts
 	@./data/scripts/uninstall.sh
 
-up:
+# --- Services ---
+up: ## Start core and async
 	@$(DEVHUB) up
 
-up-async:
+up-async: ## Start core and async (compatibility alias)
 	@$(DEVHUB) up --with async
 
-down:
+down: ## Stop shared containers, keep volumes
 	@$(DEVHUB) down
 
-restart:
+restart: ## Restart core and async
 	@$(DEVHUB) restart
 
-ps:
+ps: ## Show service status
 	@$(DEVHUB) ps
 
-logs:
+logs: ## Follow service logs
 	@$(DEVHUB) logs
 
-doctor:
+doctor: ## Check health, network and configured ports
 	@$(DEVHUB) doctor
 
-db-create:
+# --- Databases ---
+db-create: ## Create PostgreSQL database (DB=name)
 	@$(DEVHUB) db create $(DB)
 
-db-list:
+db-list: ## List PostgreSQL databases
 	@$(DEVHUB) db list
 
-runtime:
-	@test -n "$(PROJECT)" || { echo "Usage: make runtime PROJECT=<name>"; exit 1; }
-	@$(DEVHUB) runtime $(PROJECT)
+# --- Checks ---
+test: ## Run CLI Bats tests
+	@bats tests/*.bats
 
-down-runtime:
-	@test -n "$(PROJECT)" || { echo "Usage: make down-runtime PROJECT=<name>"; exit 1; }
-	@$(DEVHUB) down-runtime $(PROJECT)
-
-project-list:
-	@$(DEVHUB) project list
-
-adopt:
-	@test -n "$(SRC)" || { echo "Usage: make adopt SRC=<path> [NAME=x] [STACK=s]"; exit 1; }
-	@$(DEVHUB) project adopt $(SRC) $(if $(NAME),--name $(NAME)) $(if $(STACK),--stack $(STACK))
-
-wt-list:
-	@test -n "$(PROJECT)" || { echo "Usage: make wt-list PROJECT=<name>"; exit 1; }
-	@$(DEVHUB) wt list $(PROJECT)
-
-wt-add:
-	@test -n "$(PROJECT)" || { echo "Usage: make wt-add PROJECT=<name> BRANCH=feat/x [BASE=main]"; exit 1; }
-	@test -n "$(BRANCH)" || { echo "Usage: make wt-add PROJECT=<name> BRANCH=feat/x [BASE=main]"; exit 1; }
-	@$(DEVHUB) wt add $(PROJECT) $(BRANCH) $(or $(BASE),main)
-
-wt-rm:
-	@test -n "$(PROJECT)" || { echo "Usage: make wt-rm PROJECT=<name> SLUG=feat-x"; exit 1; }
-	@test -n "$(SLUG)" || { echo "Usage: make wt-rm PROJECT=<name> SLUG=feat-x"; exit 1; }
-	@$(DEVHUB) wt rm $(PROJECT) $(SLUG)
-
-wt-status:
-	@test -n "$(PROJECT)" || { echo "Usage: make wt-status PROJECT=<name>"; exit 1; }
-	@$(DEVHUB) wt status $(PROJECT)
-
-test:
-	@bunx bats tests/*.bats
-
-version:
+# --- Releases ---
+version: ## Show installed version
 	@$(DEVHUB) version
 
-release:
+release: ## Cut release (BUMP=patch|minor|major|X.Y.Z)
 	@./data/scripts/release.sh $(BUMP)

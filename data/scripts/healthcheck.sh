@@ -10,19 +10,23 @@ services=(
   infra-adminer
   infra-dozzle
   infra-rabbitmq
-  infra-node
 )
 
 printf "%-24s %-10s %-12s\n" "CONTAINER" "RUNNING" "HEALTH"
 printf "%-24s %-10s %-12s\n" "--------" "-------" "------"
 
+status=0
 for c in "${services[@]}"; do
-  if docker ps -a --format '{{.Names}}' | grep -q "^${c}$"; then
-    running="no"
-    if docker ps --format '{{.Names}}' | grep -q "^${c}$"; then
-      running="yes"
+  if state=$(docker inspect -f '{{.State.Running}} {{if .State.Health}}{{.State.Health.Status}}{{else}}n/a{{end}}' "$c" 2>/dev/null); then
+    read -r running health <<<"$state"
+    if [ "$running" != true ] || { [ "$health" != healthy ] && [ "$health" != n/a ]; }; then
+      status=1
     fi
-    health=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}n/a{{end}}' "$c" 2>/dev/null || echo "n/a")
-    printf "%-24s %-10s %-12s\n" "$c" "$running" "$health"
+  else
+    running=missing
+    health=unknown
+    status=1
   fi
+  printf "%-24s %-10s %-12s\n" "$c" "$running" "$health"
 done
+exit "$status"

@@ -10,8 +10,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - `devhub up` / `devhub restart` now start the `async` profile (RabbitMQ) by
   default alongside `core`. Projects relying on AMQP no longer crash-loop after
-  a plain `devhub up`. Use `--with node` to add Node.js on top; `make up-async`
-  is kept as an alias of `make up`.
+  a plain `devhub up`. `make up-async` remains an alias of `make up`.
+- Limit DevHub to its eight shared services; remove application templates, agent
+  generation, project/worktree commands, runtime commands and the Node profile.
+  Remove the obsolete local overrides, generated Docker files and project registry
+  after explicit approval, including their unused directories and ignore rules.
+- Make the Redis ACL path configurable, persist RabbitMQ node identity, pin
+  formerly floating latest images and rotate container logs (3 files of 10 MiB).
+- Resolve UI and diagnostic ports from Compose; return failure from diagnostics
+  for missing or unhealthy services without creating the network.
 
 ## [0.0.3] - 2026-07-18
 
@@ -35,7 +42,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - `devhub project adopt <path>`: one-shot migration of an existing Git checkout
-  into a worktree hub — stack auto-detection (root and `apps/*`/`packages/*`
+  into a worktree hub: stack auto-detection (root and `apps/*`/`packages/*`
   workspaces), bare clone, project registration, `main` worktree, untracked
   env-file carry-over, and a generated `CLAUDE.md`/`AGENTS.md` agent guide at
   the hub root (one worktree per terminal/agent via `devhub wt add`).

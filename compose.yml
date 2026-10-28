@@ -1,9 +1,16 @@
+x-logging: &shared-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   postgres:
     image: postgres:16-alpine
     container_name: infra-postgres
     profiles: [core]
     restart: unless-stopped
+    logging: *shared-logging
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-devhub}
       POSTGRES_USER: ${POSTGRES_USER:-test}
@@ -26,6 +33,7 @@ services:
     container_name: infra-mysql
     profiles: [core]
     restart: unless-stopped
+    logging: *shared-logging
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root}
       MYSQL_DATABASE: ${MYSQL_DATABASE:-trading}
@@ -48,7 +56,9 @@ services:
     container_name: infra-redis
     profiles: [core]
     restart: unless-stopped
-    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
+    logging: *shared-logging
+    # Empty on fresh installs; existing ACL deployments set a path inside /data.
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "512mb", "--maxmemory-policy", "allkeys-lru", "--aclfile", "${REDIS_ACL_FILE:-}"]
     volumes:
       - infra_redis_data:/data
     ports:
@@ -66,6 +76,7 @@ services:
     container_name: infra-meilisearch
     profiles: [core]
     restart: unless-stopped
+    logging: *shared-logging
     environment:
       MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:-masterKey}
       MEILI_ENV: development
@@ -83,10 +94,11 @@ services:
       - dev-shared-net
 
   mailpit:
-    image: axllent/mailpit:latest
+    image: axllent/mailpit:v1.30.7@sha256:d5ecbb067db3705fa953d79e1b7f81ef84038df67aba6c52825d8c02a1ea748a
     container_name: infra-mailpit
     profiles: [core]
     restart: unless-stopped
+    logging: *shared-logging
     environment:
       MP_SMTP_AUTH_ACCEPT_ANY: 1
       MP_SMTP_AUTH_ALLOW_INSECURE: 1
@@ -104,10 +116,11 @@ services:
       - dev-shared-net
 
   adminer:
-    image: adminer:latest
+    image: adminer:6.1.2@sha256:251295c1cd51d3889f1c42ffa4864b24eeab51f0caf395cfe5bf4726c5ec9a2a
     container_name: infra-adminer
     profiles: [core]
     restart: unless-stopped
+    logging: *shared-logging
     environment:
       ADMINER_DEFAULT_SERVER: infra-postgres
       ADMINER_DESIGN: pepa-linha
@@ -120,10 +133,11 @@ services:
       - dev-shared-net
 
   dozzle:
-    image: amir20/dozzle:latest
+    image: amir20/dozzle:v10.7.3@sha256:c32ca7a443796de62a07afd621b17b6c6c073320cd8431493bb1fd84e3a1eff8
     container_name: infra-dozzle
     profiles: [core]
     restart: unless-stopped
+    logging: *shared-logging
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     ports:
@@ -142,7 +156,9 @@ services:
     hostname: infra-rabbitmq
     profiles: [async]
     restart: unless-stopped
+    logging: *shared-logging
     environment:
+      RABBITMQ_NODENAME: rabbit@infra-rabbitmq
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER:-guest}
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS:-guest}
       RABBITMQ_DEFAULT_VHOST: ${RABBITMQ_DEFAULT_VHOST:-/}
@@ -156,20 +172,6 @@ services:
       interval: 20s
       timeout: 10s
       retries: 10
-    networks:
-      - dev-shared-net
-
-  node:
-    image: node:22-alpine
-    container_name: infra-node
-    profiles: [node]
-    restart: unless-stopped
-    command: ["sh", "-lc", "tail -f /dev/null"]
-    ports:
-      - "127.0.0.1:${NODE_PORT:-3002}:3000"
-      - "127.0.0.1:${VITE_PORT:-5173}:5173"
-    environment:
-      - NODE_ENV=development
     networks:
       - dev-shared-net
 

@@ -6,16 +6,13 @@ Repository instructions for AI coding agents working on DevHub.
 
 DevHub is shared local development infrastructure built around Docker Compose.
 It provides PostgreSQL, MySQL, Redis, Meilisearch, Mailpit, Adminer, Dozzle,
-RabbitMQ, Node.js runtime templates, and optional project runtimes through
-Compose override files.
+and RabbitMQ. Applications connect through the shared external network.
 
 Primary entry points:
 - `bin/devhub`: Bash CLI used by humans and automation.
 - `compose.yml`: shared service definitions and profiles.
 - `data/scripts/`: helper scripts for install, database creation, networking,
   health checks, and uninstall.
-- `overrides/`: local project override files; committed content should stay
-  limited to placeholders unless explicitly requested.
 
 ## Search Tools
 
@@ -54,8 +51,8 @@ These guidelines follow the style of the Karpathy coding-agent example:
 Use the smallest useful verification set:
 
 ```bash
-bash -n bin/devhub data/scripts/*.sh
-COMPOSE_PROFILES=core,async,node docker compose --env-file .env.example -f compose.yml config
+for script in bin/devhub data/scripts/*.sh; do bash -n "$script"; done
+COMPOSE_PROFILES=core,async docker compose --env-file .env.example -f compose.yml config
 ./bin/devhub help
 ```
 
@@ -78,8 +75,6 @@ the user explicitly asks for data removal.
 - Named volumes hold local developer data. Treat them as persistent user data.
 - Dozzle mounts `/var/run/docker.sock`; changes around that service should be
   reviewed with extra care.
-- `overrides/` and `docker/` are intended for local generated or private files;
-  avoid committing project-specific content there unless requested.
 
 ## Style Notes
 

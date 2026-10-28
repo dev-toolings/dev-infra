@@ -17,13 +17,17 @@ jobs:
       - uses: actions/checkout@v6
 
       - name: Bash syntax check
-        run: bash -n bin/devhub data/scripts/*.sh
+        run: |
+          for script in bin/devhub install-remote.sh data/scripts/*.sh; do bash -n "$script"; done
 
       - name: ShellCheck
         run: shellcheck -x --severity=warning bin/devhub data/scripts/*.sh
 
       - name: Compose config
-        run: COMPOSE_PROFILES=core,async,node docker compose --env-file .env.example -f compose.yml config > /dev/null
+        run: |
+          for profiles in core async core,async; do
+            COMPOSE_PROFILES="$profiles" docker compose --env-file .env.example -f compose.yml config > /dev/null
+          done
 
   test:
     name: Bats tests

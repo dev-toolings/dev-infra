@@ -51,7 +51,7 @@ Guidelines:
 - Keep cards shallow and purposeful. Radius should stay at `rounded-lg`.
 - Prefer hairline borders and subtle shadows over heavy containers.
 - Tables and code blocks should remain practical and scannable.
-- Mobile layout must keep the runtime preview readable without horizontal overflow.
+- Mobile layout must keep the service preview readable without horizontal overflow.
 
 ## Components
 
@@ -63,9 +63,9 @@ Sticky, translucent, hairline border, compact brand mark. Navigation stays quiet
 
 Primary: blue pill with panel text. Secondary: panel pill with hairline border. Buttons are used only for direct actions.
 
-### Runtime Preview
+### Service Preview
 
-Use a macOS-style window frame to explain the worktree model visually. It should be a product diagram, not a decorative card. Keep status colors limited to small window dots and small status pills.
+Use a macOS-style window frame to explain the shared services visually. It should be a product diagram, not a decorative card. Keep status colors limited to small window dots and small status pills.
 
 ### Code Blocks
 

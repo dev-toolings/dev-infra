@@ -3,15 +3,15 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>DevHub, infrastructure Docker locale et runtimes Git worktree</title>
+    <title>DevHub, services Docker locaux partagés</title>
     <meta
       name="description"
-      content="DevHub is a local Docker Compose development hub with shared infrastructure and one-port-per-worktree runtimes for Symfony, Laravel, Next.js, TanStack Start, Hono, and FastAPI DDD."
+      content="DevHub provides eight shared local Docker services for databases, cache, search, mail, logs and queues."
     >
     <meta property="og:title" content="DevHub">
     <meta
       property="og:description"
-      content="Infrastructure Docker locale, services partages et runtimes Git worktree par port pour projets PHP, JavaScript, TypeScript et Python."
+      content="Infrastructure Docker locale : huit services partagés, des volumes persistants et des ports configurables."
     >
     <meta property="og:type" content="website">
     <meta name="theme-color" content="#f5f5f7">
@@ -24,7 +24,7 @@
           <span class="grid size-9 shrink-0 place-items-center rounded-lg bg-graphite text-[0.72rem] font-semibold text-page shadow-sm">dh</span>
           <span class="min-w-0">
             <strong class="block text-[0.95rem] leading-tight tracking-normal">DevHub</strong>
-            <small class="block truncate text-[0.82rem] text-muted">Infra locale pour projets worktree</small>
+            <small class="block truncate text-[0.82rem] text-muted">Services Docker locaux partagés</small>
           </span>
         </a>
 
@@ -44,8 +44,6 @@
         >
           <a class="block rounded-lg px-3 py-2 text-sm font-medium text-muted transition hover:bg-soft hover:text-graphite md:inline-block" href="#quick-start">Quick start</a>
           <a class="block rounded-lg px-3 py-2 text-sm font-medium text-muted transition hover:bg-soft hover:text-graphite md:inline-block" href="#commands">Commandes</a>
-          <a class="block rounded-lg px-3 py-2 text-sm font-medium text-muted transition hover:bg-soft hover:text-graphite md:inline-block" href="#worktrees">Worktrees</a>
-          <a class="block rounded-lg px-3 py-2 text-sm font-medium text-muted transition hover:bg-soft hover:text-graphite md:inline-block" href="#stacks">Stacks</a>
           <a class="block rounded-lg px-3 py-2 text-sm font-medium text-muted transition hover:bg-soft hover:text-graphite md:inline-block" href="#troubleshooting">Debug</a>
         </nav>
       </div>
@@ -55,20 +53,20 @@
       <section class="mx-auto grid min-h-[84vh] w-[min(1120px,calc(100%-2rem))] items-center gap-12 py-16 md:grid-cols-[0.92fr_1.08fr] md:py-24">
         <div>
           <p class="mb-5 inline-flex rounded-full border border-hairline bg-panel px-3 py-1 text-sm font-medium text-muted shadow-sm">
-            Docker Compose local. Git worktrees. Ports localhost.
+            Docker Compose local. Services partagés. Ports localhost.
           </p>
           <h1 class="text-[clamp(4.8rem,14vw,10.5rem)] font-semibold leading-[0.88] tracking-[-0.045em] text-graphite">
             DevHub
           </h1>
           <p class="mt-7 max-w-[58ch] text-[clamp(1.25rem,2.2vw,1.85rem)] leading-[1.22] tracking-[-0.018em] text-graphite">
-            Une infra locale nette pour lancer plusieurs branches sans dupliquer Docker.
+            Une infra locale commune à tes applications, sans dupliquer Docker.
           </p>
           <p class="mt-5 max-w-[63ch] text-lg leading-8 text-muted">
-            Les services communs tournent une fois. Chaque worktree garde son dossier, son port, son environnement et ses URLs servies a la racine.
+            Les huit services tournent une fois. Tes applications les rejoignent par le réseau partagé ou les ports localhost configurés.
           </p>
           <div class="mt-8 flex flex-wrap gap-3">
             <a class="rounded-full bg-blue px-5 py-3 text-sm font-semibold text-panel shadow-[0_16px_38px_oklch(58%_0.19_255_/_0.25)] transition hover:bg-blue-strong" href="#install">Installer</a>
-            <a class="rounded-full border border-hairline bg-panel px-5 py-3 text-sm font-semibold text-graphite shadow-sm transition hover:bg-soft" href="#worktree-flow">Créer un runtime</a>
+            <a class="rounded-full border border-hairline bg-panel px-5 py-3 text-sm font-semibold text-graphite shadow-sm transition hover:bg-soft" href="#quick-start">Démarrer les services</a>
           </div>
         </div>
 
@@ -99,16 +97,16 @@
 
                 <div class="grid gap-3 sm:grid-cols-3">
                   <div class="rounded-lg border border-hairline bg-panel p-4">
-                    <div class="text-sm text-muted">main</div>
-                    <div class="mt-3 text-2xl font-semibold tracking-[-0.02em]">8101</div>
+                    <div class="text-sm text-muted">PostgreSQL</div>
+                    <div class="mt-3 text-2xl font-semibold tracking-[-0.02em]">5432</div>
                   </div>
                   <div class="rounded-lg border border-hairline bg-panel p-4">
-                    <div class="text-sm text-muted">feat-payment</div>
-                    <div class="mt-3 text-2xl font-semibold tracking-[-0.02em]">8102</div>
+                    <div class="text-sm text-muted">Redis</div>
+                    <div class="mt-3 text-2xl font-semibold tracking-[-0.02em]">6379</div>
                   </div>
                   <div class="rounded-lg border border-hairline bg-panel p-4">
-                    <div class="text-sm text-muted">fix-auth</div>
-                    <div class="mt-3 text-2xl font-semibold tracking-[-0.02em]">8103</div>
+                    <div class="text-sm text-muted">Mailpit</div>
+                    <div class="mt-3 text-2xl font-semibold tracking-[-0.02em]">8025</div>
                   </div>
                 </div>
 
@@ -133,20 +131,20 @@
         <div class="grid gap-10 md:grid-cols-[0.78fr_1.22fr]">
           <div>
             <p class="mb-4 text-sm font-medium text-blue">Modèle mental</p>
-            <h2 class="max-w-[13ch] text-[clamp(2.35rem,5.2vw,4.8rem)] font-semibold leading-[0.95] tracking-[-0.04em]">Un hub. Des branches. Rien a bricoler.</h2>
+            <h2 class="max-w-[13ch] text-[clamp(2.35rem,5.2vw,4.8rem)] font-semibold leading-[0.95] tracking-[-0.04em]">Un hub. Huit services partagés.</h2>
           </div>
           <div class="grid gap-3">
             <article class="rounded-lg border border-hairline bg-panel p-5 shadow-sm">
               <strong class="text-lg font-semibold tracking-[-0.01em]">Services partagés</strong>
-              <p class="mt-2 max-w-[70ch] leading-7 text-muted">PostgreSQL, MySQL, Redis, Meilisearch, Mailpit, Adminer, Dozzle, RabbitMQ et Node tournent dans une stack centrale.</p>
+              <p class="mt-2 max-w-[70ch] leading-7 text-muted">PostgreSQL, MySQL, Redis, Meilisearch, Mailpit, Adminer, Dozzle, et RabbitMQ tournent dans une stack centrale.</p>
             </article>
             <article class="rounded-lg border border-hairline bg-panel p-5 shadow-sm">
-              <strong class="text-lg font-semibold tracking-[-0.01em]">Runtimes projet</strong>
-              <p class="mt-2 max-w-[70ch] leading-7 text-muted">Chaque projet ajoute uniquement son runtime applicatif via un override Compose local.</p>
+              <strong class="text-lg font-semibold tracking-[-0.01em]">Réseau partagé</strong>
+              <p class="mt-2 max-w-[70ch] leading-7 text-muted">Chaque application rejoint le réseau externe dev-shared-net et utilise les noms infra-*.</p>
             </article>
             <article class="rounded-lg border border-hairline bg-panel p-5 shadow-sm">
-              <strong class="text-lg font-semibold tracking-[-0.01em]">Worktrees isolés</strong>
-              <p class="mt-2 max-w-[70ch] leading-7 text-muted">Chaque branche a son chemin, son port, sa base et son environnement local.</p>
+              <strong class="text-lg font-semibold tracking-[-0.01em]">Données persistantes</strong>
+              <p class="mt-2 max-w-[70ch] leading-7 text-muted">Les volumes conservent les données. Les identifiants et ports restent dans le fichier .env local.</p>
             </article>
           </div>
         </div>
@@ -210,7 +208,6 @@ devhub db create myapp</code></pre>
               <tr><td>Adminer</td><td>infra-adminer</td><td>9080</td><td>core</td></tr>
               <tr><td>Dozzle</td><td>infra-dozzle</td><td>8888</td><td>core</td></tr>
               <tr><td>RabbitMQ</td><td>infra-rabbitmq</td><td>5672, 15672</td><td>async</td></tr>
-              <tr><td>Node.js 22</td><td>infra-node</td><td>3002, 5173</td><td>node</td></tr>
             </tbody>
           </table>
         </div>
@@ -226,9 +223,9 @@ devhub db create myapp</code></pre>
           <article class="rounded-lg border border-hairline bg-panel p-5 shadow-sm">
             <h3 class="mb-4 text-xl font-semibold tracking-[-0.01em]">Services</h3>
             <dl class="space-y-4">
-              <div><dt class="font-mono text-sm font-semibold text-blue">devhub up [--with profile]</dt><dd class="mt-1 leading-7 text-muted">Démarre les services partagés. <code>core</code> et <code>async</code> (RabbitMQ) sont lancés par défaut, <code>node</code> ajoute Node.js 22.</dd></div>
+              <div><dt class="font-mono text-sm font-semibold text-blue">devhub up [--with profile]</dt><dd class="mt-1 leading-7 text-muted">Démarre les services partagés. <code>core</code> et <code>async</code> (RabbitMQ) sont lancés par défaut.</dd></div>
               <div><dt class="font-mono text-sm font-semibold text-blue">devhub down</dt><dd class="mt-1 leading-7 text-muted">Stoppe et supprime les containers de la stack DevHub, sans supprimer les volumes.</dd></div>
-              <div><dt class="font-mono text-sm font-semibold text-blue">devhub restart</dt><dd class="mt-1 leading-7 text-muted">Redémarre les services core.</dd></div>
+              <div><dt class="font-mono text-sm font-semibold text-blue">devhub restart</dt><dd class="mt-1 leading-7 text-muted">Redémarre les services core et async.</dd></div>
               <div><dt class="font-mono text-sm font-semibold text-blue">devhub ps</dt><dd class="mt-1 leading-7 text-muted">Affiche l'état Compose de tous les services.</dd></div>
               <div><dt class="font-mono text-sm font-semibold text-blue">devhub logs [service]</dt><dd class="mt-1 leading-7 text-muted">Suit les logs de toute la stack ou d'un service donné.</dd></div>
             </dl>
@@ -252,125 +249,6 @@ devhub db create myapp</code></pre>
             </dl>
           </article>
 
-          <article class="rounded-lg border border-hairline bg-panel p-5 shadow-sm">
-            <h3 class="mb-4 text-xl font-semibold tracking-[-0.01em]">Runtimes projet</h3>
-            <dl class="space-y-4">
-              <div><dt class="font-mono text-sm font-semibold text-blue">devhub runtime &lt;project&gt;</dt><dd class="mt-1 leading-7 text-muted">Démarre l'override <code>overrides/&lt;project&gt;-app.override.yml</code>.</dd></div>
-              <div><dt class="font-mono text-sm font-semibold text-blue">devhub down-runtime &lt;project&gt;</dt><dd class="mt-1 leading-7 text-muted">Stoppe uniquement les services projet, pas l'infra partagée.</dd></div>
-            </dl>
-          </article>
-        </div>
-      </section>
-
-      <section class="mx-auto w-[min(1120px,calc(100%-2rem))] py-20" id="worktrees">
-        <div class="mb-8">
-          <p class="mb-3 text-sm font-medium text-blue">Project registry</p>
-          <h2 class="max-w-[13ch] text-[clamp(2.35rem,5.2vw,4.8rem)] font-semibold leading-[0.95] tracking-[-0.04em]">Créer un projet prêt pour les worktrees.</h2>
-          <p class="mt-4 max-w-[72ch] leading-7 text-muted">Un projet enregistré écrit un fichier local <code>data/projects/&lt;project&gt;.env</code>, un override Compose et les fichiers Docker runtime.</p>
-        </div>
-
-        <div class="grid gap-4 lg:grid-cols-[1.25fr_0.75fr]" id="worktree-flow">
-          <article class="rounded-lg border border-hairline bg-panel p-4 shadow-sm">
-            <h3 class="mb-3 text-lg font-semibold tracking-[-0.01em]">Projet Symfony existant</h3>
-            <pre class="relative overflow-auto rounded-lg bg-code"><code class="block min-w-full whitespace-pre p-4 font-mono text-sm leading-6 text-code-text">devhub project init acme-api \
-  --stack symfony \
-  --repo ~/projects/acme/api \
-  --base develop
-
-devhub wt add acme-api feat/payment develop
-devhub runtime acme-api
-devhub wt list acme-api</code></pre>
-          </article>
-          <article class="rounded-lg border border-hairline bg-panel p-4 shadow-sm">
-            <h3 class="mb-3 text-lg font-semibold tracking-[-0.01em]">Nouveau projet FastAPI DDD</h3>
-            <pre class="relative overflow-auto rounded-lg bg-code"><code class="block min-w-full whitespace-pre p-4 font-mono text-sm leading-6 text-code-text">mkdir -p ~/dev
-cd ~/dev
-devhub project init billing-api --stack fastapi-ddd
-devhub runtime billing-api</code></pre>
-          </article>
-        </div>
-
-        <div class="mt-4 grid gap-4 lg:grid-cols-2">
-          <article class="rounded-lg border border-hairline bg-panel p-5 shadow-sm">
-            <h3 class="mb-4 text-xl font-semibold tracking-[-0.01em]"><code>project init</code></h3>
-            <dl class="space-y-4">
-              <div><dt class="font-mono text-sm font-semibold text-blue">--stack</dt><dd class="mt-1 leading-7 text-muted">Obligatoire. Valeurs: <code>symfony</code>, <code>laravel</code>, <code>nextjs</code>, <code>tanstack-start</code>, <code>hono</code>, <code>fastapi-ddd</code>.</dd></div>
-              <div><dt class="font-mono text-sm font-semibold text-blue">--root</dt><dd class="mt-1 leading-7 text-muted">Optionnel. Sans cette option, DevHub crée <code>./&lt;name&gt;</code> depuis le dossier courant.</dd></div>
-              <div><dt class="font-mono text-sm font-semibold text-blue">--repo</dt><dd class="mt-1 leading-7 text-muted">Chemin Git existant, bare repo ou URL distante.</dd></div>
-              <div><dt class="font-mono text-sm font-semibold text-blue">--base</dt><dd class="mt-1 leading-7 text-muted">Référence de base par défaut pour les nouveaux worktrees. Défaut: <code>main</code>.</dd></div>
-              <div><dt class="font-mono text-sm font-semibold text-blue">--port-start, --port-end, --runtime-port</dt><dd class="mt-1 leading-7 text-muted">Contrôle les ports de worktrees et le port dashboard runtime.</dd></div>
-            </dl>
-          </article>
-
-          <article class="rounded-lg border border-hairline bg-panel p-5 shadow-sm">
-            <h3 class="mb-4 text-xl font-semibold tracking-[-0.01em]"><code>wt</code></h3>
-            <dl class="space-y-4">
-              <div><dt class="font-mono text-sm font-semibold text-blue">devhub wt add &lt;project&gt; &lt;branch&gt; [base]</dt><dd class="mt-1 leading-7 text-muted">Crée le worktree, choisit le premier port libre et génère <code>.env</code> ou <code>.env.local</code>.</dd></div>
-              <div><dt class="font-mono text-sm font-semibold text-blue">devhub wt list &lt;project&gt;</dt><dd class="mt-1 leading-7 text-muted">Affiche les worktrees, branches et URLs <code>localhost</code>.</dd></div>
-              <div><dt class="font-mono text-sm font-semibold text-blue">devhub wt rm &lt;project&gt; &lt;slug&gt;</dt><dd class="mt-1 leading-7 text-muted">Supprime le worktree via Git, retire les fichiers env locaux et recharge le runtime si besoin.</dd></div>
-            </dl>
-          </article>
-        </div>
-      </section>
-
-      <section class="mx-auto w-[min(1120px,calc(100%-2rem))] py-20" id="stacks">
-        <div class="mb-8">
-          <p class="mb-3 text-sm font-medium text-blue">Templates</p>
-          <h2 class="text-[clamp(2.35rem,5.2vw,4.8rem)] font-semibold leading-[0.95] tracking-[-0.04em]">Comportement par stack</h2>
-        </div>
-
-        <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          <article class="min-h-44 rounded-lg border border-hairline bg-panel p-5 shadow-sm">
-            <h3 class="text-xl font-semibold tracking-[-0.01em]">Symfony</h3>
-            <p class="mt-3 leading-7 text-muted">FrankenPHP, Caddy multi-sites, <code>public/</code>, <code>.env.local</code>, PostgreSQL, Redis, Mailpit, Meilisearch.</p>
-          </article>
-          <article class="min-h-44 rounded-lg border border-hairline bg-panel p-5 shadow-sm">
-            <h3 class="text-xl font-semibold tracking-[-0.01em]">Laravel</h3>
-            <p class="mt-3 leading-7 text-muted">FrankenPHP, Caddy, <code>.env</code>, variables <code>DB_*</code>, Redis et Mailpit préconfigurés.</p>
-          </article>
-          <article class="min-h-44 rounded-lg border border-hairline bg-panel p-5 shadow-sm">
-            <h3 class="text-xl font-semibold tracking-[-0.01em]">Next.js</h3>
-            <p class="mt-3 leading-7 text-muted">Runtime Bun, <code>bun install</code>, <code>bun run dev</code>, port injecté via <code>DEVHUB_PORT</code>.</p>
-          </article>
-          <article class="min-h-44 rounded-lg border border-hairline bg-panel p-5 shadow-sm">
-            <h3 class="text-xl font-semibold tracking-[-0.01em]">TanStack Start</h3>
-            <p class="mt-3 leading-7 text-muted">Runtime Bun, host <code>0.0.0.0</code>, port par worktree, DSN partagés disponibles.</p>
-          </article>
-          <article class="min-h-44 rounded-lg border border-hairline bg-panel p-5 shadow-sm">
-            <h3 class="text-xl font-semibold tracking-[-0.01em]">Hono</h3>
-            <p class="mt-3 leading-7 text-muted">Runtime Bun pour APIs TypeScript, variables <code>PORT</code>, <code>DATABASE_URL</code>, <code>REDIS_URL</code>.</p>
-          </article>
-          <article class="min-h-44 rounded-lg border border-hairline bg-panel p-5 shadow-sm">
-            <h3 class="text-xl font-semibold tracking-[-0.01em]">FastAPI DDD</h3>
-            <p class="mt-3 leading-7 text-muted">Runtime Python, Uvicorn reload, scaffold <code>domain</code>, <code>application</code>, <code>infrastructure</code>, <code>interfaces</code>.</p>
-          </article>
-        </div>
-      </section>
-
-      <section class="mx-auto w-[min(1120px,calc(100%-2rem))] py-20" id="examples">
-        <div class="mb-8">
-          <p class="mb-3 text-sm font-medium text-blue">Exemples</p>
-          <h2 class="text-[clamp(2.35rem,5.2vw,4.8rem)] font-semibold leading-[0.95] tracking-[-0.04em]">Recettes prêtes a copier</h2>
-        </div>
-        <div class="grid gap-4 lg:grid-cols-3">
-          <article class="rounded-lg border border-hairline bg-panel p-4 shadow-sm">
-            <h3 class="mb-3 text-lg font-semibold tracking-[-0.01em]">Laravel</h3>
-            <pre class="relative overflow-auto rounded-lg bg-code"><code class="block min-w-full whitespace-pre p-4 font-mono text-sm leading-6 text-code-text">devhub project init crm-api --stack laravel --repo git@github.com:org/crm-api.git
-devhub wt add crm-api main origin/main
-devhub runtime crm-api</code></pre>
-          </article>
-          <article class="rounded-lg border border-hairline bg-panel p-4 shadow-sm">
-            <h3 class="mb-3 text-lg font-semibold tracking-[-0.01em]">Next.js</h3>
-            <pre class="relative overflow-auto rounded-lg bg-code"><code class="block min-w-full whitespace-pre p-4 font-mono text-sm leading-6 text-code-text">devhub project init webapp --stack nextjs --repo git@github.com:org/webapp.git
-devhub wt add webapp feat/search origin/main
-devhub runtime webapp</code></pre>
-          </article>
-          <article class="rounded-lg border border-hairline bg-panel p-4 shadow-sm">
-            <h3 class="mb-3 text-lg font-semibold tracking-[-0.01em]">Hono</h3>
-            <pre class="relative overflow-auto rounded-lg bg-code"><code class="block min-w-full whitespace-pre p-4 font-mono text-sm leading-6 text-code-text">devhub project init edge-api --stack hono --repo git@github.com:org/edge-api.git
-devhub wt add edge-api main origin/main
-devhub runtime edge-api</code></pre>
-          </article>
         </div>
       </section>
 
@@ -382,15 +260,15 @@ devhub runtime edge-api</code></pre>
         <div class="grid gap-4 md:grid-cols-2">
           <article class="rounded-lg border border-hairline bg-panel p-5 shadow-sm">
             <h3 class="text-xl font-semibold tracking-[-0.01em]">Port déjà occupé</h3>
-            <p class="mt-3 leading-7 text-muted"><code>wt add</code> saute les ports déjà en écoute si <code>ss</code> est disponible. Change la plage avec <code>--port-start</code> et <code>--port-end</code> si besoin.</p>
+            <p class="mt-3 leading-7 text-muted">Change le port concerné dans <code>.env</code>. <code>devhub open</code> et <code>devhub doctor</code> lisent la configuration Compose effective.</p>
           </article>
           <article class="rounded-lg border border-hairline bg-panel p-5 shadow-sm">
-            <h3 class="text-xl font-semibold tracking-[-0.01em]">Projet inconnu</h3>
-            <p class="mt-3 leading-7 text-muted">Vérifie <code>devhub project list</code>. Le registre local vit dans <code>data/projects/*.env</code> et reste ignoré par Git.</p>
+            <h3 class="text-xl font-semibold tracking-[-0.01em]">Service défaillant</h3>
+            <p class="mt-3 leading-7 text-muted">Lance <code>devhub doctor</code> : un service absent, arrêté ou en mauvaise santé produit un code de sortie non nul.</p>
           </article>
           <article class="rounded-lg border border-hairline bg-panel p-5 shadow-sm">
-            <h3 class="text-xl font-semibold tracking-[-0.01em]">Override manquant</h3>
-            <p class="mt-3 leading-7 text-muted">Relance <code>devhub project init ...</code> ou vérifie <code>overrides/&lt;project&gt;-app.override.yml</code>.</p>
+            <h3 class="text-xl font-semibold tracking-[-0.01em]">ACL Redis</h3>
+            <p class="mt-3 leading-7 text-muted"><code>REDIS_ACL_FILE</code> désigne un fichier privé dans le volume Redis. Garde le chemin existant si des ACL sont utilisées. Sur une installation vierge, la valeur vide utilise l’utilisateur Redis par défaut.</p>
           </article>
           <article class="rounded-lg border border-hairline bg-panel p-5 shadow-sm">
             <h3 class="text-xl font-semibold tracking-[-0.01em]">Pages GitHub non publiée</h3>
