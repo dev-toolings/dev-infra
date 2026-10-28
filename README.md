@@ -15,6 +15,29 @@ a shared Docker network.
 
 Full documentation: [makfly.github.io/dev-infra](https://makfly.github.io/dev-infra/)
 
+The `feat/devhub` branch is also implementing a local project manager. This
+work is in progress: the shared-infrastructure CLI above remains the working
+entry point until the project modules are integrated.
+
+The project manager keeps existing repositories where they are. You approve
+workspace folders, register a project and describe its components. A project can
+combine a Docker backend with a native frontend, or use an existing Compose
+stack. The CLI and the optional React control panel use the same project
+catalog and lifecycle engine.
+
+Projects keep their own Dockerfiles, Compose configuration, application checks
+and data. Shared DevHub services remain a separate infrastructure stack.
+Registering a project does not move it, change its Compose identity or adopt
+unmatched containers. Unregistering removes catalog metadata only.
+
+Project-manager dependencies are installed with Bun using the committed lockfile.
+Native process management targets Linux user systemd services. The controller
+uses a loopback listener and a one-time local pairing code; project execution
+runs trusted local code and does not provide a hostile-code sandbox. Image
+maintenance is a separate, explicit workflow with a source preview, candidate
+validation and activation of the exact validated image. A scan alone does not
+prove that a vulnerability has been corrected.
+
 ## Table of Contents
 
 - [Why DevHub](#why-devhub)
