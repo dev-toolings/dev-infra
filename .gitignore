@@ -26,3 +26,9 @@ node_modules/
 
 # Scripts (private - never push)
 /scripts/
+
+# Generated application output and local controller state
+apps/web/dist/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal

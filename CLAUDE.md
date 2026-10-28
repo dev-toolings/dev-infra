@@ -17,7 +17,8 @@ Before implementation:
 
 ## Simplicity First
 
-DevHub is a compact Bash and Docker Compose project. Keep it that way.
+DevHub retains compact Bash/Compose infrastructure and adds the explicitly approved
+Bun/TypeScript manager with React/Vite/shadcn UI. Keep modules focused.
 
 - No speculative features.
 - No new framework or helper dependency for simple Bash/Compose edits.

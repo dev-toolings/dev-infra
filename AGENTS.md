@@ -4,13 +4,16 @@ Repository instructions for AI coding agents working on DevHub.
 
 ## Project Overview
 
-DevHub is shared local development infrastructure built around Docker Compose.
+DevHub combines shared Docker Compose infrastructure with an approved Bun/TypeScript
+local project manager and a React/Vite/shadcn control panel.
 It provides PostgreSQL, MySQL, Redis, Meilisearch, Mailpit, Adminer, Dozzle,
 and RabbitMQ. Applications connect through the shared external network.
 
 Primary entry points:
 - `bin/devhub`: Bash CLI used by humans and automation.
-- `compose.yml`: shared service definitions and profiles.
+- `compose.yml`: shared service definitions and profiles (preserve live identity).
+- `src/`: shared manager engine, CLI and authenticated loopback API.
+- `apps/web/`: React/Vite/shadcn interface; no frontend tests or builds unless requested.
 - `data/scripts/`: helper scripts for install, database creation, networking,
   health checks, and uninstall.
 
@@ -34,7 +37,8 @@ These guidelines follow the style of the Karpathy coding-agent example:
 
 2. Keep changes simple.
    Do not add abstraction, configurability, or new tooling unless it directly
-   supports the requested change. This repository is intentionally small.
+   supports the requested change. Keep module boundaries and dependencies focused.
+   Bun dependencies for the approved manager are allowed; infrastructure remains small.
 
 3. Make surgical edits.
    Touch only files needed for the task. Preserve existing CLI behavior,

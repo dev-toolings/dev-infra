@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Foundation for the approved local DevHub manager: shared TypeScript contracts,
+  Bun dependencies, React/Vite tooling and isolated worker implementation branches.
+
 ### Changed
 - `devhub up` / `devhub restart` now start the `async` profile (RabbitMQ) by
   default alongside `core`. Projects relying on AMQP no longer crash-loop after

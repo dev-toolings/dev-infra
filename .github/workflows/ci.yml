@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, develop, feat/devhub]
   pull_request:
   workflow_dispatch:
 
@@ -15,6 +15,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
 
       - name: Bash syntax check
         run: |
@@ -22,6 +31,14 @@ jobs:
 
       - name: ShellCheck
         run: shellcheck -x --severity=warning bin/devhub data/scripts/*.sh
+
+      - name: TypeScript and backend tests
+        run: |
+          bun run typecheck
+          bun test src
+
+      - name: Infrastructure identity contract
+        run: python3 tests/infra-contract.py
 
       - name: Compose config
         run: |
@@ -34,6 +51,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
 
       - name: Install bats
         run: sudo apt-get update -q && sudo apt-get install -y -q bats

@@ -25,6 +25,9 @@ set -euo pipefail
 printf '%s\n' "$*" >> "$DOCKER_CALLS"
 case "$1" in
   compose)
+    case "$*" in
+      "compose --env-file ${EXPECTED_ENV_FILE:-$DEVHUB_DIR/.env} -f $DEVHUB_DIR/compose.yml up -d"|"compose --env-file ${EXPECTED_ENV_FILE:-$DEVHUB_DIR/.env} -f $DEVHUB_DIR/compose.yml down"|"compose --env-file ${EXPECTED_ENV_FILE:-$DEVHUB_DIR/.env} -f $DEVHUB_DIR/compose.yml ps") exit 0 ;;
+    esac
     [ "$*" = "compose --env-file ${EXPECTED_ENV_FILE:-$DEVHUB_DIR/.env} -f $DEVHUB_DIR/compose.yml config --format json" ] || exit 97
     [ "${COMPOSE_PROFILES:-}" = core,async ] || exit 98
     [ "${CONFIG_FAIL:-0}" = 0 ] || exit 1
@@ -64,12 +67,12 @@ SH
   run "$REPO_DIR/bin/devhub" help
   [ "$status" -eq 0 ]
   [[ "$output" == *"core, async"* ]]
-  [[ "$output" != *node* && "$output" != *runtime* && "$output" != *"wt "* ]]
+  [[ "$output" != *"infra-node"* && "$output" != *"down-runtime"* && "$output" != *"wt add"* ]]
   [ ! -s "$DOCKER_CALLS" ]
 }
 
 @test "unknown and retired commands fail before Docker" {
-  for command in unknown project wt runtime down-runtime; do
+  for command in unknown wt runtime down-runtime; do
     run "$REPO_DIR/bin/devhub" "$command"
     [ "$status" -ne 0 ]
     [[ "$output" == *"Unknown command: $command"* ]]
@@ -134,4 +137,16 @@ SH
   run "$REPO_DIR/bin/devhub" doctor
   [ "$status" -eq 0 ]
   [ ! -e "$DEVHUB_DIR/.env" ]
+}
+
+@test "infra up down and ps preserve original Compose argv and project identity" {
+  for command in up down ps; do
+    : > "$DOCKER_CALLS"
+    run "$REPO_DIR/bin/devhub" "$command"
+    [ "$status" -eq 0 ]
+    suffix="$command"
+    [ "$command" != up ] || suffix='up -d'
+    grep -Fx "compose --env-file $DEVHUB_DIR/.env -f $DEVHUB_DIR/compose.yml $suffix" "$DOCKER_CALLS"
+    ! grep -Eq -- '--project-name|--remove-orphans|--volumes|down -v|prune' "$DOCKER_CALLS"
+  done
 }
