@@ -1,7 +1,10 @@
+import { lstatSync, realpathSync, readFileSync, existsSync } from "node:fs";
+import { resolve, dirname, join, sep } from "node:path";
+import { homedir } from "node:os";
 import type { ExecOptions, Executor, ExecResult } from "./contracts";
 import { DevHubError } from "./contracts";
 
-const prefix = ["git", "--no-pager", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=", "-c", "commit.gpgSign=false", "-c", "tag.gpgSign=false", "-c", "core.pager=cat", "-c", "diff.external=", "-c", "log.showSignature=false"];
+const prefix = ["git", "--no-pager", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=", "-c", "commit.gpgSign=false", "-c", "tag.gpgSign=false", "-c", "core.pager=cat", "-c", "diff.external=", "-c", "log.showSignature=false", "-c", "submodule.recurse=false", "-c", "fetch.recurseSubmodules=false"];
 const commands = new Set(["init", "rev-parse", "config", "status", "diff", "switch", "checkout", "branch", "add", "commit", "restore", "worktree", "show", "log", "ls-files", "check-ref-format", "symbolic-ref"]);
 
 /** Run Git with fixed config and refuse external repository execution hooks. */
@@ -28,6 +31,38 @@ export async function gitRun(run: Executor, argv: string[], options: ExecOptions
     if (check.code === 0 && check.stdout.trim()) throw new DevHubError("Repository has external configuration or filters; manual review required", "unsafe_git", 409);
     if (check.code !== 0 && check.code !== 1) throw new DevHubError("Cannot verify repository configuration", "unsafe_git", 409);
   }
-  const safeArgs = ["diff", "show", "log"].includes(verb) ? [...argv.slice(0, offset + 1), "--no-ext-diff", "--no-textconv", ...argv.slice(offset + 1)] : argv;
+  if (verb !== "init") {
+    let root = resolve(options.cwd ?? process.cwd());
+    for (let index = 0; index < location.length; index += 2) root = resolve(root, location[index + 1]!);
+    while (!existsSync(join(root, ".git"))) {
+      const parent = dirname(root);
+      if (parent === root) throw new DevHubError("Git checkout metadata is missing", "unsafe_git", 409);
+      root = parent;
+    }
+    root = realpathSync(root);
+    const reserved = [resolve(import.meta.dir, ".."), resolve(homedir(), ".local/share/devhub"), ...(process.env.DEVHUB_DIR ? [resolve(process.env.DEVHUB_DIR)] : [])].map((path) => existsSync(path) ? realpathSync(path) : path);
+    const forbidden = (path: string) => reserved.some((base) => path === base || path.startsWith(base + sep));
+    if (forbidden(root)) throw new DevHubError("Infrastructure checkout is protected", "unsafe_git", 409);
+    const dot = join(root, ".git");
+    if (lstatSync(dot).isSymbolicLink()) throw new DevHubError("Symlinked Git metadata is not supported", "unsafe_git", 409);
+    let expectedDir: string;
+    let expectedCommon: string;
+    if (lstatSync(dot).isDirectory()) { expectedDir = realpathSync(dot); expectedCommon = expectedDir; }
+    else {
+      const match = /^gitdir: ([^\r\n]+)\r?\n?$/.exec(readFileSync(dot, "utf8"));
+      if (!match) throw new DevHubError("Invalid Git pointer", "unsafe_git", 409);
+      expectedDir = realpathSync(resolve(root, match[1]!));
+      const commonFile = join(expectedDir, "commondir"), backlink = join(expectedDir, "gitdir");
+      if (!existsSync(commonFile) || !existsSync(backlink)) throw new DevHubError("Unverified external Git directory", "unsafe_git", 409);
+      expectedCommon = realpathSync(resolve(expectedDir, readFileSync(commonFile, "utf8").trim()));
+      const actualBacklink = realpathSync(resolve(expectedDir, readFileSync(backlink, "utf8").trim()));
+      if (actualBacklink !== realpathSync(dot) || dirname(dirname(expectedDir)) !== expectedCommon || dirname(expectedDir) !== join(expectedCommon, "worktrees")) throw new DevHubError("Git worktree backlink mismatch", "unsafe_git", 409);
+    }
+    if (forbidden(expectedDir) || forbidden(expectedCommon)) throw new DevHubError("Infrastructure Git metadata is protected", "unsafe_git", 409);
+    const metadata = await run([...prefix, ...location, "rev-parse", "--path-format=absolute", "--absolute-git-dir", "--git-common-dir"], opts);
+    const paths = metadata.stdout.trim().split(/\r?\n/);
+    if (metadata.code !== 0 || paths.length !== 2 || realpathSync(paths[0]!) !== expectedDir || realpathSync(paths[1]!) !== expectedCommon) throw new DevHubError("Git metadata does not belong to this checkout", "unsafe_git", 409);
+  }
+  const safeArgs = verb === "status" ? [...argv.slice(0, offset + 1), "--ignore-submodules=all", ...argv.slice(offset + 1)] : ["diff", "show", "log"].includes(verb) ? [...argv.slice(0, offset + 1), "--no-ext-diff", "--no-textconv", "--ignore-submodules=all", ...argv.slice(offset + 1)] : argv;
   return run([...prefix, ...safeArgs], opts);
 }

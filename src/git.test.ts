@@ -3,6 +3,7 @@ import { mkdtempSync, writeFileSync, existsSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gitRun } from "./git";
+import { execCommand } from "./runtime/executor";
 import type { Executor } from "./contracts";
 
 const fixtures: string[] = [];
@@ -94,4 +95,26 @@ test("rejects core.worktree redirection outside the approved checkout", async ()
   await call(["config", "core.worktree", outside]);
   await expect(call(["restore", "file"])).rejects.toThrow("external configuration");
   expect(await Bun.file(join(outside, "file")).text()).toBe("unchanged\n");
+});
+
+test("rejects a forged Git pointer while allowing a genuine linked worktree", async () => {
+  const { path, call } = await committedFixture();
+  const linked = join(path, "genuine");
+  expect((await call(["worktree", "add", "-b", "genuine", linked])).code).toBe(0);
+  expect((await gitRun(run, ["-C", linked, "status", "--porcelain"])).code).toBe(0);
+  const forged = mkdtempSync(join(tmpdir(), "devhub-git-forged-")); fixtures.push(forged);
+  writeFileSync(join(forged, ".git"), `gitdir: ${join(path, ".git")}\n`);
+  await expect(gitRun(run, ["-C", forged, "status", "--porcelain"])).rejects.toThrow("Unverified external Git directory");
+});
+
+test("real executor drops ambient Git redirection and configuration parameters", async () => {
+  const { path } = await committedFixture();
+  const previousDir = process.env.GIT_DIR, previousParameters = process.env.GIT_CONFIG_PARAMETERS;
+  process.env.GIT_DIR = "/does-not-exist/devhub-hostile-git";
+  process.env.GIT_CONFIG_PARAMETERS = "'core.worktree'='/does-not-exist/redirected'";
+  try { expect((await gitRun(execCommand, ["-C", path, "status", "--porcelain"])).code).toBe(0); }
+  finally {
+    if (previousDir === undefined) delete process.env.GIT_DIR; else process.env.GIT_DIR = previousDir;
+    if (previousParameters === undefined) delete process.env.GIT_CONFIG_PARAMETERS; else process.env.GIT_CONFIG_PARAMETERS = previousParameters;
+  }
 });

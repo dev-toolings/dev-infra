@@ -40,7 +40,6 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
   if (argv[0] === "serve") {
     if (argv.length > 1 && (argv.length !== 3 || argv[1] !== "--port")) throw new Error("Usage: devhub serve [--port 8040]");
     const port = argv[1] === "--port" ? Number(argv[2]) : DEFAULT_PORT;
-    api!.issuePairingCode(stateDir);
     const app = api!.createApp(appServices, { stateDir, hostnames: [`127.0.0.1:${port}`, `localhost:${port}`, "127.0.0.1:5175", "localhost:5175"], origins: [`http://127.0.0.1:${port}`, `http://localhost:${port}`, "http://127.0.0.1:5175", "http://localhost:5175"] });
     listen((request) => app.fetch(request), port);
     process.stdout.write(`DevHub listening on http://${LISTEN_HOST}:${port}\nRun devhub pair to obtain a one-time pairing code.\n`);

@@ -84,10 +84,12 @@ export class DevHubError extends Error {
  constructor(message: string, public readonly code = "invalid", public readonly status = 400) { super(message); this.name = "DevHubError"; }
 }
 
-export type PublicComponent = Pick<Component,"id"|"name"|"kind"|"dependsOn"|"url">;
+export type PublicComponent = Pick<Component,"id"|"name"|"kind"|"cwd"|"argv"|"compose"|"dependsOn"|"url"|"health"|"limits">;
 export type PublicProject = Omit<Project,"components"> & { components: PublicComponent[] };
 
 export interface ApiSuccess<T> { data: T }
 export interface ApiError { error: { code: string; message: string } }
 export type PublicDetection = Omit<Detection,"components"> & { components: PublicComponent[] };
 export type PublicSetupPlan = Omit<SetupPlan,"project"> & { project: Omit<PublicProject,"createdAt"> };
+
+export type PublicChange = Omit<Change,"original"|"proposed"> & { changedLine: { line: number; before: string; after: string } };
