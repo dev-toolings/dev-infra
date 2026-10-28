@@ -276,12 +276,25 @@ in [the maintenance report](docs/maintenance.md).
 
 ```bash
 for script in bin/devhub install-remote.sh data/scripts/*.sh; do bash -n "$script"; done
-shellcheck -x --severity=warning bin/devhub data/scripts/*.sh
+shellcheck -x --severity=warning bin/devhub install-remote.sh data/scripts/*.sh
 for profiles in core async core,async; do
   COMPOSE_PROFILES="$profiles" docker compose --env-file .env.example -f compose.yml config --quiet
 done
 bats tests
 ```
+
+The project-manager source has separate static and backend checks:
+
+```bash
+bun install --frozen-lockfile
+bun run typecheck
+bun test src
+python3 tests/infra-contract.py
+```
+
+These checks do not start the controller, compile the frontend or recreate
+containers. The infrastructure contract renders the retained profiles and
+compares names, ports, mounts, network and RabbitMQ identity with the baseline.
 
 Install ShellCheck and Bats to run these checks. CLI tests simulate Docker and
 never change running services. `doctor` returns nonzero for missing, stopped,
