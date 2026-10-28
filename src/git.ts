@@ -1,7 +1,7 @@
 import type { ExecOptions, Executor, ExecResult } from "./contracts";
 import { DevHubError } from "./contracts";
 
-const prefix = ["git", "--no-pager", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=", "-c", "commit.gpgSign=false", "-c", "tag.gpgSign=false", "-c", "core.pager=cat", "-c", "diff.external="];
+const prefix = ["git", "--no-pager", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=", "-c", "commit.gpgSign=false", "-c", "tag.gpgSign=false", "-c", "core.pager=cat", "-c", "diff.external=", "-c", "log.showSignature=false"];
 const commands = new Set(["init", "rev-parse", "config", "status", "diff", "switch", "checkout", "branch", "add", "commit", "restore", "worktree", "show", "log", "ls-files", "check-ref-format", "symbolic-ref"]);
 
 /** Run Git with fixed config and refuse external repository execution hooks. */
@@ -24,7 +24,7 @@ export async function gitRun(run: Executor, argv: string[], options: ExecOptions
   const verb = argv[offset];
   if (!verb || !commands.has(verb)) throw new DevHubError("Explicit Git command required");
   if (!["init", "rev-parse", "config", "check-ref-format"].includes(verb)) {
-    const check = await run([...prefix, ...location, "config", "--local", "--no-includes", "--name-only", "--get-regexp", "^(include\\.|includeif\\.|filter\\.|merge\\..*\\.driver$|diff\\..*\\.(command|textconv)$)"], opts);
+    const check = await run([...prefix, ...location, "config", "--no-includes", "--name-only", "--get-regexp", "^(core\\.worktree$|gpg\\..*program$|include\\.|includeif\\.|filter\\.|merge\\..*\\.driver$|diff\\..*\\.(command|textconv)$)"], opts);
     if (check.code === 0 && check.stdout.trim()) throw new DevHubError("Repository has external configuration or filters; manual review required", "unsafe_git", 409);
     if (check.code !== 0 && check.code !== 1) throw new DevHubError("Cannot verify repository configuration", "unsafe_git", 409);
   }

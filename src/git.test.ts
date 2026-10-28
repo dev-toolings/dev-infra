@@ -21,7 +21,7 @@ async function fixture() {
   return { path, call };
 }
 
-test("neutralizes global hooks and local signing programs", async () => {
+test("neutralizes global hooks and signing configuration", async () => {
   const { path, call } = await fixture();
   const marker = join(path, "executed");
   const program = join(path, "unsafe-program");
@@ -30,7 +30,6 @@ test("neutralizes global hooks and local signing programs", async () => {
   const globalConfig = join(path, "hostile-global");
   writeFileSync(globalConfig, `[core]\n hooksPath = ${join(path, ".git", "hooks")}\n[commit]\n gpgSign = true\n[gpg]\n program = ${program}\n`);
   await call(["config", "commit.gpgSign", "true"]);
-  await call(["config", "gpg.program", program]);
   writeFileSync(join(path, "file"), "fixture\n");
   expect((await call(["add", "file"])).code).toBe(0);
   const result = await gitRun(run, ["-C", path, "commit", "-m", "fixture"], { env: { GIT_CONFIG_GLOBAL: globalConfig } });
@@ -52,4 +51,47 @@ test("rejects local external filters and merge drivers before repository reads o
   await call(["config", "merge.escape.driver", program]);
   await expect(call(["add", "file"])).rejects.toThrow("external configuration");
   expect(existsSync(marker)).toBe(false);
+});
+
+async function committedFixture() {
+  const item = await fixture();
+  writeFileSync(join(item.path, "file"), "fixture\n");
+  expect((await item.call(["add", "file"])).code).toBe(0);
+  expect((await item.call(["commit", "-m", "fixture"])).code).toBe(0);
+  return item;
+}
+
+test("rejects filters in linked worktree configuration for reads and writes", async () => {
+  const { path, call } = await committedFixture();
+  await call(["config", "extensions.worktreeConfig", "true"]);
+  const linked = join(path, "linked");
+  expect((await call(["worktree", "add", "-b", "linked", linked])).code).toBe(0);
+  const marker = join(path, "executed");
+  const program = join(path, "unsafe-worktree-filter");
+  writeFileSync(program, `#!/bin/sh\ntouch '${marker}'\ncat\n`, { mode: 0o700 });
+  expect((await gitRun(run, ["-C", linked, "config", "--worktree", "filter.escape.clean", program])).code).toBe(0);
+  writeFileSync(join(linked, ".gitattributes"), "file filter=escape\n");
+  await expect(gitRun(run, ["-C", linked, "status", "--porcelain"])).rejects.toThrow("external configuration");
+  await expect(gitRun(run, ["-C", linked, "add", "file"])).rejects.toThrow("external configuration");
+  expect(existsSync(marker)).toBe(false);
+});
+
+test("rejects repository signature programs even when show-signature is configured", async () => {
+  const { path, call } = await committedFixture();
+  const marker = join(path, "executed");
+  const program = join(path, "unsafe-signature");
+  writeFileSync(program, `#!/bin/sh\ntouch '${marker}'\n`, { mode: 0o700 });
+  await call(["config", "log.showSignature", "true"]);
+  await call(["config", "gpg.program", program]);
+  await expect(call(["show", "HEAD"])).rejects.toThrow("external configuration");
+  expect(existsSync(marker)).toBe(false);
+});
+
+test("rejects core.worktree redirection outside the approved checkout", async () => {
+  const { path, call } = await committedFixture();
+  const outside = mkdtempSync(join(tmpdir(), "devhub-git-outside-")); fixtures.push(outside);
+  writeFileSync(join(outside, "file"), "unchanged\n");
+  await call(["config", "core.worktree", outside]);
+  await expect(call(["restore", "file"])).rejects.toThrow("external configuration");
+  expect(await Bun.file(join(outside, "file")).text()).toBe("unchanged\n");
 });

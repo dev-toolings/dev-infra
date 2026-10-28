@@ -1,11 +1,12 @@
 import { homedir } from "node:os";
-import { resolve, join } from "node:path";
+import { resolve, join, isAbsolute } from "node:path";
 import type { AppServices, CatalogPort, DiscoveryPort, RuntimePort, OperationsPort, MaintenancePort, Executor } from "./contracts";
 
 export const LISTEN_HOST = "127.0.0.1" as const;
 export const DEFAULT_PORT = 8040;
 export function stateDirectory(): string {
-  return join(process.env.XDG_STATE_HOME || join(homedir(), ".local", "state"), "devhub");
+  const configured = process.env.XDG_STATE_HOME;
+  return join(configured && isAbsolute(configured) ? configured : join(homedir(), ".local", "state"), "devhub");
 }
 type ListenerOptions = { hostname: string; port: number; fetch: (request: Request) => Response | Promise<Response> };
 export function listen(fetch: ListenerOptions["fetch"], port = DEFAULT_PORT, serve: (options: ListenerOptions) => unknown = (options) => Bun.serve(options)): unknown {
