@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { mkdtempSync, writeFileSync, existsSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { gitRun } from "./git";
 import { execCommand } from "./runtime/executor";
 import type { Executor } from "./contracts";
@@ -117,4 +117,17 @@ test("real executor drops ambient Git redirection and configuration parameters",
     if (previousDir === undefined) delete process.env.GIT_DIR; else process.env.GIT_DIR = previousDir;
     if (previousParameters === undefined) delete process.env.GIT_CONFIG_PARAMETERS; else process.env.GIT_CONFIG_PARAMETERS = previousParameters;
   }
+});
+
+test("caller PATH and loader injection cannot override the hardened Git environment", async () => {
+  const { path } = await committedFixture();
+  const result = await gitRun(execCommand, ["-C", path, "status", "--porcelain"], { env: { PATH: "/does-not-exist", LD_PRELOAD: "/does-not-exist/unsafe.so" } });
+  expect(result.code).toBe(0);
+  expect(result.stderr).not.toContain("preload");
+});
+test("initialization rejects the infrastructure checkout before invoking Git", async () => {
+  let calls = 0;
+  const fake: Executor = async () => { calls++; return { code: 0, stdout: "", stderr: "" }; };
+  await expect(gitRun(fake, ["init"], { cwd: resolve(import.meta.dir, "..") })).rejects.toThrow("protected");
+  expect(calls).toBe(0);
 });

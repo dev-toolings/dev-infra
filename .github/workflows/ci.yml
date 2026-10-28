@@ -30,7 +30,7 @@ jobs:
           for script in bin/devhub install-remote.sh data/scripts/*.sh; do bash -n "$script"; done
 
       - name: ShellCheck
-        run: shellcheck -x --severity=warning bin/devhub data/scripts/*.sh
+        run: shellcheck -x --severity=warning bin/devhub install-remote.sh data/scripts/*.sh
 
       - name: TypeScript and backend tests
         run: |

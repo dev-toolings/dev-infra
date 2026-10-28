@@ -63,6 +63,7 @@ function dockerRunHasMountOrNoAutoRemove(args: string[], start: number): string 
 
     const name = optionName(token);
     if (name && mountOptions.has(name)) return "Docker run mounts are not permitted";
+    if (token.startsWith("--rm=") && token !== "--rm=true") return "Docker run must use --rm";
     if (token === "--rm" || token === "--rm=true") hasAutoRemove = true;
     if (/^-[^-]/.test(token)) {
       const flags = token.slice(1);

@@ -63,6 +63,7 @@ test("guard denies Docker destruction and mounted candidate containers before ex
     ["docker", "run", "--rm", "-v/tmp:/mnt", "image"],
     ["docker", "container", "run", "--rm", "--volumes-from", "other", "image"],
     ["docker", "run", "image"],
+    ["docker", "run", "--rm", "--rm=false", "image"],
     ["docker", "compose", "run", "service"],
   ];
 
