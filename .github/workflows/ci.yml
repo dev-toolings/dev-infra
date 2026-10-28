@@ -35,7 +35,7 @@ jobs:
       - name: TypeScript and backend tests
         run: |
           bun run typecheck
-          bun test src
+          python3 tests/backend-isolated.py
 
       - name: Infrastructure identity contract
         run: python3 tests/infra-contract.py

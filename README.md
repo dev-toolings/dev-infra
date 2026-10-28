@@ -288,7 +288,7 @@ The project-manager source has separate static and backend checks:
 ```bash
 bun install --frozen-lockfile
 bun run typecheck
-bun test src
+python3 tests/backend-isolated.py
 python3 tests/infra-contract.py
 ```
 
