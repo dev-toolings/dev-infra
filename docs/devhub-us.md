@@ -1,0 +1,225 @@
+# DevHub project stories and adoption criteria
+
+This document defines the intended workflows for bringing existing applications under the DevHub project manager and connecting them to shared local services. The stories are acceptance criteria, not a release promise.
+
+Status below reflects the repository on 2026-10-29. Update a status when implementation lands. Any command labeled **planned** describes the target interface and may not work yet.
+
+## Product boundary and current status
+
+DevHub has two parts:
+
+- **Shared infrastructure** is the existing Compose stack of PostgreSQL, MySQL, Redis, Meilisearch, Mailpit, Adminer, Dozzle, and RabbitMQ.
+- **The project manager** is the local CLI, loopback API, and control panel for explicitly approved application folders.
+
+The manager is a local development tool, not a hosted platform or a hostile-code sandbox. It must preserve the existing Compose project, container, volume, port, profile, and network identities in [compose.yml](../compose.yml). It must not silently adopt or stop unrelated applications.
+
+The existing Bash CLI in [bin/devhub](../bin/devhub) contains the shared-infrastructure commands **up**, **down**, **restart**, **ps**, **logs**, **open**, **db**, **doctor**, **version**, and **help**. The source tree also has shared contracts and local safety foundations in [src/contracts.ts](../src/contracts.ts), [src/state.ts](../src/state.ts), [src/guard.ts](../src/guard.ts), [src/git.ts](../src/git.ts), [src/runtime/executor.ts](../src/runtime/executor.ts), and a composition entry point in [src/main.ts](../src/main.ts).
+
+The manager is not fully operational yet. The catalog, discovery, runtime adapter, operations, maintenance, API, and CLI modules are absent. The React view components exist under [apps/web/src/components/views](../apps/web/src/components/views/), but they receive data through props and do not call a connected API. The CLI help and current Bash handlers therefore remain the source of truth for commands that work today.
+
+## Stories
+
+### US-01: Keep shared infrastructure working
+
+**Actor and need:** As an existing application maintainer, I want the established shared services and commands to keep working while project management is added, so current development environments keep their identity and data.
+
+**Scope:** Preserve the Compose stack and its Bash entry points. New project operations act only on registered project components. Explicit shared-infrastructure commands remain separate.
+
+**Acceptance criteria:**
+
+- The eight existing service and container identities, **core** and **async** profiles, external **dev-shared-net**, published ports, named volumes, and RabbitMQ hostname remain unchanged.
+- Existing **devhub up**, **down**, **restart**, **ps**, **logs**, **open**, **db**, and **doctor** behavior remains available without requiring Bun.
+- Any future **devhub infra ...** form delegates to the existing Bash implementation with its existing arguments and Compose identity.
+- A project start, stop, restart, or removal cannot stop, remove, or claim shared infrastructure. Removing a project unregisters it only.
+
+**Verification method:** The infrastructure contract check compares the frozen Compose identity. CLI Bats fixtures check legacy dispatch and ensure project operations do not generate shared-resource teardown arguments.
+
+**Dependencies:** Existing Compose and Bash CLI; lead-owned compatibility dispatch.
+
+**Current status:** **Partially implemented.** The current stack and Bash commands are present. Manager dispatch and ownership checks are not.
+
+**Current command example:**
+
+~~~sh
+devhub up
+devhub ps
+devhub doctor
+devhub down
+~~~
+
+### US-02: Approve roots and discover existing projects in place
+
+**Actor and need:** As a developer with applications in several folders, I want to approve workspace roots and discover repositories without moving or rewriting them, so I can manage the folders where they already live.
+
+**Scope:** Root approval, bounded metadata-only scans, repository and worktree discovery, and explicit grouping of related folders.
+
+**Acceptance criteria:**
+
+- **root add** accepts a path explicitly selected by the local operator. Discovery scans only approved roots and stays within canonical real paths.
+- Discovery can identify Git repositories and worktrees, Compose files, known manifests, and static Make targets without running project scripts, hooks, or Makefiles.
+- Symlink escapes and protected DevHub, state, and installer paths are refused. A broad approved root may contain protected subtrees, but scans skip those subtrees.
+- Existing folders are registered in place. No folder is moved, copied, or modified during discovery.
+- Multiple detected folders are grouped only after the operator selects them. Their component paths remain inside the selected project root.
+
+**Verification method:** Catalog, discovery, and CLI tests use temporary roots and inert Git/Compose fixtures. Include sibling paths, linked worktrees, symlink escapes, and a broad root containing a protected subtree.
+
+**Dependencies:** Catalog root policy, Discovery, and CLI approval flow.
+
+**Current status:** **Planned.** The shared interfaces and composition skeleton exist, but Catalog, Discovery, and CLI modules do not.
+
+**Planned command shape:**
+
+~~~sh
+devhub root add ~/code
+devhub project add --path ~/code/shop --name shop --preset compose-existing --apply
+devhub project list
+~~~
+
+### US-03: Preview project presets before writing files
+
+**Actor and need:** As a developer starting or configuring an application, I want a preset or detected setup to be previewed before files are created, so I can see exactly what DevHub proposes.
+
+**Scope:** Interactive and flag-based project addition for Symfony, Laravel, and Node Docker backends with a native frontend where detected, existing Compose projects, native projects, and custom local configuration.
+
+**Acceptance criteria:**
+
+- Supported preset IDs are **symfony-docker**, **laravel-docker**, **node-docker**, **compose-existing**, **native**, and **custom**.
+- Interactive setup and **project add --path ... --name ... --preset ... --apply** use the same discovery preview and apply path.
+- Preview lists every file, component, command, Compose identity, warning, and detected port that would change. No file is written before explicit apply.
+- Apply creates only files that do not already exist. It never overwrites project files. A partial apply failure removes only files created by that apply and does not register an incomplete project.
+- Existing .env content is preserved. Within a project .env, only **COMPOSE_PROJECT_NAME** and **COMPOSE_PROFILES** are accepted as Compose controls; other **COMPOSE_*** settings are rejected without rewriting the file.
+- Existing Compose identity is preserved unless the operator explicitly supplies a supported replacement during preview.
+
+**Verification method:** Discovery and CLI tests compare preview output with fixture files, prove apply is exclusive, and verify existing bytes are unchanged on refusal or failure.
+
+**Dependencies:** Discovery, Catalog validation, and CLI preview/apply flow.
+
+**Current status:** **Planned.** No project setup or preset implementation is present.
+
+**Planned command shape:**
+
+~~~sh
+devhub project add --path ~/code/api --name api --preset laravel-docker --apply
+devhub project show api
+~~~
+
+### US-04: Operate a Docker backend with a native frontend
+
+**Actor and need:** As a developer running a hybrid application, I want to start and inspect its Docker backend and native frontend together, so I can use the same local workflow for mixed stacks.
+
+**Scope:** Compose and native lifecycle, dependency ordering, readiness, status, and bounded logs on the current local Linux host.
+
+**Acceptance criteria:**
+
+- Docker uses the current context only after verifying it is local. DevHub does not silently switch to the default context.
+- Native processes use the local user's systemd session and D-Bus. Setup does not install system packages, use sudo, or create system-wide units.
+- Start orders selected components by their declared dependencies. Stop orders them in reverse. Operations never stop shared infrastructure or unregistered resources.
+- If startup partially fails, DevHub records failure and leaves components already started running for diagnosis. It does not roll them back automatically.
+- Status distinguishes process state from readiness and reports unknown or failed checks honestly.
+- Project .env accepts only the approved **COMPOSE_PROJECT_NAME** and **COMPOSE_PROFILES** controls. The project keeps its existing Compose identity unless explicitly changed during setup.
+- No project operation runs a database schema migration or claims to roll one back.
+
+**Verification method:** Runtime and Operations tests use an injected executor and temporary project fixtures. Cover dependency order, local-context refusal, readiness, native unit ownership, bounded logs, and partial-start failure that leaves prior components running. Do not start live project services as a test.
+
+**Dependencies:** Catalog, Runtime, Operations, guarded executor, and Discovery component definitions.
+
+**Current status:** **Partially implemented.** The bounded executor foundation exists. Runtime adapters and Operations are absent.
+
+**Planned command shape:**
+
+~~~sh
+devhub project start shop
+devhub project status shop
+devhub project logs shop
+devhub project stop shop
+~~~
+
+### US-05: Pair with a local control panel and inspect project logs
+
+**Actor and need:** As a local developer, I want to pair a browser with my DevHub process and view project status and logs, so I can inspect work without exposing a remote service.
+
+**Scope:** Explicit CLI pairing, authenticated API requests, project-scoped logs, and the control-panel views.
+
+**Acceptance criteria:**
+
+- The controller binds only to **127.0.0.1**, on port **8040** by default. Starting the server does not silently create a pairing code.
+- **devhub pair** explicitly creates a one-time code with at least 128 bits of entropy, a maximum five-minute lifetime, and single use.
+- Pairing is the only unauthenticated API route. Sessions use an HttpOnly, SameSite=Strict cookie; tokens are not stored in browser local storage.
+- Requests require exact loopback Host and Origin checks. A development frontend origin is trusted only when explicitly supplied with **--dev-origin**.
+- Logs are bounded and project-scoped. Selecting another project changes the log stream; it cannot reveal the previous project's logs.
+- Failed authentication, expired sessions, and API errors are visible. The panel never reports a successful operation unless the backend reports it.
+
+**Verification method:** API tests exercise pairing replay/expiry, origins, sessions, project scope, and bounded log streams through in-process requests. Check UI TypeScript and source wiring without starting a server or running frontend tests.
+
+**Dependencies:** API, Catalog, Operations, CLI pairing, and control-panel integration.
+
+**Current status:** **Partially implemented.** Presentational views, including project, pairing, and log components, exist. The API and client integration are absent, so the panel is not yet operational.
+
+**Planned command shape:**
+
+~~~sh
+devhub pair
+devhub serve
+devhub serve --dev-origin http://127.0.0.1:5175
+~~~
+
+### US-06: Inspect containers and scan local images
+
+**Actor and need:** As a developer reviewing a local stack, I want a read-only inventory and explicit image scans, so I can see what is running and what the scanner found without DevHub adopting unrelated containers.
+
+**Scope:** Current local Docker inventory, explicit scans of locally available image IDs, findings, fixability, and scanner database freshness.
+
+**Acceptance criteria:**
+
+- Inventory uses the verified current local Docker context and exposes only the approved metadata subset.
+- Containers without an explicit project mapping remain observed-only. Inventory never grants permission to start, stop, or modify them.
+- A scan runs only after an explicit request for an existing local image. DevHub does not install a scanner, log into a registry, or upload images to a cloud service.
+- Results identify the exact image ID, scanner, scan time, findings, available fixed versions, and vulnerability database freshness. Unknown freshness and scanner failures are reported as such.
+- A successful scan is not treated as proof that a vulnerability was fixed.
+
+**Verification method:** Runtime and maintenance tests inject inventory and scanner results. Cover unmapped containers, missing images, scanner failure, unknown database freshness, and findings with no fix. No live Docker or scanner call is part of a test.
+
+**Dependencies:** Runtime inventory, Maintenance scanner adapter, API, and panel integration.
+
+**Current status:** **Partially implemented.** Inventory and scan views can display typed data, but the inventory and scanner services and API are absent.
+
+### US-07: Review and validate a replacement image reference
+
+**Actor and need:** As a developer maintaining an application image, I want to enter a candidate image reference, review the exact source change, and validate the exact candidate before activation, so an image update is deliberate and evidence-backed.
+
+**Scope:** A checked image-reference input, narrowly supported Dockerfile or Compose source edits, isolated candidate validation, and a separate activation step.
+
+**Acceptance criteria:**
+
+- The operator can type a replacement image reference. DevHub validates the supported reference syntax before changing a file and rejects flags, newlines, unresolved variables, and malformed or unsupported references.
+- A source mapping must already associate the selected component with the target file and image. Preview changes one Dockerfile **FROM** operand or one Compose **image** scalar and shows only the changed operand.
+- Apply rechecks the source hash and scoped Git tree, then creates a dedicated local branch. It does not push.
+- Validation builds and checks a separate candidate without network access, host mounts, project secrets, shared services, or shared data volumes. It records the exact candidate image ID and scan result.
+- Activation is a separate explicit action. It requires successful, current validation evidence, rechecks source/runtime/volume identity, and selects the exact validated candidate.
+- Unsupported validation, changed source, stale evidence, a major database version change, or missing checks blocks activation. DevHub performs no schema migration and makes no data rollback claim.
+
+**Verification method:** Maintenance tests use temporary repositories plus injected scanner and executor fixtures. Cover successful preview/apply/validate/activate and stale source, invalid reference, missing fix, failed checks, and candidate identity mismatch. Do not build or activate a live application image.
+
+**Dependencies:** Catalog source mapping, Runtime snapshots, Maintenance, Git safety helper, API, and panel integration.
+
+**Current status:** **Partially implemented.** The panel can display existing scan and change DTOs as read-only data. Maintenance and its checked image-reference input are absent.
+
+### US-08: Adopt shared services one project at a time
+
+**Actor and need:** As an application maintainer, I want to connect one project at a time to DevHub's shared services, so I can simplify project Compose files without unexpectedly moving or deleting application data.
+
+**Scope:** Explicit application configuration changes that point to an already provisioned shared service. This workflow does not transfer databases or rewrite schemas.
+
+**Acceptance criteria:**
+
+- The operator selects the project and each shared dependency to adopt. DevHub shows the target service and connection method before the project configuration is changed.
+- Containers use the existing external **dev-shared-net** and stable service identities such as **infra-postgres**, **infra-mysql**, **infra-redis**, **infra-meilisearch**, **infra-mailpit**, and **infra-rabbitmq**. Native host processes use the configured loopback port.
+- The project's Compose project name, application container names, and application-owned named volumes are preserved.
+- Adoption does not copy database contents, run migrations, delete project services, remove volumes, or change shared service identities. If required data is not already present in the selected shared service, the application stays on its current service until a separate data-migration decision is made.
+- A project is considered adopted only after its configured application check confirms the intended connection. Other projects remain unchanged.
+
+**Verification method:** Use inert project fixtures and a mocked connection check to verify the proposed network and connection mapping. Confirm the shared Compose identity contract remains unchanged. A later adoption requires the project owner to confirm application health explicitly. This verification does not touch live projects or shared services, and performs no data copy, migration, volume removal, or automatic project switch.
+
+**Dependencies:** Existing shared infrastructure, project approval and discovery, safe preview/apply, and a user-provided connection configuration.
+
+**Current status:** **Partially implemented.** Shared services, the external network, **devhub db create**, and the network helper exist. There is no manager workflow for staged application adoption, and no data transfer is included in this scope.
