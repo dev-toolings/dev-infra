@@ -19,7 +19,7 @@ if not bun:
 
 with tempfile.TemporaryDirectory(prefix="devhub-backend-") as directory:
     root = Path(directory)
-    for name in ("home", "state", "runtime", "bin"):
+    for name in ("home", "state", "runtime", "config", "bin"):
         (root / name).mkdir(mode=0o700)
     log = root / "unexpected-tools"
     for tool in ("docker", "docker-compose", "systemctl", "journalctl", *(("git",) if args.deny_git else ())):
@@ -29,10 +29,13 @@ with tempfile.TemporaryDirectory(prefix="devhub-backend-") as directory:
                         "exit 97\n")
         shim.chmod(0o700)
     environment = dict(os.environ, HOME=str(root / "home"),
+                       XDG_CONFIG_HOME=str(root / "config"),
                        XDG_STATE_HOME=str(root / "state"),
                        XDG_RUNTIME_DIR=str(root / "runtime"),
                        PATH=f"{root / 'bin'}:{os.environ.get('PATH', '')}")
-    result = subprocess.run([bun, "test", args.test_path], cwd=args.repo.resolve(), env=environment)
+    environment = {key: value for key, value in environment.items()
+                   if key != "DBUS_SESSION_BUS_ADDRESS" and not key.startswith("DOCKER_")}
+    result = subprocess.run([bun, "--no-env-file", "test", args.test_path], cwd=args.repo.resolve(), env=environment)
     unexpected = log.read_text() if log.exists() else ""
     if unexpected:
         print("FAIL: backend tests attempted live tool calls:", unexpected, flush=True)
