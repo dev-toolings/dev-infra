@@ -185,3 +185,10 @@ test("preview edits a named Dockerfile stage and keeps its AS suffix", async () 
   expect(change.proposed).toBe("FROM alpine:3.21 AS builder\nRUN true\nFROM busybox:1.36\n");
   expect(publicChange(change).changedLine).toMatchObject({ line: 1, before: "alpine:3.20", after: "alpine:3.21" });
 });
+
+test("preview selects a dotted Dockerfile stage name", async () => {
+  const f = fixture();
+  writeFileSync(join(f.root, "Dockerfile"), "FROM alpine:3.20 AS build.prod\nFROM busybox:1.36\n");
+  const change = await f.maintenance.preview({ projectId: "fixture", componentId: "app", file: "Dockerfile", service: "app", stage: "build.prod", replacement: "alpine:3.21" });
+  expect(change.proposed).toBe("FROM alpine:3.21 AS build.prod\nFROM busybox:1.36\n");
+});

@@ -258,7 +258,7 @@ export class Maintenance implements MaintenancePort {
         const matching = source.content.split(/\r?\n/).filter((line) => {
           if (!/^\s*FROM\s/i.test(line)) return false;
           if (!selectedStage) return true;
-          return new RegExp("\\sAS\\s+([A-Za-z0-9_-]+)(?:\\s|$)", "i").exec(line)?.[1]?.toLowerCase() === selectedStage.toLowerCase();
+          return new RegExp("\\sAS\\s+([A-Za-z0-9_.-]+)(?:\\s|$)", "i").exec(line)?.[1]?.toLowerCase() === selectedStage.toLowerCase();
         });
         if (matching.length !== 1) throw fail("Dockerfile stage must identify exactly one FROM instruction", "unsupported_patch", 409);
         currentRef = findReference(matching[0]!);
@@ -276,7 +276,7 @@ export class Maintenance implements MaintenancePort {
         const imageLine = source.content.slice(0, node.range[0]).split(/\r?\n/).length - 1;
         proposed = replaceReference(source.content, currentRef, input.replacement, imageLine);
       } else {
-        const lines = source.content.split(/\r?\n/); const selected = lines.filter((line) => /^\s*FROM\s/i.test(line) && findReference(line) === currentRef && (!selectedStage || new RegExp("\\sAS\\s+([A-Za-z0-9_-]+)(?:\\s|$)", "i").exec(line)?.[1]?.toLowerCase() === selectedStage.toLowerCase()));
+        const lines = source.content.split(/\r?\n/); const selected = lines.filter((line) => /^\s*FROM\s/i.test(line) && findReference(line) === currentRef && (!selectedStage || new RegExp("\\sAS\\s+([A-Za-z0-9_.-]+)(?:\\s|$)", "i").exec(line)?.[1]?.toLowerCase() === selectedStage.toLowerCase()));
         if (selected.length !== 1) throw fail("Dockerfile FROM operand must be uniquely editable", "unsupported_patch", 409);
         proposed = replaceReference(source.content, currentRef, input.replacement, lines.indexOf(selected[0]!));
       }

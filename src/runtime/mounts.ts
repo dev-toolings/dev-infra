@@ -27,7 +27,9 @@ export function sharedVolumeName(name: string): boolean {
   return /^(?:dev-infra|devhub|devhub-infra)_/.test(name) || /^infra_[a-z0-9]+_data$/.test(name) || /_infra_[a-z0-9]+_data$/.test(name);
 }
 export function protectedHostPaths(stateDir: string): string[] {
-  return ["/var/run/docker.sock", "/run/docker.sock", resolve(import.meta.dir, "../.."), stateDir, process.env.DEVHUB_DIR, join(resolve(process.env.HOME || homedir()), ".local/share/devhub")]
+  // Docker storage roots back every named volume, including the shared infra volumes, so they are protected as a whole.
+  const home = resolve(process.env.HOME || homedir());
+  return ["/var/run/docker.sock", "/run/docker.sock", "/var/lib/docker", "/var/lib/containerd", join(home, ".local/share/docker"), resolve(import.meta.dir, "../.."), stateDir, process.env.DEVHUB_DIR, join(resolve(process.env.HOME || homedir()), ".local/share/devhub")]
     .filter((x): x is string => !!x).flatMap((p) => [...new Set([resolve(p), canonicalHostPath(p)])]);
 }
 /**
