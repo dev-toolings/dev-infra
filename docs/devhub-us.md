@@ -85,10 +85,10 @@ devhub project list
 
 - Supported preset IDs are **symfony-docker**, **laravel-docker**, **node-docker**, **compose-existing**, **native**, and **custom**.
 - Interactive setup and **project add --path ... --name ... --preset ... --apply** use the same discovery preview and apply path.
-- Preview lists every file, component, command, Compose identity, warning, and detected port that would change. No file is written before explicit apply.
+- Preview lists planned files, components, Compose identity, warnings, and detected ports. Exact configured commands remain in the local CLI preview; browser DTOs omit execution arguments and environment contents. No file is written before explicit apply.
 - Apply creates only files that do not already exist. It never overwrites project files. A partial apply failure removes only files created by that apply and does not register an incomplete project.
 - Existing .env content is preserved. Within a project .env, only **COMPOSE_PROJECT_NAME** and **COMPOSE_PROFILES** are accepted as Compose controls; other **COMPOSE_*** settings are rejected without rewriting the file.
-- Existing Compose identity is preserved unless the operator explicitly supplies a supported replacement during preview.
+- Existing Compose identity is preserved. An explicit project name resolves ambiguity by selecting the existing identity; renaming a running stack is outside this workflow.
 
 **Verification method:** Discovery and CLI tests compare preview output with fixture files, prove apply is exclusive, and verify existing bytes are unchanged on refusal or failure.
 
@@ -116,7 +116,7 @@ devhub project show api
 - Start orders selected components by their declared dependencies. Stop orders them in reverse. Operations never stop shared infrastructure or unregistered resources.
 - If startup partially fails, DevHub records failure and leaves components already started running for diagnosis. It does not roll them back automatically.
 - Status distinguishes process state from readiness and reports unknown or failed checks honestly.
-- Project .env accepts only the approved **COMPOSE_PROJECT_NAME** and **COMPOSE_PROFILES** controls. The project keeps its existing Compose identity unless explicitly changed during setup.
+- Project .env accepts only the approved **COMPOSE_PROJECT_NAME** and **COMPOSE_PROFILES** controls. The project keeps its existing Compose identity.
 - No project operation runs a database schema migration or claims to roll one back.
 
 **Verification method:** Runtime and Operations tests use an injected executor and temporary project fixtures. Cover dependency order, local-context refusal, readiness, native unit ownership, bounded logs, and partial-start failure that leaves prior components running. Do not start live project services as a test.
@@ -194,7 +194,7 @@ devhub serve --dev-origin http://127.0.0.1:5175
 - The operator can type a replacement image reference. DevHub validates the supported reference syntax before changing a file and rejects flags, newlines, unresolved variables, and malformed or unsupported references.
 - A source mapping must already associate the selected component with the target file and image. Preview changes one Dockerfile **FROM** operand or one Compose **image** scalar and shows only the changed operand.
 - Apply rechecks the source hash and scoped Git tree, then creates a dedicated local branch. It does not push.
-- Validation builds and checks a separate candidate without network access, host mounts, project secrets, shared services, or shared data volumes. It records the exact candidate image ID and scan result.
+- Validation prepares a separate candidate. Application checks run without network access, host mounts, project secrets, shared services, or shared data volumes. It records the exact candidate image ID and scan result.
 - Activation is a separate explicit action. It requires successful, current validation evidence, rechecks source/runtime/volume identity, and selects the exact validated candidate.
 - Unsupported validation, changed source, stale evidence, a major database version change, or missing checks blocks activation. DevHub performs no schema migration and makes no data rollback claim.
 
@@ -208,7 +208,7 @@ devhub serve --dev-origin http://127.0.0.1:5175
 
 **Actor and need:** As an application maintainer, I want to connect one project at a time to DevHub's shared services, so I can simplify project Compose files without unexpectedly moving or deleting application data.
 
-**Scope:** Explicit application configuration changes that point to an already provisioned shared service. This workflow does not transfer databases or rewrite schemas.
+**Scope:** Follow-up work in each explicitly selected application repository. This DevHub delivery provides adoption guidance and the existing networking helper; automated rewrites of external repositories are not part of this delivery. Adoption does not transfer databases or rewrite schemas.
 
 **Acceptance criteria:**
 
