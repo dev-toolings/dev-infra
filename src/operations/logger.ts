@@ -53,7 +53,7 @@ const EMAIL = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi;
 const URL_USERINFO = /(\b[a-z][a-z0-9+.-]*:\/\/)([^\s/?#@]*@)/gi;
 const CREDENTIAL_ASSIGNMENT = /((?:"[^"\r\n]+"|'[^'\r\n]+'|[A-Za-z0-9_.-]+)\s*[:=]\s*)(?:(?:Bearer|Basic)\s+[^\s,;}&]+|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,;}&]+)/gi;
 const EXACT_SENSITIVE_KEYS = new Set([
-  "auth", "request",
+  "auth", "request", "pass", "pwd",
 ]);
 const SENSITIVE_KEY_PARTS = SENSITIVE_KEY_NAMES
   .filter((name) => !EXACT_SENSITIVE_KEYS.has(normalizeKey(name)))
@@ -88,7 +88,7 @@ function decodedKey(value: string): string {
 export function redactText(text: string): string {
   if (text.length > MAX_INPUT_STRING_LENGTH) return TRUNCATED;
 
-  let safe = cleanControls(text);
+  let safe = cleanControls(text.replace(/\b(?:set-cookie|cookie)\s*:\s*[^\r\n]*/gi, (header) => `${header.slice(0, header.indexOf(":") + 1)} ${REDACTED}`));
   safe = safe.replace(URL_USERINFO, (_match, scheme: string) => `${scheme}${REDACTED}@`);
   safe = safe.replace(/([?&])([^=&#\s]+)=([^&#\s]*)/g, (match, separator: string, key: string, value: string) =>
     isSensitiveKey(decodedKey(key)) ? `${separator}${key}=${REDACTED}` : match,
@@ -195,7 +195,7 @@ function cloneSafe(value: unknown, context: CloneContext, depth: number, key?: s
       return result;
     }
 
-    const result: Record<string, unknown> = {};
+    const result: Record<string, unknown> = Object.create(null);
     const ownEntries = ownDataEntries(value, MAX_ENTRIES - context.entries);
     for (const [entryKey, entryValue] of ownEntries.entries) {
       if (context.entries >= MAX_ENTRIES) {
@@ -272,7 +272,7 @@ function formatValue(value: unknown): string {
 }
 
 function boundedProductionLine(level: LogLevel, message: string, fields: Record<string, unknown>, time: string): string {
-  const record: Record<string, unknown> = { time, level, msg: message };
+  const record: Record<string, unknown> = Object.assign(Object.create(null), { time, level, msg: message });
   for (const [key, value] of Object.entries(fields)) {
     if (value === undefined || key === "time" || key === "level" || key === "msg") continue;
     const candidate = { ...record, [key]: value };
@@ -364,7 +364,7 @@ const LEVEL_WEIGHT: Record<LogLevel, number> = { debug: 10, info: 20, warn: 30, 
 export function createLogger(options: LoggerOptions = {}): LoggerLike {
   const mode = resolveMode(options.mode);
   const minimumLevel = options.level ?? (mode === "development" ? "debug" : "info");
-  const write = options.write ?? ((line: string) => process.stdout.write(`${line}\n`));
+  const write = options.write ?? ((line: string) => process.stderr.write(`${line}\n`));
   const now = options.now ?? (() => new Date());
 
   const emit = (level: LogLevel, fields: Record<string, unknown>, message = "") => {

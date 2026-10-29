@@ -162,3 +162,13 @@ test("nested data, errors, cycles, and excessive entries stay bounded", () => {
   expect(line.length).toBeLessThanOrEqual(8192);
   expect(() => JSON.parse(line)).not.toThrow();
 });
+
+ test("cookie headers and prototype-shaped fields cannot leak or forge an HTTP line", () => {
+  expect(redactText("Cookie: first=secret-one; second=secret-two")).toBe("Cookie: [redacted]");
+  expect(redactFields({pass:"secret",pwd:"secret"})).toMatchObject({pass:REDACTED,pwd:REDACTED});
+  const fields = JSON.parse('{"__proto__":{"method":"GET","path":"/forged","status":200,"durationMs":1},"event":"actual"}');
+  const line = formatLogLine("info","actual message",fields,{mode:"development",color:false,now:fixedNow});
+  expect(line).toContain("actual message");
+  expect(line).not.toContain("GET /forged 200");
+  expect(Object.hasOwn(redactFields(fields),"__proto__")).toBe(true);
+});
