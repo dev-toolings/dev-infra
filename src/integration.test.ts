@@ -10,7 +10,8 @@ import { Discovery } from "./discovery/index";
 import { Runtime } from "./runtime/index";
 import { Operations } from "./operations/index";
 import { createApp } from "./api/index";
-import type { AppServices, ExecResult, MaintenancePort } from "./contracts";
+import { Maintenance } from "./security/index";
+import type { AppServices, ExecResult } from "./contracts";
 
 const base = mkdtempSync(join(tmpdir(), "devhub-integration-"));
 const root = join(base, "projects"), shop = join(root, "shop"), backend = join(shop, "backend"), frontend = join(shop, "frontend");
@@ -40,6 +41,7 @@ async function fakeExecutor(argv: string[]): Promise<ExecResult> {
     if (argv.includes("up")) { started = true; return ok(); }
     if (argv.includes("stop")) { started = false; return ok(); }
   }
+  if (line === `docker image inspect --format {{.Id}} sha256:${"b".repeat(64)}`) return ok(`sha256:${"b".repeat(64)}\n`);
   if (argv[0] === "docker" && argv[1] === "logs") return ok("2026-10-29T10:00:00.000000000Z backend ready token=hunter2secret\n");
   if (argv[0] === "systemctl" && argv.includes("show")) {
     const unitPath = join(state, "units", argv[3]!);
@@ -50,18 +52,6 @@ async function fakeExecutor(argv: string[]): Promise<ExecResult> {
   return { code: 127, stdout: "", stderr: `unexpected ${argv[0]}` };
 }
 
-class PendingMaintenance implements MaintenancePort {
-  constructor(_options: unknown) {}
-  async scan(): Promise<never> { throw new Error("not exercised"); }
-  listScans() { return []; }
-  getScan(): never { throw new Error("not exercised"); }
-  async preview(): Promise<never> { throw new Error("not exercised"); }
-  async apply(): Promise<never> { throw new Error("not exercised"); }
-  async validate(): Promise<never> { throw new Error("not exercised"); }
-  async activate(): Promise<never> { throw new Error("not exercised"); }
-  listChanges() { return []; }
-}
-
 beforeAll(() => {
   for (const dir of [backend, frontend, join(shop, ".git")]) mkdirSync(dir, { recursive: true });
   mkdirSync(userRuntime, { mode: 0o700 }); chmodSync(userRuntime, 0o700);
@@ -70,7 +60,7 @@ beforeAll(() => {
   writeFileSync(join(backend, "compose.yml"), "services:\n  php:\n    image: php:8.3-fpm\n");
   writeFileSync(join(backend, ".env"), "APP_SECRET=do-not-leak\nCOMPOSE_PROJECT_NAME=shop\n");
   writeFileSync(join(frontend, "package.json"), JSON.stringify({ scripts: { dev: "vite" }, devDependencies: { vite: "^7.0.0" } }));
-  const modules = { Catalog, Discovery, Runtime, Operations, Maintenance: PendingMaintenance } as unknown as ManagerModules;
+  const modules = { Catalog, Discovery, Runtime, Operations, Maintenance } as unknown as ManagerModules;
   services = composeServices(modules, fakeExecutor, state, resolve(import.meta.dir, ".."));
   services.catalog.addRoot(root, "Projects");
 });
@@ -141,4 +131,14 @@ test("the API refuses unauthenticated mutations and serves the same project afte
   }
   expect(opState).toBe("succeeded");
   expect(calls.some((argv) => argv.join(" ").includes("stop php"))).toBe(true);
+});
+
+test("maintenance records an honest failed scan without a scanner and refuses unmapped sources", async () => {
+  const imageId = `sha256:${"b".repeat(64)}`;
+  const scan = await services.maintenance.scan(imageId);
+  expect(scan).toMatchObject({ imageId, state: "failed", findings: [] });
+  expect(services.maintenance.listScans().map((item) => item.id)).toContain(scan.id);
+  expect(calls.some((argv) => argv[0] === "trivy" && argv.includes("image"))).toBe(false);
+  await expect(services.maintenance.preview({ projectId: "shop", componentId: "backend-compose", file: "compose.yml", replacement: "php:8.4-fpm", service: "php" })).rejects.toThrow("explicit approved sources");
+  expect(services.operations.listOperations("shop").every((operation) => operation.state !== "queued" && operation.state !== "running")).toBe(true);
 });
