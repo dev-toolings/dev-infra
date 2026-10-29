@@ -1,6 +1,7 @@
 import type { CSSProperties, ReactNode } from "react";
 import { Box, ChevronsUpDown, FolderKanban, LogOut, Logs, Monitor, Moon, Palette, ShieldCheck, Sun } from "lucide-react";
 import { cn } from "../../lib/utils";
+import { routePath } from "../../lib/router";
 import { LogoMark } from "../brand/logo";
 import { useTheme, type Theme } from "../theme";
 import { Button } from "../ui/button";
@@ -158,14 +159,22 @@ export function AppShell({ activeView, onNavigate, onLogout, children, title, de
               {navigation.map(({ id, label, icon: Icon }) => (
                 <SidebarMenuItem key={id}>
                   <SidebarMenuButton
-                    type="button"
+                    asChild
                     isActive={id === activeView}
                     aria-current={id === activeView ? "page" : undefined}
                     tooltip={label}
-                    onClick={() => onNavigate(id)}
                   >
-                    <Icon aria-hidden="true" />
-                    <span>{label}</span>
+                    <a
+                      href={routePath({ view: id })}
+                      onClick={(event) => {
+                        if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+                        event.preventDefault();
+                        onNavigate(id);
+                      }}
+                    >
+                      <Icon aria-hidden="true" />
+                      <span>{label}</span>
+                    </a>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               ))}

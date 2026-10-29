@@ -6,6 +6,7 @@ import { useLifetime } from "./lib/use-lifetime";
 import { useLogStream } from "./lib/use-log-stream";
 import { useMaintenance } from "./lib/use-maintenance";
 import { useResource } from "./lib/use-resource";
+import { useRoute } from "./lib/router";
 import { ActionBanner } from "./components/action-banner";
 import { ProjectPicker } from "./components/project-picker";
 import { EmptyState } from "./components/ui/state";
@@ -43,15 +44,25 @@ export interface WorkspaceProps {
  */
 export function Workspace({ onLogout }: WorkspaceProps) {
   const lifetime = useLifetime();
-  const [view, setView] = React.useState<AppView>("projects");
-  const [chosenProjectId, setChosenProjectId] = React.useState<string>();
+  const { route, navigate } = useRoute();
+  const view = route.view;
   const [logFilter, setLogFilter] = React.useState<{ projectId: string; componentId: string }>();
   const [paused, setPaused] = React.useState(false);
 
   const projects = useResource(listProjects, "projects");
   const projectList = projects.data ?? [];
-  const selected = projectList.find((project) => project.id === chosenProjectId) ?? projectList[0];
+  const selected = projectList.find((project) => project.id === route.projectId) ?? projectList[0];
   const selectedId = selected?.id;
+
+  React.useEffect(() => {
+    document.title = `${viewCopy[view].title} | DevHub`;
+  }, [view]);
+
+  React.useEffect(() => {
+    if (projects.data && route.projectId && !projectList.some((project) => project.id === route.projectId)) {
+      navigate({ view }, { replace: true });
+    }
+  }, [navigate, projectList, projects.data, route.projectId, view]);
 
   const status = useResource(
     (signal) => getProjectStatus(selectedId ?? "", signal),
@@ -69,26 +80,28 @@ export function Workspace({ onLogout }: WorkspaceProps) {
   const addProject = useAddProject(lifetime, (project) => {
     projects.update((current) => [...(current ?? []).filter((item) => item.id !== project.id), project]);
     projects.reload();
-    setChosenProjectId(project.id);
-    setView("projects");
+    navigate({ view: "projects", projectId: project.id });
   });
 
   const componentFilter = logFilter && logFilter.projectId === selectedId ? logFilter.componentId : undefined;
   const lifecycleError = lifecycle.error && lifecycle.error.projectId === selectedId ? lifecycle.error.message : undefined;
 
   function openProject(projectId: string) {
-    setChosenProjectId(projectId);
-    setView("projects");
+    navigate({ view: "projects", projectId });
+  }
+
+  function selectProject(projectId: string) {
+    navigate({ view, projectId });
   }
 
   const picker = projectList.length > 1 ? (
-    <ProjectPicker projects={projectList} selectedProjectId={selectedId} onSelect={setChosenProjectId} />
+    <ProjectPicker projects={projectList} selectedProjectId={selectedId} onSelect={selectProject} />
   ) : null;
 
   return (
     <AppShell
       activeView={view}
-      onNavigate={setView}
+      onNavigate={(nextView) => navigate({ view: nextView, projectId: nextView === "projects" || nextView === "logs" ? selectedId : undefined })}
       title={viewCopy[view].title}
       description={viewCopy[view].description}
       onLogout={onLogout}
@@ -101,7 +114,7 @@ export function Workspace({ onLogout }: WorkspaceProps) {
             loading={projects.loading}
             error={projects.error && projectList.length === 0 ? projects.error : undefined}
             compact
-            onSelect={setChosenProjectId}
+            onSelect={selectProject}
             onAddProject={addProject.requestOpen}
           />
           {selected ? (
@@ -159,7 +172,7 @@ export function Workspace({ onLogout }: WorkspaceProps) {
         <div className="min-w-0 space-y-4">
           {maintenance.error ? <ActionBanner title="Maintenance action failed" message={maintenance.error} onDismiss={maintenance.dismissError} /> : null}
           {containers.error ? <ActionBanner title="Container inventory unavailable" message={containers.error} /> : null}
-          <Tabs defaultValue="scans">
+          <Tabs value={route.tab ?? "scans"} onValueChange={(tab) => navigate({ view: "maintenance", tab: tab as "scans" | "remediation" })}>
             <TabsList aria-label="Maintenance sections">
               <TabsTrigger value="scans">Image scans</TabsTrigger>
               <TabsTrigger value="remediation">Source remediation</TabsTrigger>

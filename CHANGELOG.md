@@ -31,6 +31,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   itself, reuses one already answering on the dev origin, and stops it with the
   controller. The Vite proxy follows `--port` through `DEVHUB_API_PORT` instead of
   always targeting 8040.
+- Control panel pages have their own URLs (`/projects/:id`, `/containers`,
+  `/logs/:id`, `/maintenance`, `/maintenance/remediation`) with working reload,
+  new tab and back/forward. Containers and image scans are now filterable
+  inventories: stat tiles that filter, search, one table, and a detail sheet for
+  IDs, ports and findings. The image selector that listed every image with all
+  its containers is replaced by a per-image Scan action. Stopped containers no
+  longer count as unhealthy from their last health result.
 - `devhub up` / `devhub restart` now start the `async` profile (RabbitMQ) by
   default alongside `core`. Projects relying on AMQP no longer crash-loop after
   a plain `devhub up`. `make up-async` remains an alias of `make up`.

@@ -103,33 +103,48 @@ export function ProjectDetailSkeleton() {
   );
 }
 
-export function ContainersSkeleton({ count = 4 }: { count?: number }) {
+/** Stat tiles, toolbar and table rows: the inventory layout shared by Containers and image scans. */
+function InventorySkeleton({ label, columns, rows = 8 }: { label: string; columns: string[]; rows?: number }) {
   return (
-    <Busy label="Loading container inventory" className="grid grid-cols-1 gap-3 xl:grid-cols-2">
-      <Repeat count={count}>
-        {(index) => (
-          <Card key={index}>
-            <CardHeader className="flex flex-row items-start gap-3">
-              <Skeleton className="size-9 shrink-0" />
-              <div className="flex-1 space-y-2">
-                <Skeleton className="h-3.5 w-36" />
-                <Skeleton className="h-3 w-56" />
+    <Busy label={label} className="space-y-4">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <Repeat count={4}>
+          {(index) => (
+            <div key={index} className="space-y-2.5 rounded-xl border bg-card p-3.5 shadow-xs">
+              <Skeleton className="h-3 w-20" />
+              <Skeleton className="h-6 w-10" />
+              <Skeleton className="h-3 w-28" />
+            </div>
+          )}
+        </Repeat>
+      </div>
+      <div className="flex items-center gap-2">
+        <Skeleton className="h-7 w-64" />
+        <Skeleton className="h-7 w-44" />
+        <Skeleton className="ml-auto h-3 w-24" />
+      </div>
+      <div className="overflow-hidden rounded-xl border bg-card shadow-xs">
+        <div className="flex h-9 items-center gap-6 border-b bg-muted/40 px-3">
+          {columns.map((width, index) => <Skeleton key={index} className={cn("h-2.5", width)} />)}
+        </div>
+        <Repeat count={rows}>
+          {(index) => (
+            <div key={index} className="flex items-center gap-6 border-b px-3 py-2.5 last:border-b-0">
+              <div className="min-w-0 flex-1 space-y-1.5">
+                <Skeleton className={cn("h-3.5", projectNameWidths[index % projectNameWidths.length])} />
+                <Skeleton className="h-3 w-56 max-w-full" />
               </div>
-              <Skeleton className="h-5.5 w-24" />
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <FieldGrid count={5} />
-              <div className="space-y-2 rounded-md bg-muted/60 p-3">
-                <Skeleton className="h-3 w-11/12" />
-                <Skeleton className="h-3 w-10/12" />
-                <Skeleton className="h-3 w-40" />
-              </div>
-            </CardContent>
-          </Card>
-        )}
-      </Repeat>
+              {columns.slice(1).map((width, column) => <Skeleton key={column} className={cn("hidden h-5 sm:block", width)} />)}
+            </div>
+          )}
+        </Repeat>
+      </div>
     </Busy>
   );
+}
+
+export function ContainersSkeleton() {
+  return <InventorySkeleton label="Loading container inventory" columns={["w-20", "w-24", "w-16", "w-12", "w-14", "w-28"]} />;
 }
 
 const logMessageWidths = ["w-3/4", "w-1/2", "w-5/6", "w-2/3", "w-2/5", "w-4/5"];
@@ -153,32 +168,8 @@ export function LogsSkeleton({ lines = 8 }: { lines?: number }) {
   );
 }
 
-export function ScansSkeleton({ count = 2 }: { count?: number }) {
-  return (
-    <Busy label="Loading scan and change records" className="space-y-3">
-      <Skeleton className="h-3.5 w-24" />
-      <Repeat count={count}>
-        {(index) => (
-          <Card key={index}>
-            <CardHeader className="flex flex-row items-start justify-between gap-3">
-              <div className="space-y-2">
-                <Skeleton className="h-3.5 w-24" />
-                <Skeleton className="h-3 w-72 max-w-full" />
-              </div>
-              <Skeleton className="h-5.5 w-20" />
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <FieldGrid count={3} className="rounded-md bg-muted/60 p-3 sm:grid-cols-3" />
-              <div className="space-y-2">
-                <Skeleton className="h-3 w-2/3" />
-                <Skeleton className="h-3 w-1/2" />
-              </div>
-            </CardContent>
-          </Card>
-        )}
-      </Repeat>
-    </Busy>
-  );
+export function ScansSkeleton() {
+  return <InventorySkeleton label="Loading images and scans" columns={["w-20", "w-28", "w-24", "w-20", "w-16"]} rows={6} />;
 }
 
 /** Stand-in for the whole shell while the session is checked, matching the floating sidebar. */

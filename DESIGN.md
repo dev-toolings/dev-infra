@@ -75,7 +75,18 @@ surfaces, dense information, and color reserved for state. Nothing decorative.
 - Cards: `rounded-xl`, hairline border, `shadow-xs`. `CardHeader` is a grid: add
   `flex flex-row` for a header that puts actions on the same line.
 - Session menu (sidebar footer): theme switch (light, dark, system) and Log out.
+- Inventories (Containers, image scans): `StatTile` row that doubles as filters, a
+  toolbar (search, filter, result count), then one table in a card
+  (`components/views/inventory.tsx`). Rows show the name, one secondary line and the
+  state; full IDs, every port and long lists go to a right `Sheet` opened from the row.
+  Never put a long list in a `Select`: past about ten options, use a filterable table.
+- Row actions are `outline`, `size="sm"`: a page with many rows has no primary button.
+- Digest-pinned references (`name:tag@sha256:...`) show `name:tag` with a `pinned`
+  badge; the short digest (`sha256:` plus 12 characters) goes on the secondary line.
 - Theme: stored under `devhub-theme`, applied before the first render.
+- Routing (`src/lib/router.ts`): every page has a URL (`/projects/:id`, `/containers`,
+  `/logs/:id`, `/maintenance`, `/maintenance/remediation`). Navigation items are real
+  links, so a new tab and back/forward work. Unknown paths go to `/projects`.
 
 ### States
 
