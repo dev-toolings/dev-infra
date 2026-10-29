@@ -177,3 +177,11 @@ test("Compose image replacement is validated before exact candidate activation",
   expect(f.calls.some((argv) => argv[0] === "docker" && argv[1] === "build")).toBe(false);
   expect((await f.maintenance.activate(change.id)).state).toBe("activated");
 });
+
+test("preview edits a named Dockerfile stage and keeps its AS suffix", async () => {
+  const f = fixture();
+  writeFileSync(join(f.root, "Dockerfile"), "FROM alpine:3.20 AS builder\nRUN true\nFROM busybox:1.36\n");
+  const change = await f.maintenance.preview({ projectId: "fixture", componentId: "app", file: "Dockerfile", service: "app", stage: "builder", replacement: "alpine:3.21" });
+  expect(change.proposed).toBe("FROM alpine:3.21 AS builder\nRUN true\nFROM busybox:1.36\n");
+  expect(publicChange(change).changedLine).toMatchObject({ line: 1, before: "alpine:3.20", after: "alpine:3.21" });
+});

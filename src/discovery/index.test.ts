@@ -178,3 +178,12 @@ test("expired setup plans are reclaimed so previews never exhaust plan storage",
   const remaining = catalog.listRecords<{ plan: { id: string } }>("discovery-plans").map((item) => item.plan.id);
   expect(remaining.sort()).toEqual(["old-0", plan.id].sort());
 });
+
+test("an expired setup plan cannot be applied", async () => {
+  const root = fixture(); const path = viteFixture(root); const catalog = new MemoryCatalog(); catalog.addRoot(root);
+  const discovery = new Discovery({ catalog, run: async () => response("") });
+  const plan = await discovery.preview({ path, name: "Shop", preset: "native" });
+  catalog.updateRecord<{ plan: { createdAt: string } }>("discovery-plans", plan.id, (current) => ({ ...current!, plan: { ...current!.plan, createdAt: new Date(Date.now() - 2 * 60 * 60_000).toISOString() } }));
+  await expect(discovery.apply(plan.id)).rejects.toMatchObject({ code: "plan_expired" });
+  expect(catalog.listProjects()).toHaveLength(0);
+});

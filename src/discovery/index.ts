@@ -361,6 +361,7 @@ export class Discovery implements DiscoveryPort {
     if (!stored || stored.plan.id !== planId) fail("Setup plan is unknown or expired", "plan_not_found", 404);
     if (stored.state === "complete" && stored.project) return structuredClone(stored.project);
     if (stored.state !== "ready") fail("Setup plan cannot be replayed after an interrupted or failed apply; create a new preview", "plan_unavailable", 409);
+    if (!(Date.parse(stored.plan.createdAt) > Date.now() - PLAN_TTL_MS)) { this.markFailed(planId, stored); fail("Setup plan expired; create a new preview", "plan_expired", 409); }
     const owner = processOwner(); const claimToken = randomUUID();
     const claimed = this.catalog.updateRecord<StoredPlan>(PLAN_NS, planId, (current) => {
       if (!current || current.state !== "ready") return current ?? stored;

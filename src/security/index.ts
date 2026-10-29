@@ -7,6 +7,7 @@ import { DevHubError, type CatalogPort, type Change, type Component, type Contai
 import { gitRun } from "../git";
 import { redactText } from "../operations/logger";
 import { ensureStateDir } from "../state";
+import { assertSharedDataUntouched, type ComposeModel } from "../runtime/mounts";
 
 const READ = { timeoutMs: 20_000, maxOutputBytes: 8 * 1024 * 1024 } as const;
 const DOCKER = { timeoutMs: 900_000, maxOutputBytes: 8 * 1024 * 1024 } as const;
@@ -39,7 +40,7 @@ function imageParts(ref: string): { family: string; major?: number } {
 }
 function databaseImage(ref: string): boolean { return /^(?:postgres(?:ql)?|mysql|mariadb|mongo(?:db)?|redis|mssql|cassandra|oracle)(?:[-_].*)?$/.test(imageParts(ref).family); }
 function findReference(line: string): string {
-  const from = /^([ \t]*FROM[ \t]+(?:--platform=[^ \t]+[ \t]+)?)([^ \t#]+)([ \t]*(?:#.*)?)$/i.exec(line);
+  const from = /^([ \t]*FROM[ \t]+(?:--platform=[^ \t]+[ \t]+)?)([^ \t#]+)((?:[ \t]+AS[ \t]+[A-Za-z0-9_.-]+)?[ \t]*(?:#.*)?)$/i.exec(line);
   if (from) return from[2]!;
   const image = /^([ \t]*image[ \t]*:[ \t]*)(?:"([^"\r\n]+)"|'([^'\r\n]+)'|([^#\s]+))([ \t]*(?:#.*)?)$/.exec(line);
   if (image) return image[2] ?? image[3] ?? image[4]!;
@@ -52,7 +53,7 @@ function replaceReference(content: string, source: string, replacement: string, 
   if (found.length !== 1) throw fail("Source must contain exactly one supported matching image operand", "unsupported_patch", 409);
   const i = found[0]!; const line = lines[i]!;
   if (findReference(line) !== source) throw fail("Selected image operand changed", "stale_source", 409);
-  const docker = /^([ \t]*FROM[ \t]+(?:--platform=[^ \t]+[ \t]+)?)([^ \t#]+)([ \t]*(?:#.*)?)$/i;
+  const docker = /^([ \t]*FROM[ \t]+(?:--platform=[^ \t]+[ \t]+)?)([^ \t#]+)((?:[ \t]+AS[ \t]+[A-Za-z0-9_.-]+)?[ \t]*(?:#.*)?)$/i;
   const compose = /^([ \t]*image[ \t]*:[ \t]*)(?:"([^"\r\n]+)"|'([^'\r\n]+)'|([^#\s]+))([ \t]*(?:#.*)?)$/;
   const m = docker.exec(line); const c = compose.exec(line);
   let changed: string;
@@ -324,8 +325,14 @@ export class Maintenance implements MaintenancePort {
       change.branch = branch; change.state = "applied"; this.save(change); return change;
     } catch (caught) {
       if (switched) {
-        try { writeFileSync(source.path, change.original, "utf8"); await this.git(gitRoot, ["switch", currentBranch.stdout.trim()]); await this.git(gitRoot, ["branch", "-D", branch]); }
-        catch { /* Preserve the primary failure; the operation remains failed for diagnosis. */ }
+        const problems: string[] = [];
+        try { writeFileSync(source.path, change.original, "utf8"); } catch { problems.push("source bytes"); }
+        if ((await this.git(gitRoot, ["switch", currentBranch.stdout.trim()]).catch(() => ({ code: 1 }))).code !== 0) problems.push("original branch");
+        else if ((await this.git(gitRoot, ["branch", "-D", branch]).catch(() => ({ code: 1 }))).code !== 0) problems.push("maintenance branch removal");
+        const back = await this.git(gitRoot, ["rev-parse", "HEAD"]).catch(() => ({ code: 1, stdout: "" }));
+        if (back.code !== 0 || back.stdout.trim() !== head.stdout.trim()) problems.push("HEAD");
+        try { if (readFileSync(source.path, "utf8") !== change.original) problems.push("source bytes"); } catch { problems.push("source bytes"); }
+        if (problems.length) throw fail(`Apply failed and rollback is incomplete (${[...new Set(problems)].join(", ")}); inspect the Git checkout before retrying`, "rollback_incomplete", 500);
       }
       throw caught;
     }
@@ -359,6 +366,7 @@ export class Maintenance implements MaintenancePort {
     if (!preferredService && buildServices.length !== 1) throw fail("Validation requires one unambiguous selected service", "validation_unsupported", 409);
     const selected = preferredService ?? buildServices[0]!;
     for (const service of component.compose.services) if (!model.services[service]) throw fail("Selected service is absent from Compose configuration");
+    assertSharedDataUntouched(model as ComposeModel, component.compose.services, this.stateDir);
     const service = model.services[selected];
     if (service.privileged === true || service.devices || service.userns_mode === "host" || service.cgroup_parent || service.cgroup || service.volumes_from) throw fail("Selected Compose service uses unsupported privileged settings", "unsafe_compose", 403);
     for (const key of ["network_mode", "ipc", "pid"]) if (typeof service[key] === "string" && /^(?:host|container:)/.test(service[key])) throw fail("Selected Compose service shares a host or container namespace", "unsafe_compose", 403);
@@ -369,6 +377,24 @@ export class Maintenance implements MaintenancePort {
       if (!within(mountPath, root) || mountStat.isSymbolicLink() || (!mountStat.isDirectory() && !mountStat.isFile())) throw fail("Selected Compose bind mounts must stay inside the project", "unsafe_path", 403);
     }
     return { base, model, selected };
+  }
+  /** Hash .env, component env files and every selected service env_file so activation sees the validated environment. */
+  private envInputsHash(component: Component, model: Record<string, any>): string {
+    const cwd = canonical(component.cwd);
+    const files = new Set<string>([join(cwd, ".env"), ...(component.envFiles ?? []).map((file) => resolve(cwd, file))]);
+    for (const service of component.compose?.services ?? []) {
+      const entries = model.services?.[service]?.env_file;
+      for (const entry of Array.isArray(entries) ? entries : entries === undefined ? [] : [entries]) {
+        const path = typeof entry === "string" ? entry : typeof entry?.path === "string" ? entry.path : undefined;
+        if (!path || path.includes("${")) throw fail("Service env_file must be a resolved path", "validation_unsupported", 409);
+        files.add(resolve(cwd, path));
+      }
+    }
+    const parts = [...files].sort().map((path) => {
+      try { const stat = lstatSync(path); if (stat.isSymbolicLink() || !stat.isFile()) throw fail("Environment inputs must be regular files", "unsafe_environment", 403); return `${path}\0${hash(readFileSync(path, "utf8"))}`; }
+      catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return `${path}\0missing`; throw error; }
+    });
+    return hash(parts.join("\n"));
   }
   private async inspectContainers(project: Project, component: Component): Promise<{ containers: ContainerInfo[]; volumes: ValidationEvidence["volumes"] }> {
     const inventory = await this.runtime.inventory([project]);
@@ -395,7 +421,8 @@ export class Maintenance implements MaintenancePort {
       const root = canonical(project.root); let imageTag: string | undefined;
       let candidateRef: string;
       if (build) {
-        if (typeof build.context !== "string" || /\$\{|^(?:https?:|git@)/i.test(build.context) || build.args || build.secrets || build.ssh || build.additional_contexts || build.entitlements || build.network) throw fail("Compose build uses unsupported or unsafe inputs", "validation_unsupported", 409);
+        if (typeof build.context !== "string" || /\$\{|^(?:https?:|git@)/i.test(build.context) || build.args || build.secrets || build.ssh || build.additional_contexts || build.entitlements || build.network || build.platforms || build.platform) throw fail("Compose build uses unsupported or unsafe inputs", "validation_unsupported", 409);
+        if (build.target !== undefined && (typeof build.target !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/.test(build.target))) throw fail("Compose build target is invalid", "validation_unsupported", 409);
         const context = canonical(resolve(component.cwd, build.context));
         if (!within(context, root)) throw fail("Build context escapes project root", "unsafe_path", 403);
         const sourceFile = typeof build.dockerfile === "string" ? canonical(resolve(context, build.dockerfile)) : join(context, "Dockerfile");
@@ -432,7 +459,7 @@ export class Maintenance implements MaintenancePort {
         if (dockerfileStat.isSymbolicLink() || !dockerfileStat.isFile()) throw fail("Build Dockerfile must be a regular project file", "unsafe_path", 403);
         const sourceFile = canonical(dockerfilePath);
         if (!within(sourceFile, root)) throw fail("Build Dockerfile escapes project root", "unsafe_path", 403);
-        const buildArgs = ["docker", "build", "--pull=false", "--tag", imageTag!, "--file", sourceFile, context]; assertSafeDockerArgv(buildArgs, false);
+        const buildArgs = ["docker", "build", "--pull=false", ...(typeof build.target === "string" ? ["--target", build.target] : []), "--tag", imageTag!, "--file", sourceFile, context]; assertSafeDockerArgv(buildArgs, false);
         await this.dockerContext();
         const built = await this.run(buildArgs, DOCKER); if (built.code !== 0) throw fail("Candidate image build failed", "candidate_build", 502);
       }
@@ -445,7 +472,7 @@ export class Maintenance implements MaintenancePort {
       const candidateChange: Change = { ...change, imageId: candidateImageId, scanId: candidateScan.id };
       const findingsImproved = candidateScan.state === "succeeded" && sortedFindings(candidateScan.findings).join("\n") !== sortedFindings(baselineScan.findings).join("\n") && candidateScan.findings.length < baselineScan.findings.length;
       const evidence: ValidationEvidence = { baselineImageId, candidateImageId, baselineScanId: baselineScan.id, candidateScanId: candidateScan.id, sourceHash: sourceHashOf(change.proposed), runtimeHash, containerIds: snap.containers.map((x) => x.id).sort(), volumes: snap.volumes, checksPassed: check.code === 0 && candidateScan.state === "succeeded", findingsImproved, validatedAt: new Date().toISOString() };
-      this.catalog.putRecord(RECORD_SNAPSHOT, change.id, { evidence, selectedService: selected, imageTag, candidateRef, composeHash: hash(stable(model)), base });
+      this.catalog.putRecord(RECORD_SNAPSHOT, change.id, { evidence, selectedService: selected, imageTag, candidateRef, composeHash: hash(stable(model)), envInputsHash: this.envInputsHash(component, model), base });
       candidateChange.evidence = evidence; candidateChange.state = evidence.checksPassed ? "validated" : "failed";
       if (!evidence.checksPassed) candidateChange.error = check.code !== 0 ? "Configured application validation failed" : candidateScan.error ?? "Candidate scan failed";
       this.save(candidateChange); if (!evidence.checksPassed) throw fail(candidateChange.error!, "validation_failed", 409); return candidateChange;
@@ -476,6 +503,7 @@ export class Maintenance implements MaintenancePort {
       if (image.code !== 0 || image.stdout.trim() !== evidence.candidateImageId) throw fail("Validated candidate image is no longer present locally", "stale_evidence", 409);
       const { base, model, selected } = await this.composePreflight(project, component, snapshot.selectedService);
       if (selected !== snapshot.selectedService || hash(stable(model)) !== snapshot.composeHash) throw fail("Compose service model changed since validation", "stale_evidence", 409);
+      if (!snapshot.envInputsHash || this.envInputsHash(component, model) !== snapshot.envInputsHash) throw fail("Environment inputs changed since validation", "stale_evidence", 409);
       const before = await this.inspectContainers(project, component);
       if (stable(before.containers.map((x) => x.id).sort()) !== stable(evidence.containerIds) || stable(before.volumes) !== stable(evidence.volumes)) throw fail("Live container or named-volume identity changed since validation", "stale_evidence", 409);
       const overridePath = resolve(this.stateDir, `compose-override-${change.id}.yml`);
