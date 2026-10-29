@@ -120,7 +120,7 @@ export function ProjectDetail({ project, status, operations = [], busyComponentI
                       ) : null}
 
                       {url ? (
-                        <a href={url} className="inline-flex min-h-11 items-center gap-2 text-sm font-medium text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                        <a href={url} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-11 items-center gap-2 text-sm font-medium text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
                           Open component URL <ExternalLink aria-hidden="true" className="size-4" />
                         </a>
                       ) : component.url || componentStatus?.url ? (

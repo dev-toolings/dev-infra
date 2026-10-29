@@ -96,12 +96,12 @@ export function ScansView({ scans, changes, containers, loading = false, error }
                           <h4 className="text-sm font-medium">{scan.findings.length} {scan.findings.length === 1 ? "finding" : "findings"}</h4>
                           <ul className="space-y-2">
                             {scan.findings.map((finding) => (
-                              <li key={finding.id} className="min-w-0 rounded-md border border-border bg-card p-3">
+                              <li key={JSON.stringify([finding.target, finding.id, finding.package, finding.installedVersion])} className="min-w-0 rounded-md border border-border bg-card p-3">
                                 <div className="flex min-w-0 flex-wrap items-start justify-between gap-2">
                                   <div className="min-w-0 space-y-1">
                                     <h5 className="break-words text-sm font-medium">{finding.title}</h5>
                                     <p className="break-all text-xs text-muted-foreground">
-                                      {finding.package} {finding.installedVersion} · {finding.target}
+                                      {finding.id} · {finding.package} {finding.installedVersion} · {finding.target}
                                     </p>
                                   </div>
                                   <Badge variant={severityVariant(finding.severity)}>{finding.severity}</Badge>

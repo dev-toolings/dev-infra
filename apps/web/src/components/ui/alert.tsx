@@ -33,9 +33,9 @@ export const AlertTitle = React.forwardRef<HTMLHeadingElement, React.HTMLAttribu
 );
 AlertTitle.displayName = "AlertTitle";
 
-export const AlertDescription = React.forwardRef<HTMLParagraphElement, React.HTMLAttributes<HTMLParagraphElement>>(
+export const AlertDescription = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
   ({ className, ...props }, ref) => (
-    <p ref={ref} className={cn("text-sm leading-5 text-muted-foreground [&_p]:leading-relaxed", className)} {...props} />
+    <div ref={ref} className={cn("text-sm leading-5 text-muted-foreground [&_p]:leading-relaxed", className)} {...props} />
   ),
 );
 AlertDescription.displayName = "AlertDescription";

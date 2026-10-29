@@ -49,7 +49,8 @@ export function LogsView({
     ? components
     : Array.from(seenIds, (id) => ({ id, name: id, kind: undefined }));
   const componentById = new Map(options.map((component) => [component.id, component]));
-  const newestEntries = entries.slice(-1000);
+  const filteredEntries = componentFilter ? entries.filter((entry) => entry.componentId === componentFilter) : entries;
+  const newestEntries = filteredEntries.slice(-1000);
   const selectValue = componentFilter ? `component:${componentFilter}` : "all";
 
   return (
@@ -93,7 +94,7 @@ export function LogsView({
         <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
           <Badge variant={paused ? "secondary" : "outline"}>{paused ? "Paused" : "Following"}</Badge>
           <span>{newestEntries.length} {newestEntries.length === 1 ? "entry" : "entries"}</span>
-          {entries.length > newestEntries.length ? <span>Showing newest 1,000 of {entries.length}</span> : null}
+          {filteredEntries.length > newestEntries.length ? <span>Showing newest 1,000 of {filteredEntries.length}</span> : null}
         </div>
       </div>
 
@@ -120,7 +121,6 @@ export function LogsView({
                   </Badge>
                   <span className="break-all text-log-foreground">{component?.name ?? entry.componentId}</span>
                   <span>{sourceLabel(component?.kind)}</span>
-                  {entry.sourceId ? <code className="break-all">{entry.sourceId}</code> : null}
                 </div>
                 <pre className="m-0 mt-1 min-w-0 whitespace-pre-wrap break-words font-mono text-xs leading-5 text-log-foreground">{entry.message}</pre>
               </li>
