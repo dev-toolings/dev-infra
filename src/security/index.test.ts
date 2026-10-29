@@ -1,4 +1,4 @@
-import { afterEach, expect, mock, test } from "bun:test";
+import { afterEach, expect, test } from "bun:test";
 import { chmodSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -7,8 +7,7 @@ import { publicChange } from "../public";
 import { execCommand } from "../runtime/executor";
 import { gitRun } from "../git";
 
-mock.module("../state", () => ({ ensureStateDir: (path: string) => path }));
-const { Maintenance } = await import("./index");
+import { Maintenance } from "./index";
 
 const dirs: string[] = [];
 const BASE = "sha256:" + "a".repeat(64);
