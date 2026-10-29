@@ -1,6 +1,8 @@
 import { homedir } from "node:os";
-import { resolve, join, isAbsolute } from "node:path";
+import { resolve, join, isAbsolute, sep } from "node:path";
+import { lstatSync, realpathSync } from "node:fs";
 import { ensureStateDir } from "./state";
+import { parseCliArgs } from "./cli/args";
 import { guardExecutor } from "./guard";
 import type { AppServices, CatalogPort, DiscoveryPort, RuntimePort, OperationsPort, MaintenancePort, Executor } from "./contracts";
 
@@ -56,7 +58,42 @@ export function parseServeOptions(argv: string[]): { port: number; devOrigin?: s
   if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Error("Invalid controller port");
   return { port, devOrigin };
 }
+const STATIC_TYPES: Record<string, string> = { ".html": "text/html; charset=utf-8", ".js": "text/javascript", ".css": "text/css", ".svg": "image/svg+xml", ".png": "image/png", ".ico": "image/x-icon", ".woff2": "font/woff2", ".json": "application/json" };
+/** Serve only regular files inside the built panel directory; unknown routes fall back to index.html. */
+export function staticAsset(distDir: string, pathname: string): Response | undefined {
+  let root: string;
+  try { root = realpathSync(distDir); } catch { return undefined; }
+  let decoded: string;
+  try { decoded = decodeURIComponent(pathname); } catch { return new Response("Bad request", { status: 400 }); }
+  if (decoded.includes("\0")) return new Response("Bad request", { status: 400 });
+  const candidates = decoded === "/" || !/\.[a-z0-9]+$/i.test(decoded) ? ["/index.html"] : [decoded];
+  for (const relative of candidates) {
+    const target = resolve(root, "." + relative);
+    if (!target.startsWith(root + sep)) return new Response("Not found", { status: 404 });
+    try {
+      const real = realpathSync(target);
+      if (!real.startsWith(root + sep) || !lstatSync(real).isFile()) return new Response("Not found", { status: 404 });
+      const type = STATIC_TYPES[real.slice(real.lastIndexOf(".")).toLowerCase()] ?? "application/octet-stream";
+      return new Response(Bun.file(real), { headers: { "content-type": type, "x-content-type-options": "nosniff", "cache-control": "no-store" } });
+    } catch { return new Response("Not found", { status: 404 }); }
+  }
+  return undefined;
+}
+export function controllerFetch(api: { fetch: (request: Request) => Response | Promise<Response> }, distDir: string) {
+  return (request: Request): Response | Promise<Response> => {
+    const { pathname } = new URL(request.url);
+    if (pathname === "/api" || pathname.startsWith("/api/")) return api.fetch(request);
+    if (request.method !== "GET" && request.method !== "HEAD") return new Response("Method not allowed", { status: 405 });
+    return staticAsset(distDir, pathname) ?? new Response("DevHub API is running. The control panel is not built: run `bun run web:build` in the DevHub checkout, or use `devhub serve --dev-origin http://127.0.0.1:5175` with the Vite dev server.\n", { status: 503, headers: { "content-type": "text/plain; charset=utf-8" } });
+  };
+}
 export async function main(argv = process.argv.slice(2)): Promise<number> {
+  if (argv[0] !== "serve" && argv[0] !== "pair") {
+    let parsed: ReturnType<typeof parseCliArgs>;
+    try { parsed = parseCliArgs(argv); }
+    catch (error) { process.stderr.write(`devhub: ${error instanceof Error ? error.message : "Invalid command"}\n`); return 2; }
+    if (parsed.command === "help") { process.stdout.write(`${parsed.text}\n`); return 0; }
+  }
   const serveOptions = argv[0] === "serve" ? parseServeOptions(argv.slice(1)) : undefined;
   const stateDir = ensureStateDir(stateDirectory());
   const api = argv[0] === "serve" || argv[0] === "pair" ? await moduleAt("api") : undefined;
@@ -72,7 +109,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     const origins = [`http://127.0.0.1:${port}`, `http://localhost:${port}`, ...(devOrigin ? [devOrigin] : [])];
     const hostnames = [`127.0.0.1:${port}`, `localhost:${port}`, ...(devOrigin ? [new URL(devOrigin).host] : [])];
     const app = api!.createApp(appServices, { stateDir, hostnames, origins });
-    listen((request) => app.fetch(request), port);
+    listen(controllerFetch(app, resolve(import.meta.dir, "..", "apps", "web", "dist")), port);
     process.stdout.write(`DevHub listening on http://${LISTEN_HOST}:${port}\nRun devhub pair to obtain a one-time pairing code.\n`);
     return 0;
   }
