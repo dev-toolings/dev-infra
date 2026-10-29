@@ -34,7 +34,7 @@ export type Executor = (argv: string[], options?: ExecOptions) => Promise<ExecRe
 export interface CatalogPort {
  listRoots(): Root[]; addRoot(path: string, label?: string): Root; removeRoot(id: string): void;
  assertAllowedPath(path: string, mustExist?: boolean): string;
- listProjects(): Project[]; getProject(id: string): Project; saveProject(input: ProjectInput): Project; removeProject(id: string): void;
+ listProjects(): Project[]; getProject(id: string): Project; createProject(input: ProjectInput): Project; saveProject(input: ProjectInput): Project; removeProject(id: string): void;
  claimOperation(projectId: string, action: Action, componentIds: string[], idempotencyKey?: string): OperationClaim;
  updateOperation(id: string, patch: Partial<Pick<Operation,"state"|"error">>): Operation;
  getOperation(id: string): Operation; listOperations(projectId?: string): Operation[]; recoverOperations(): void;
