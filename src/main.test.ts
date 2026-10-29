@@ -84,3 +84,14 @@ test("help and usage errors return before touching state", async () => {
     rmSync(base, { recursive: true, force: true });
   }
 });
+
+test("serve banner names where the panel is in each mode", async () => {
+  const { serveBanner } = await import("./main");
+  const dev = serveBanner({ port: 8040, devOrigin: "http://127.0.0.1:5175", panelBuilt: false, checkout: "/opt/devhub", color: false });
+  expect(dev).toContain("development mode");
+  expect(dev).toContain("http://127.0.0.1:8040/api/v1");
+  expect(dev).toContain("http://127.0.0.1:5175  served by Vite: run `bun run web:dev` in /opt/devhub");
+  expect(serveBanner({ port: 8040, panelBuilt: true, checkout: "/opt/devhub", color: false })).toContain("Panel   http://127.0.0.1:8040/");
+  expect(serveBanner({ port: 8040, panelBuilt: false, checkout: "/opt/devhub", color: false })).toContain("not built  run `bun run web:build` in /opt/devhub");
+  expect(serveBanner({ port: 8040, panelBuilt: true, checkout: "/opt/devhub", color: true })).toContain("\u001b[");
+});

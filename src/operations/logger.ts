@@ -362,12 +362,13 @@ export function formatLogLine(
 const LEVEL_WEIGHT: Record<LogLevel, number> = { debug: 10, info: 20, warn: 30, error: 40 };
 
 export function createLogger(options: LoggerOptions = {}): LoggerLike {
-  const mode = resolveMode(options.mode);
-  const minimumLevel = options.level ?? (mode === "development" ? "debug" : "info");
   const write = options.write ?? ((line: string) => process.stderr.write(`${line}\n`));
   const now = options.now ?? (() => new Date());
 
+  // Mode is resolved per line so a mode chosen at startup (devhub serve --dev-origin) applies to this shared instance.
   const emit = (level: LogLevel, fields: Record<string, unknown>, message = "") => {
+    const mode = resolveMode(options.mode);
+    const minimumLevel = options.level ?? (mode === "development" ? "debug" : "info");
     if (LEVEL_WEIGHT[level] < LEVEL_WEIGHT[minimumLevel]) return;
     write(formatLogLine(level, message, fields, { ...options, mode, now }));
   };

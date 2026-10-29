@@ -1,6 +1,6 @@
 import { homedir } from "node:os";
 import { resolve, join, isAbsolute, sep } from "node:path";
-import { lstatSync, realpathSync } from "node:fs";
+import { existsSync, lstatSync, realpathSync } from "node:fs";
 import { ensureStateDir } from "./state";
 import { parseCliArgs } from "./cli/args";
 import { guardExecutor } from "./guard";
@@ -87,6 +87,29 @@ export function controllerFetch(api: { fetch: (request: Request) => Response | P
     return staticAsset(distDir, pathname) ?? new Response("DevHub API is running. The control panel is not built: run `bun run web:build` in the DevHub checkout, or use `devhub serve --dev-origin http://127.0.0.1:5175` with the Vite dev server.\n", { status: 503, headers: { "content-type": "text/plain; charset=utf-8" } });
   };
 }
+const paint = (code: string, text: string, enabled: boolean) => enabled ? `\u001b[${code}m${text}\u001b[0m` : text;
+/** Startup summary that says where the API and the panel actually are in each mode. */
+export function serveBanner(options: { port: number; devOrigin?: string; panelBuilt: boolean; checkout: string; color?: boolean }): string {
+  const color = options.color ?? process.env.NO_COLOR === undefined;
+  const label = (text: string) => paint("1", text.padEnd(8), color);
+  const url = (text: string) => paint("36", text, color);
+  const hint = (text: string) => paint("90", text, color);
+  const api = `http://${LISTEN_HOST}:${options.port}`;
+  const panel = options.devOrigin
+    ? `${url(options.devOrigin)}  ${hint(`served by Vite: run \`bun run web:dev\` in ${options.checkout}`)}`
+    : options.panelBuilt
+      ? url(`${api}/`)
+      : `${paint("33", "not built", color)}  ${hint(`run \`bun run web:build\` in ${options.checkout}, or use --dev-origin with Vite`)}`;
+  return [
+    `${paint("1;32", "DevHub controller", color)} ${options.devOrigin ? paint("35", "development mode", color) : hint("ready")}`,
+    `  ${label("API")}${url(`${api}/api/v1`)}  ${hint(`loopback only`)}`,
+    `  ${label("Panel")}${panel}`,
+    `  ${label("Pairing")}${hint("run")} devhub pair ${hint("in another terminal, then paste the code in the panel")}`,
+    `  ${label("Logs")}${options.devOrigin ? "colored request log below" : hint("JSON on stderr (DEVHUB_ENV=development for colored logs)")}`,
+    `  ${label("Stop")}${hint("Ctrl+C")}`,
+    "",
+  ].join("\n");
+}
 export async function main(argv = process.argv.slice(2)): Promise<number> {
   if (argv[0] !== "serve" && argv[0] !== "pair") {
     let parsed: ReturnType<typeof parseCliArgs>;
@@ -95,11 +118,14 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     if (parsed.command === "help") { process.stdout.write(`${parsed.text}\n`); return 0; }
   }
   const serveOptions = argv[0] === "serve" ? parseServeOptions(argv.slice(1)) : undefined;
+  // Development mode turns on the colored key=value terminal logger unless the operator chose a mode.
+  if (serveOptions?.devOrigin) process.env.DEVHUB_ENV ??= "development";
   const stateDir = ensureStateDir(stateDirectory());
   const api = argv[0] === "serve" || argv[0] === "pair" ? await moduleAt("api") : undefined;
   if (argv[0] === "pair") {
     const pairing = api!.issuePairingCode(stateDir) as { code: string; expiresAt: string };
-    process.stdout.write(`Pairing code: ${pairing.code}\nExpires: ${pairing.expiresAt}\n`);
+    const color = process.env.NO_COLOR === undefined;
+    process.stdout.write(`${paint("1", "Pairing code", color)}  ${paint("1;32", pairing.code, color)}\n${paint("90", `Single use, expires ${pairing.expiresAt}. Paste it in the DevHub panel.`, color)}\n`);
     return 0;
   }
   const reservedPorts = [...CONTROLLER_PORTS, serveOptions?.port ?? DEFAULT_PORT, ...(serveOptions?.devOrigin ? [Number(new URL(serveOptions.devOrigin).port || 80)] : [])];
@@ -109,8 +135,9 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     const origins = [`http://127.0.0.1:${port}`, `http://localhost:${port}`, ...(devOrigin ? [devOrigin] : [])];
     const hostnames = [`127.0.0.1:${port}`, `localhost:${port}`, ...(devOrigin ? [new URL(devOrigin).host] : [])];
     const app = api!.createApp(appServices, { stateDir, hostnames, origins });
-    listen(controllerFetch(app, resolve(import.meta.dir, "..", "apps", "web", "dist")), port);
-    process.stdout.write(`DevHub listening on http://${LISTEN_HOST}:${port}\nRun devhub pair to obtain a one-time pairing code.\n`);
+    const distDir = resolve(import.meta.dir, "..", "apps", "web", "dist");
+    listen(controllerFetch(app, distDir), port);
+    process.stdout.write(serveBanner({ port, devOrigin, panelBuilt: existsSync(join(distDir, "index.html")), checkout: resolve(import.meta.dir, "..") }));
     return 0;
   }
   try {

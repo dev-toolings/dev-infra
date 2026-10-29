@@ -165,7 +165,7 @@ export function createApp(services: AppServices, options: ApiOptions): Hono<ApiE
     if (originHeader && (!loopbackOrigin(originHeader) || !allowedOrigins.has(originHeader) || !allowedHosts.has(new URL(originHeader).host))) return fail("origin_forbidden", "Origin is not allowed.", 403);
     const began = Date.now();
     try { await next(); }
-    finally { logEvent("info", "http", { method: c.req.method, route: c.req.routePath || c.req.path, status: c.res.status, durationMs: Date.now() - began }); }
+    finally { const status = c.res.status; logEvent(status >= 500 ? "error" : status >= 400 ? "warn" : "info", "http", { method: c.req.method, route: c.req.routePath || c.req.path, status, durationMs: Date.now() - began }); }
     if (originHeader && allowedOrigins.has(originHeader)) {
       c.header("Access-Control-Allow-Origin", originHeader);
       c.header("Access-Control-Allow-Credentials", "true");
