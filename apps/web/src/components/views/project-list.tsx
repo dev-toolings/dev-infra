@@ -10,11 +10,13 @@ export interface ProjectListProps {
   selectedProjectId?: string;
   loading?: boolean;
   error?: string;
+  /** Single column, for use in a narrow sidebar next to the project detail. */
+  compact?: boolean;
   onSelect: (projectId: string) => void | Promise<void>;
   onAddProject?: () => void | Promise<void>;
 }
 
-export function ProjectList({ projects, selectedProjectId, loading = false, error, onSelect, onAddProject }: ProjectListProps) {
+export function ProjectList({ projects, selectedProjectId, loading = false, error, compact = false, onSelect, onAddProject }: ProjectListProps) {
   return (
     <section className="space-y-4" aria-labelledby="projects-heading">
       <ViewHeading
@@ -41,7 +43,7 @@ export function ProjectList({ projects, selectedProjectId, loading = false, erro
       ) : null}
 
       {!error && !loading && projects.length > 0 ? (
-        <ul className="grid min-w-0 grid-cols-1 gap-3 xl:grid-cols-2">
+        <ul className={cn("grid min-w-0 grid-cols-1 gap-3", !compact && "xl:grid-cols-2")}>
           {projects.map((project) => {
             const selected = project.id === selectedProjectId;
             return (
