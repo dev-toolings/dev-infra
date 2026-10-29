@@ -116,4 +116,3 @@ describe("Catalog", () => {
     expect(catalog.getOperation(live.id).state).toBe("queued");
   });
 });
-

@@ -10,6 +10,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Foundation for the approved local DevHub manager: shared TypeScript contracts,
   Bun dependencies, React/Vite tooling and isolated worker implementation branches.
+- Local project manager: SQLite catalog of approved roots and in-place projects,
+  static discovery with presets (`symfony-docker`, `laravel-docker`,
+  `node-docker`, `compose-existing`, `native`, `custom`), Compose and user
+  systemd runtimes, dependency-aware operations with merged redacted logs,
+  `root`/`project`/`maintenance` CLI commands, an authenticated loopback API
+  (`devhub serve`, `devhub pair`) and a connected React control panel.
 
 ### Changed
 - `devhub up` / `devhub restart` now start the `async` profile (RabbitMQ) by

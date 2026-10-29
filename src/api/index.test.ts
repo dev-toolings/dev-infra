@@ -160,4 +160,3 @@ describe("local API authentication", () => {
     expect(command.status).toBe(400);
   });
 });
-

@@ -15,9 +15,11 @@ a shared Docker network.
 
 Full documentation: [makfly.github.io/dev-infra](https://makfly.github.io/dev-infra/)
 
-The `feat/devhub` branch is also implementing a local project manager. This
-work is in progress: the shared-infrastructure CLI above remains the working
-entry point until the project modules are integrated.
+DevHub also includes a local project manager (Bun required): approved workspace
+roots, in-place project registration with presets, dependency-aware start/stop,
+status and merged logs, an authenticated loopback API and a React control panel,
+plus image scanning and verified image-reference remediation. See
+[docs/devhub.md](docs/devhub.md) for the full workflow.
 
 The project manager keeps existing repositories where they are. You approve
 workspace folders, register a project and describe its components. A project can
@@ -175,6 +177,11 @@ devhub db create myapp  # create a PostgreSQL database + role
 | `devhub db list` | List PostgreSQL databases |
 | `devhub doctor` | Diagnostics: health, network, ports |
 | `devhub help` | Show help |
+| `devhub root add\|list\|remove` | Approve workspace folders for the project manager |
+| `devhub project discover\|add\|list\|show\|remove` | Detect and register projects in place |
+| `devhub project start\|stop\|restart\|check\|status\|logs <id>` | Project lifecycle, status and merged logs |
+| `devhub maintenance inventory\|scan\|scans\|changes\|preview\|apply\|validate\|activate` | Docker inventory, image scans and remediation |
+| `devhub serve [--port 8040] [--dev-origin URL]` / `devhub pair` | Loopback control panel API and one-time pairing code |
 
 **Make shortcuts:**
 
