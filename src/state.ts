@@ -70,7 +70,7 @@ function assertOutsideProtectedPaths(statePath: string, infraDir?: string): void
 
   for (const protectedPath of protectedPaths) {
     for (const canonicalPath of canonicalProtectedPath(protectedPath)) {
-      if (isAtOrBelow(statePath, canonicalPath)) {
+      if (isAtOrBelow(statePath, canonicalPath) || isAtOrBelow(canonicalPath, statePath)) {
         throw new Error(`State directory must be outside protected DevHub path: ${statePath}`);
       }
     }

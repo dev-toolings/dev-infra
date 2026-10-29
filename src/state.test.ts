@@ -83,16 +83,17 @@ test("rejects Git and recognized project roots in the state path ancestry", () =
   }
 });
 
-test("does not inspect arbitrary children of a normal home directory", () => {
+test("rejects HOME as state without changing project children", () => {
   const { home, infra } = sandbox();
   const childProject = join(home, "projects", "sample");
   mkdirSync(childProject, { recursive: true });
   writeFileSync(join(childProject, "package.json"), "{}");
   const childProjectMode = statSync(join(childProject, "package.json")).mode & 0o777;
 
-  const statePath = ensureStateDir(home, infra);
-  expect(statePath).toBe(home);
-  expect(statSync(statePath).mode & 0o777).toBe(0o700);
+  const mask = process.umask();
+  expect(() => ensureStateDir(home, infra)).toThrow("protected DevHub path");
+  expect(process.umask()).toBe(mask);
+  expect(readFileSync(join(childProject, "package.json"), "utf8")).toBe("{}");
   expect(statSync(join(childProject, "package.json")).mode & 0o777).toBe(childProjectMode);
 });
 
@@ -180,4 +181,41 @@ test("default infrastructure path is rejected without creating state in the chec
   const candidate = resolve(import.meta.dir, "..", ".state-probe");
   expect(() => ensureStateDir(candidate)).toThrow("protected DevHub path");
   expect(existsSync(candidate)).toBe(false);
+});
+
+for (const kind of ["infra", "configured", "installer", "alias"] as const) {
+  test(`state ancestor refuses ${kind} before chmod`, () => {
+    const root = mkdtempSync("/var/tmp/devhub-overlap-"); fixtures.push(root);
+    const home = join(root, "home"), parent = join(root, "state"), target = join(parent, "checkout");
+    mkdirSync(home, {mode:0o700}); mkdirSync(parent, {mode:0o700}); mkdirSync(target, {mode:0o755});
+    chmodSync(parent,0o700); chmodSync(target,0o755);
+    const sentinel = join(target, "sentinel.txt"); writeFileSync(sentinel,"fixture preserved"); chmodSync(sentinel,0o644);
+    process.env.HOME = home; delete process.env.DEVHUB_DIR;
+    let infra = join(root, "other-infra");
+    if (kind === "infra") infra = target;
+    if (kind === "configured") process.env.DEVHUB_DIR = target;
+    if (kind === "installer") {
+      mkdirSync(join(home,".local","share"),{recursive:true});
+      symlinkSync(target,join(home,".local","share","devhub"));
+    }
+    if (kind === "alias") { infra = join(root,"infra-alias"); symlinkSync(target,infra); }
+    const mask = process.umask();
+    let error: unknown;
+    try { ensureStateDir(parent,infra); } catch (caught) { error = caught; }
+    const unchanged = {
+      file: statSync(sentinel).mode & 0o777,
+      directory: statSync(target).mode & 0o777,
+      contents: readFileSync(sentinel,"utf8"),
+      mask: process.umask(),
+    };
+    expect(() => { if (error) throw error; }).toThrow("protected DevHub path");
+    expect(unchanged).toEqual({file:0o644,directory:0o755,contents:"fixture preserved",mask});
+  });
+}
+
+test("supports the dedicated default state directory under HOME", () => {
+  const { home, infra } = sandbox();
+  const state = join(home, ".local", "state", "devhub");
+  expect(ensureStateDir(state, infra)).toBe(state);
+  expect(statSync(state).mode & 0o777).toBe(0o700);
 });
