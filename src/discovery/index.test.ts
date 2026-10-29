@@ -130,7 +130,7 @@ test("project .env Compose controls are rejected without exposing values", async
   const catalog = new MemoryCatalog(); catalog.addRoot(root);
   const discovery = new Discovery({ catalog, run: async () => response("") });
   await expect(discovery.inspect(path)).rejects.toThrow("unsupported Compose control");
-  const serialized = JSON.stringify(catalog.listRecords("discovery/plans"));
+  const serialized = JSON.stringify(catalog.listRecords("discovery-plans"));
   expect(serialized).not.toContain("value-that-must-not-leak");
 });
 
@@ -144,7 +144,7 @@ test("partial file creation rolls back only files created by this apply after ca
   const root = fixture(); const path = viteFixture(root); const catalog = new MemoryCatalog(); catalog.addRoot(root); catalog.failCreate = true;
   const discovery = new Discovery({ catalog, run: async () => response("") });
   const plan = await discovery.preview({ path, name: "Shop", preset: "native" });
-  const key = `discovery/plans:${plan.id}`;
+  const key = `discovery-plans:${plan.id}`;
   const stored = catalog.records.get(key) as { plan: typeof plan; snapshots: Array<{ path: string; hash: string }> };
   stored.plan.files.push({ path: ".devhub/first.conf", content: "created by plan\n" });
   stored.snapshots.push({ path: join(path, ".devhub", "first.conf"), hash: "absent" });
@@ -158,7 +158,7 @@ test("an existing planned file is refused without modifying it", async () => {
   const root = fixture(); const path = viteFixture(root); const catalog = new MemoryCatalog(); catalog.addRoot(root);
   const discovery = new Discovery({ catalog, run: async () => response("") });
   const plan = await discovery.preview({ path, name: "Shop", preset: "native" });
-  const key = `discovery/plans:${plan.id}`;
+  const key = `discovery-plans:${plan.id}`;
   const stored = catalog.records.get(key) as { plan: typeof plan; snapshots: Array<{ path: string; hash: string }> };
   stored.plan.files.push({ path: ".devhub/owned.conf", content: "new content\n" });
   stored.snapshots.push({ path: join(path, ".devhub", "owned.conf"), hash: "absent" });

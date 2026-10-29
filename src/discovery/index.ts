@@ -6,7 +6,7 @@ import { parseDocument } from "yaml";
 import { DevHubError, type CatalogPort, type Component, type Detection, type DiscoveryPort, type Executor, type PlannedFile, type Preset, type Project, type ProjectInput, type SetupInput, type SetupPlan } from "../contracts";
 import { classifyManifests, parseMakeTargets } from "./manifests";
 
-const PLAN_NS = "discovery/plans";
+const PLAN_NS = "discovery-plans";
 const PLAN_LIMIT = 100;
 const FILE_LIMIT = 1024 * 1024;
 const SKIP = new Set([".git", ".hg", ".svn", ".idea", ".vscode", "node_modules", "vendor", "build", "dist", "target", "coverage", ".next", ".cache", ".venv"]);
