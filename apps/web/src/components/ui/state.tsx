@@ -1,0 +1,92 @@
+import * as React from "react";
+import { CircleAlert } from "lucide-react";
+import { cn } from "../../lib/utils";
+import { Skeleton } from "./skeleton";
+
+export interface EmptyStateProps extends React.HTMLAttributes<HTMLElement> {
+  title: string;
+  description?: string;
+  icon?: React.ReactNode;
+  action?: React.ReactNode;
+}
+
+export const EmptyState = React.forwardRef<HTMLElement, EmptyStateProps>(
+  ({ title, description, icon, action, className, ...props }, ref) => {
+    const titleId = React.useId();
+    const descriptionId = React.useId();
+    return (
+      <section
+        ref={ref}
+        aria-labelledby={titleId}
+        aria-describedby={description ? descriptionId : undefined}
+        className={cn("flex min-h-48 flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-border bg-panel px-5 py-8 text-center", className)}
+        {...props}
+      >
+        {icon ? <span aria-hidden="true" className="text-muted-foreground">{icon}</span> : null}
+        <div className="max-w-md space-y-1.5">
+          <h2 id={titleId} className="text-base font-semibold text-foreground">{title}</h2>
+          {description ? <p id={descriptionId} className="text-sm leading-5 text-muted-foreground">{description}</p> : null}
+        </div>
+        {action ? <div className="pt-1">{action}</div> : null}
+      </section>
+    );
+  },
+);
+EmptyState.displayName = "EmptyState";
+
+export interface ErrorStateProps extends React.HTMLAttributes<HTMLElement> {
+  title?: string;
+  description: string;
+  action?: React.ReactNode;
+}
+
+export const ErrorState = React.forwardRef<HTMLElement, ErrorStateProps>(
+  ({ title = "Unable to load this view", description, action, className, ...props }, ref) => {
+    const titleId = React.useId();
+    const descriptionId = React.useId();
+    return (
+      <section
+        ref={ref}
+        role="alert"
+        aria-labelledby={titleId}
+        aria-describedby={descriptionId}
+        className={cn("flex min-h-40 flex-col items-center justify-center gap-3 rounded-lg border border-destructive/30 bg-destructive/5 px-5 py-7 text-center", className)}
+        {...props}
+      >
+        <CircleAlert aria-hidden="true" className="size-5 text-destructive" />
+        <div className="max-w-md space-y-1.5">
+          <h2 id={titleId} className="text-base font-semibold text-foreground">{title}</h2>
+          <p id={descriptionId} className="text-sm leading-5 text-muted-foreground">{description}</p>
+        </div>
+        {action ? <div className="pt-1">{action}</div> : null}
+      </section>
+    );
+  },
+);
+ErrorState.displayName = "ErrorState";
+
+export interface LoadingStateProps extends React.HTMLAttributes<HTMLDivElement> {
+  label?: string;
+  rows?: number;
+}
+
+export const LoadingState = React.forwardRef<HTMLDivElement, LoadingStateProps>(
+  ({ label = "Loading", rows = 3, className, ...props }, ref) => {
+    const rowCount = Math.max(1, Math.min(Math.floor(rows), 8));
+    return (
+      <div ref={ref} role="status" aria-label={label} aria-busy="true" className={cn("space-y-3", className)} {...props}>
+        {Array.from({ length: rowCount }, (_, index) => (
+          <div key={index} className="flex min-w-0 items-center gap-3 rounded-lg border border-border bg-card p-4">
+            <Skeleton className="size-9 shrink-0 rounded-md" />
+            <div className="min-w-0 flex-1 space-y-2">
+              <Skeleton className="h-3.5 w-2/5 max-w-48" />
+              <Skeleton className="h-3 w-4/5 max-w-80" />
+            </div>
+          </div>
+        ))}
+        <span className="sr-only">{label}</span>
+      </div>
+    );
+  },
+);
+LoadingState.displayName = "LoadingState";

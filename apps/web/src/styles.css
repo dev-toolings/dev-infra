@@ -1,0 +1,117 @@
+@import "tailwindcss";
+
+@source "../index.html";
+@source "./**/*.{ts,tsx}";
+
+@theme inline {
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", ui-sans-serif, system-ui, "Segoe UI", sans-serif;
+  --font-mono: "SFMono-Regular", ui-monospace, Consolas, "Liberation Mono", monospace;
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-ring: var(--ring);
+  --color-panel: var(--panel);
+  --color-shell: var(--shell);
+  --color-shell-border: var(--shell-border);
+  --color-log-panel: var(--log-panel);
+  --color-log-foreground: var(--log-foreground);
+  --color-log-muted: var(--log-muted);
+
+  --radius-sm: calc(var(--radius) - 0.25rem);
+  --radius-md: calc(var(--radius) - 0.125rem);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 0.25rem);
+  --radius-2xl: calc(var(--radius) + 0.5rem);
+}
+
+:root {
+  color-scheme: light;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", ui-sans-serif, system-ui, "Segoe UI", sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+
+  --background: oklch(97.6% 0.004 250);
+  --foreground: oklch(21% 0.012 255);
+  --card: oklch(99.1% 0.003 250);
+  --card-foreground: var(--foreground);
+  --popover: oklch(99.1% 0.003 250);
+  --popover-foreground: var(--foreground);
+  --panel: oklch(96.7% 0.005 250);
+  --shell: oklch(95.8% 0.006 250);
+  --shell-border: oklch(86.5% 0.008 250);
+  --border: oklch(86.5% 0.008 250);
+  --input: oklch(86.5% 0.008 250);
+  --muted: oklch(94.2% 0.006 250);
+  --muted-foreground: oklch(43% 0.018 255);
+  --secondary: oklch(94.2% 0.006 250);
+  --secondary-foreground: var(--foreground);
+  --primary: oklch(52% 0.21 255);
+  --primary-foreground: oklch(99.1% 0.003 250);
+  --destructive: oklch(54% 0.2 27);
+  --destructive-foreground: oklch(99% 0.003 250);
+  --ring: oklch(52% 0.21 255);
+  --log-panel: oklch(24% 0.016 255);
+  --log-foreground: oklch(92% 0.006 255);
+  --log-muted: oklch(76% 0.018 255);
+  --radius: 0.625rem;
+
+  background: var(--background);
+  color: var(--foreground);
+}
+
+* {
+  border-color: var(--border);
+}
+
+body {
+  min-width: 320px;
+  min-height: 100vh;
+  margin: 0;
+  background: var(--background);
+  color: var(--foreground);
+  font-family: inherit;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+::selection {
+  color: var(--primary-foreground);
+  background: var(--primary);
+}
+
+:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
