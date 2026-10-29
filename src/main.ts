@@ -46,8 +46,10 @@ export async function services(stateDir = stateDirectory(), reservedPorts = CONT
 export function parseServeOptions(argv: string[]): { port: number; devOrigin?: string } {
   let port = DEFAULT_PORT, devOrigin: string | undefined;
   for (let index = 0; index < argv.length; index += 2) {
+    // --dev is shorthand for the default Vite origin.
+    if (argv[index] === "--dev") { devOrigin = "http://localhost:5175"; index -= 1; continue; }
     const value = argv[index + 1];
-    if (!value) throw new Error("Usage: devhub serve [--port 8040] [--dev-origin http://127.0.0.1:5175]");
+    if (!value) throw new Error("Usage: devhub serve [--port 8040] [--dev | --dev-origin http://localhost:5175]");
     if (argv[index] === "--port") port = Number(value);
     else if (argv[index] === "--dev-origin") {
       const url = new URL(value);
@@ -94,9 +96,10 @@ export function serveBanner(options: { port: number; devOrigin?: string; panelBu
   const label = (text: string) => paint("1", text.padEnd(8), color);
   const url = (text: string) => paint("36", text, color);
   const hint = (text: string) => paint("90", text, color);
-  const api = `http://${LISTEN_HOST}:${options.port}`;
+  // Bound to 127.0.0.1; shown as localhost, which the API and Vite both accept.
+  const api = `http://localhost:${options.port}`;
   const panel = options.devOrigin
-    ? `${url(options.devOrigin)}  ${hint(`served by Vite: run \`bun run web:dev\` in ${options.checkout}`)}`
+    ? `${url(`http://localhost:${new URL(options.devOrigin).port || "80"}`)}  ${hint(`served by Vite: run \`bun run web:dev\` in ${options.checkout}`)}`
     : options.panelBuilt
       ? url(`${api}/`)
       : `${paint("33", "not built", color)}  ${hint(`run \`bun run web:build\` in ${options.checkout}, or use --dev-origin with Vite`)}`;
@@ -132,8 +135,11 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
   const appServices = await services(stateDir, reservedPorts);
   if (argv[0] === "serve") {
     const { port, devOrigin } = serveOptions!;
-    const origins = [`http://127.0.0.1:${port}`, `http://localhost:${port}`, ...(devOrigin ? [devOrigin] : [])];
-    const hostnames = [`127.0.0.1:${port}`, `localhost:${port}`, ...(devOrigin ? [new URL(devOrigin).host] : [])];
+    // A loopback dev origin is trusted under both names so http://localhost and http://127.0.0.1 behave the same.
+    const devPort = devOrigin ? new URL(devOrigin).port || "80" : undefined;
+    const devHosts = devPort ? [`127.0.0.1:${devPort}`, `localhost:${devPort}`] : [];
+    const origins = [`http://127.0.0.1:${port}`, `http://localhost:${port}`, ...devHosts.map((host) => `http://${host}`)];
+    const hostnames = [`127.0.0.1:${port}`, `localhost:${port}`, ...devHosts];
     const app = api!.createApp(appServices, { stateDir, hostnames, origins });
     const distDir = resolve(import.meta.dir, "..", "apps", "web", "dist");
     listen(controllerFetch(app, distDir), port);

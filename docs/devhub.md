@@ -88,8 +88,14 @@ explicitly to create a one-time code. The development UI origin is trusted only
 when passed explicitly, for example:
 
 ```sh
-devhub serve --dev-origin http://127.0.0.1:5175
+devhub serve --dev          # same as --dev-origin http://localhost:5175
+bun run web:dev             # second terminal: Vite on http://localhost:5175
+devhub pair                 # third terminal: one-time code for the panel
 ```
+
+`localhost` and `127.0.0.1` are accepted for the same loopback port. Without
+`--dev`, build the panel once with `bun run web:build` and `devhub serve` serves
+it on `http://localhost:8040`.
 
 The control panel is not exposed on the network. Pairing codes and credentials
 must not be copied into shell history or shared logs.

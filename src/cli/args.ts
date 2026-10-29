@@ -127,7 +127,7 @@ const USAGE = [
   "  infra <arguments...> passes all arguments to the existing Bash CLI.",
   "",
   "Controller commands handled by src/main.ts:",
-  "  serve [--port 8040] [--dev-origin http://127.0.0.1:5175]",
+  "  serve [--port 8040] [--dev | --dev-origin http://localhost:5175]",
   "  pair",
   "",
   "Use --json on manager data and action commands. Use --help after a command",
