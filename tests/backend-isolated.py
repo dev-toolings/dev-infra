@@ -22,7 +22,7 @@ with tempfile.TemporaryDirectory(prefix="devhub-backend-") as directory:
     for name in ("home", "state", "runtime", "config", "bin"):
         (root / name).mkdir(mode=0o700)
     log = root / "unexpected-tools"
-    for tool in ("docker", "docker-compose", "systemctl", "journalctl", "busctl", "dbus-send", "systemd-run", *(("git",) if args.deny_git else ())):
+    for tool in ("docker", "docker-compose", "systemctl", "journalctl", "busctl", "dbus-send", "systemd-run", "ss", "lsof", "make", "sh", *(("git",) if args.deny_git else ())):
         shim = root / "bin" / tool
         shim.write_text("#!/bin/sh\n"
                         f"printf '%s\\n' {shlex.quote(tool)} >> {shlex.quote(str(log))}\n"
@@ -42,4 +42,4 @@ with tempfile.TemporaryDirectory(prefix="devhub-backend-") as directory:
         raise SystemExit(1)
     if result.returncode:
         raise SystemExit(result.returncode)
-    print("PASS: isolated backend fixtures made no live Docker/systemd calls")
+    print("PASS: isolated backend fixtures made no forbidden live tool calls")
