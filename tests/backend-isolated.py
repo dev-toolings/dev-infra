@@ -34,7 +34,7 @@ with tempfile.TemporaryDirectory(prefix="devhub-backend-") as directory:
                        XDG_RUNTIME_DIR=str(root / "runtime"),
                        PATH=f"{root / 'bin'}:{os.environ.get('PATH', '')}")
     environment = {key: value for key, value in environment.items()
-                   if key != "DBUS_SESSION_BUS_ADDRESS" and not key.startswith("DOCKER_")}
+                   if key not in ("DBUS_SESSION_BUS_ADDRESS", "DEVHUB_DIR") and not key.startswith("DOCKER_")}
     result = subprocess.run([bun, "--no-env-file", "test", args.test_path], cwd=args.repo.resolve(), env=environment)
     unexpected = log.read_text() if log.exists() else ""
     if unexpected:
