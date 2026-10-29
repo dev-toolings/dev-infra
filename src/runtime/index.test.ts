@@ -143,3 +143,25 @@ test("comma-joined Compose labels keep multi-file config paths intact", async ()
   }, stateDir: join(f.root, "state"), assertAllowedPath: (path) => path });
   expect(await runtime.check({ ...f.project, components: [component] }, component)).toMatchObject({ state: "running", ready: true });
 });
+
+test("start refuses shared DevHub volumes and the Docker socket, and passes env files to Compose", async () => {
+  for (const [model, message] of [
+    [{ services: { web: { volumes: [{ type: "volume", source: "pg" }] } }, volumes: { pg: { name: "dev-infra_infra_postgres_data", external: true } } }, "shared DevHub volumes"],
+    [{ services: { web: { volumes: [{ type: "bind", source: "/var/run/docker.sock" }] } } }, "Docker socket"],
+  ] as const) {
+    const f = fixture();
+    writeFileSync(join(f.app, "app.env"), "APP_ENV=dev\n");
+    const component: Component = { ...f.component, envFiles: ["app.env"] };
+    const seen: string[][] = [];
+    const runtime = new Runtime({ run: async (argv) => {
+      seen.push(argv);
+      if (argv[1] === "context") return { code: 0, stdout: JSON.stringify([{ Endpoints: { docker: { Host: "unix:///var/run/docker.sock" } } }]), stderr: "" };
+      if (argv.includes("ps")) return { code: 0, stdout: "[]", stderr: "" };
+      if (argv.includes("config")) return { code: 0, stdout: JSON.stringify(model), stderr: "" };
+      return { code: 0, stdout: "", stderr: "" };
+    }, stateDir: join(f.root, "state"), assertAllowedPath: (path) => path });
+    await expect(runtime.start({ ...f.project, components: [component] }, component)).rejects.toThrow(message);
+    expect(seen.some((argv) => argv.includes("up"))).toBe(false);
+    expect(seen.find((argv) => argv.includes("config"))).toContain(`--env-file=${join(f.app, "app.env")}`);
+  }
+});

@@ -40,6 +40,7 @@ export interface CatalogPort {
  getOperation(id: string): Operation; listOperations(projectId?: string): Operation[]; recoverOperations(): void;
  putRecord<T>(namespace: string, id: string, value: T): void;
  updateRecord<T>(namespace: string, id: string, update: (current: T | undefined) => T): T; getRecord<T>(namespace: string, id: string): T | undefined; listRecords<T>(namespace: string): T[];
+ deleteRecord(namespace: string, id: string): void;
  close(): void;
 }
 export interface RuntimePort {

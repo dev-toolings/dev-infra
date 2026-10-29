@@ -5,6 +5,7 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { parseDocument } from "yaml";
 import { DevHubError, type CatalogPort, type Component, type ContainerInfo, type Executor, type LogEntry, type Project, type RuntimePort, type ComponentStatus } from "../contracts";
 
+type ComposeModel = { services?: Record<string, { volumes?: Array<string | { type?: string; source?: string }> }>; volumes?: Record<string, { name?: string; external?: boolean } | null> };
 type Options = { run: Executor; stateDir: string; assertAllowedPath: CatalogPort["assertAllowedPath"]; fetch?: (input: string, init?: BunFetchRequestInit) => Promise<Response>; resolveExecutable?: (command: string) => string | null };
 const SLUG = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 const ID = /^[a-f0-9]{12,64}$/;
@@ -122,7 +123,8 @@ export class Runtime implements RuntimePort {
     for (const profile of cfg.profiles) slug(profile, "Compose profile"); for (const service of cfg.services) slug(service, "Compose service");
     checkEnvControls(cwd);
     for (const file of component.envFiles ?? []) envFileCheck(resolve(cwd, file), canonical(project.root));
-    return ["docker", "compose", "-p", cfg.projectName, `--project-directory=${cwd}`, ...files.map((f) => `--file=${f}`), ...cfg.profiles.map((p) => `--profile=${p}`)];
+    const envFiles = (component.envFiles ?? []).map((file) => canonical(resolve(cwd, file)));
+    return ["docker", "compose", "-p", cfg.projectName, `--project-directory=${cwd}`, ...files.map((f) => `--file=${f}`), ...envFiles.map((f) => `--env-file=${f}`), ...cfg.profiles.map((p) => `--profile=${p}`)];
   }
   private preflightCompose(project: Project, component: Component, cwd: string): void {
     checkEnvControls(cwd);
@@ -182,6 +184,21 @@ export class Runtime implements RuntimePort {
     };
     for (const file of component.compose!.files) visit(resolve(cwd, file), 1);
   }
+  /** Project code is trusted, but shared DevHub data, the Docker socket and DevHub state stay out of project containers. */
+  private assertSharedDataUntouched(model: ComposeModel, services: string[]): void {
+    const protectedPaths = ["/var/run/docker.sock", "/run/docker.sock", resolve(import.meta.dir, "../.."), this.stateDir, process.env.DEVHUB_DIR, join(resolve(process.env.HOME || homedir()), ".local/share/devhub")].filter((x): x is string => !!x).map((p) => resolve(p));
+    const sharedVolume = (name: string) => /^(?:dev-infra|devhub|devhub-infra)_/.test(name) || /^infra_[a-z0-9]+_data$/.test(name) || /_infra_[a-z0-9]+_data$/.test(name);
+    for (const [key, volume] of Object.entries(model.volumes ?? {})) {
+      const name = typeof volume?.name === "string" ? volume.name : key;
+      if (sharedVolume(name)) throw err("Project Compose files cannot use shared DevHub volumes", "unsafe_compose", 403);
+    }
+    for (const service of services) for (const mount of model.services?.[service]?.volumes ?? []) {
+      const source = typeof mount === "string" ? mount.split(":")[0]! : typeof mount?.source === "string" ? mount.source : "";
+      const type = typeof mount === "string" ? (source.startsWith("/") || source.startsWith(".") ? "bind" : "volume") : mount?.type;
+      if (type === "volume" && source && sharedVolume(model.volumes?.[source]?.name ?? source)) throw err("Project Compose files cannot use shared DevHub volumes", "unsafe_compose", 403);
+      if (type === "bind" && isAbsolute(source) && protectedPaths.some((p) => within(resolve(source), p) || within(p, resolve(source)))) throw err("Project Compose files cannot mount the Docker socket or DevHub data", "unsafe_compose", 403);
+    }
+  }
   private async composeRecords(project: Project, component: Component, cwd: string): Promise<Record<string, unknown>[]> {
     const base = this.composeBase(project, component, cwd);
     const result = await this.run([...base, "ps", "-a", "--format", "json"], READ);
@@ -239,8 +256,9 @@ export class Runtime implements RuntimePort {
       const base = this.composeBase(project, component, cwd);
       const config = await this.run([...base, "config", "--format", "json", "--no-env-resolution", ...component.compose!.services], { timeoutMs: 30_000, maxOutputBytes: 8 * 1024 * 1024 });
       if (config.code !== 0) throw err("Compose configuration validation failed", "runtime_config", 400);
-      const model = outputJson(config.stdout) as { services?: Record<string, unknown> };
+      const model = outputJson(config.stdout) as ComposeModel;
       if (!model.services || component.compose!.services.some((s) => !model.services![s])) throw err("Selected service is absent from the Compose model");
+      this.assertSharedDataUntouched(model, component.compose!.services);
       const up = await this.run([...base, "up", "-d", "--no-deps", ...component.compose!.services], { timeoutMs: 900_000, maxOutputBytes: 8 * 1024 * 1024 });
       if (up.code !== 0) throw err("Compose start failed", "runtime_start", 502);
       return;

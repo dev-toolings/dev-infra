@@ -36,6 +36,7 @@ class MemoryCatalog implements CatalogPort {
   putRecord<T>(namespace: string, id: string, value: T) { this.records.set(`${namespace}:${id}`, structuredClone(value)); }
   updateRecord<T>(namespace: string, id: string, update: (current: T | undefined) => T) { const key = `${namespace}:${id}`; const value = update(this.records.get(key) as T | undefined); this.records.set(key, structuredClone(value)); return value; }
   getRecord<T>(namespace: string, id: string) { const value = this.records.get(`${namespace}:${id}`); return value === undefined ? undefined : structuredClone(value) as T; }
+  deleteRecord(namespace: string, id: string) { this.records.delete(`${namespace}:${id}`); }
   listRecords<T>(namespace: string) { return [...this.records].filter(([key]) => key.startsWith(`${namespace}:`)).map(([, value]) => structuredClone(value) as T); }
   close() {}
 }
@@ -166,4 +167,14 @@ test("an existing planned file is refused without modifying it", async () => {
   mkdirSync(join(path, ".devhub")); writeFileSync(join(path, ".devhub", "owned.conf"), "keep me\n");
   await expect(discovery.apply(plan.id)).rejects.toMatchObject({ code: "file_conflict" });
   expect(readFileSync(join(path, ".devhub", "owned.conf"), "utf8")).toBe("keep me\n");
+});
+
+test("expired setup plans are reclaimed so previews never exhaust plan storage", async () => {
+  const root = fixture(); const path = viteFixture(root); const catalog = new MemoryCatalog(); catalog.addRoot(root);
+  const old = new Date(Date.now() - 2 * 60 * 60_000).toISOString();
+  for (let index = 0; index < 100; index++) catalog.putRecord("discovery-plans", `old-${index}`, { plan: { id: `old-${index}`, createdAt: old }, state: index === 0 ? "running" : "ready" });
+  const discovery = new Discovery({ catalog, run: async () => response("") });
+  const plan = await discovery.preview({ path, name: "Shop", preset: "native" });
+  const remaining = catalog.listRecords<{ plan: { id: string } }>("discovery-plans").map((item) => item.plan.id);
+  expect(remaining.sort()).toEqual(["old-0", plan.id].sort());
 });

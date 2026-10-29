@@ -55,6 +55,7 @@ class MemoryCatalog implements CatalogPort {
     const key = `${namespace}:${id}`; const next = update(this.getRecord<T>(namespace, id)); this.records.set(key, structuredClone(next)); return structuredClone(next);
   }
   getRecord<T>(namespace: string, id: string): T | undefined { const value = this.records.get(`${namespace}:${id}`); return value === undefined ? undefined : structuredClone(value) as T; }
+  deleteRecord(namespace: string, id: string): void { this.records.delete(`${namespace}:${id}`); }
   listRecords<T>(namespace: string): T[] { return [...this.records.entries()].filter(([key]) => key.startsWith(`${namespace}:`)).map(([, value]) => structuredClone(value) as T); }
   close(): void {}
 }

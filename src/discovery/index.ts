@@ -8,6 +8,7 @@ import { classifyManifests, parseMakeTargets } from "./manifests";
 
 const PLAN_NS = "discovery-plans";
 const PLAN_LIMIT = 100;
+const PLAN_TTL_MS = 60 * 60_000;
 const FILE_LIMIT = 1024 * 1024;
 const SKIP = new Set([".git", ".hg", ".svn", ".idea", ".vscode", "node_modules", "vendor", "build", "dist", "target", "coverage", ".next", ".cache", ".venv"]);
 const COMPOSE_NAMES = ["compose.yml", "compose.yaml", "docker-compose.yml", "docker-compose.yaml"];
@@ -324,11 +325,22 @@ export class Discovery implements DiscoveryPort {
     const project: ProjectInput = { id, name: input.name.trim(), root: canonical, components };
     const snapshots = this.snapshot(canonical, detection, files);
     const plan: SetupPlan = { id: randomUUID(), project: structuredClone(project), files: structuredClone(files), warnings: [...detection.warnings], createdAt: new Date().toISOString() };
+    this.pruneExpiredPlans();
     if (this.catalog.listRecords<StoredPlan>(PLAN_NS).length >= PLAN_LIMIT) fail("Setup plan storage is full; remove old plans through the catalog before creating another", "plan_storage_full", 507);
     const stored: StoredPlan = { plan: structuredClone(plan), snapshots, inputsHash: hash(stableInput({ ...input, path: canonical })), state: "ready" };
     try { this.catalog.putRecord(PLAN_NS, plan.id, stored); }
     catch { fail("Unable to store setup plan in the catalog", "plan_storage_failed", 507); }
     return structuredClone(plan);
+  }
+  /** Plans are short-lived approvals: anything not being applied expires after an hour. */
+  private pruneExpiredPlans(): void {
+    const cutoff = Date.now() - PLAN_TTL_MS;
+    for (const stored of this.catalog.listRecords<StoredPlan>(PLAN_NS)) {
+      const created = Date.parse(stored?.plan?.createdAt ?? "");
+      if (stored?.plan?.id && stored.state !== "running" && (!Number.isFinite(created) || created < cutoff)) {
+        try { this.catalog.deleteRecord(PLAN_NS, stored.plan.id); } catch { /* a concurrent writer may have removed it */ }
+      }
+    }
   }
   private snapshot(root: string, detection: Detection, files: PlannedFile[]): Snapshot[] {
     const paths = new Set<string>();
