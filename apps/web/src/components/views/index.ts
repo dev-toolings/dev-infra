@@ -15,4 +15,5 @@ export type { ProjectListProps } from "./project-list";
 export { RemediationPanel } from "./remediation-panel";
 export type { RemediationPanelProps } from "./remediation-panel";
 export { ScansView } from "./scans-view";
+export { ProjectDetailSkeleton, ShellSkeleton } from "./skeletons";
 export type { ScansViewProps } from "./scans-view";

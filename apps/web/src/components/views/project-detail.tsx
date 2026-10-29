@@ -4,12 +4,16 @@ import { safeHttpUrl, formatDateTime } from "./shared";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "../ui/card";
-import { EmptyState, ErrorState, LoadingState } from "../ui/state";
+import { EmptyState, ErrorState } from "../ui/state";
+import { Skeleton } from "../ui/skeleton";
+import { ProjectDetailSkeleton } from "./skeletons";
 import { Alert, AlertDescription, AlertTitle } from "../ui/alert";
 
 export interface ProjectDetailProps {
   project?: PublicProject;
   status?: ProjectStatus;
+  /** The first status read is in flight: component badges show a placeholder, not "unavailable". */
+  statusLoading?: boolean;
   operations?: Operation[];
   busyComponentIds?: string[];
   loading?: boolean;
@@ -49,9 +53,9 @@ function operationStateLabel(operation: Operation): string {
   }
 }
 
-export function ProjectDetail({ project, status, operations = [], busyComponentIds = [], loading = false, error, onAction }: ProjectDetailProps) {
+export function ProjectDetail({ project, status, statusLoading = false, operations = [], busyComponentIds = [], loading = false, error, onAction }: ProjectDetailProps) {
   if (error) return <ErrorState description={error} />;
-  if (loading) return <LoadingState label="Loading project details" rows={3} />;
+  if (loading) return <ProjectDetailSkeleton />;
   if (!project) {
     return <EmptyState title="Select a project" description="Project components and status appear here." />;
   }
@@ -96,13 +100,13 @@ export function ProjectDetail({ project, status, operations = [], busyComponentI
                       </div>
                       <CardAction className="flex flex-wrap items-center justify-end gap-1.5">
                         <Badge variant="outline">{component.kind === "native" ? "Native" : "Compose"}</Badge>
-                        {state ? <Badge variant={stateVariant(state)}>{stateLabels[state]}</Badge> : <Badge variant="outline">Status unavailable</Badge>}
+                        {state ? <Badge variant={stateVariant(state)}>{stateLabels[state]}</Badge> : statusLoading ? <Skeleton role="status" aria-label="Loading status" className="h-5.5 w-16" /> : <Badge variant="outline">Status unavailable</Badge>}
                       </CardAction>
                     </CardHeader>
                     <CardContent className="space-y-4">
                       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
                         <span className="text-muted-foreground">Readiness</span>
-                        <span className="font-medium">{readyLabel}</span>
+                        {!componentStatus && statusLoading ? <Skeleton className="h-4 w-24" /> : <span className="font-medium">{readyLabel}</span>}
                         {componentStatus?.detail ? <span className="break-words text-muted-foreground">{componentStatus.detail}</span> : null}
                       </div>
 

@@ -1,8 +1,8 @@
 import * as React from "react";
 import { errorMessage, getSession, isAbortError, isUnauthorized, logout, pair, setUnauthorizedListener } from "./lib/api";
 import { Button } from "./components/ui/button";
-import { ErrorState, LoadingState } from "./components/ui/state";
-import { PairingForm } from "./components/views";
+import { ErrorState } from "./components/ui/state";
+import { PairingForm, ShellSkeleton } from "./components/views";
 import { Workspace } from "./workspace";
 
 type Phase = "checking" | "unauthenticated" | "ready" | "signingOut" | "unavailable";
@@ -96,5 +96,5 @@ export function App() {
       </Centered>
     );
   }
-  return <Centered><LoadingState label={phase === "signingOut" ? "Signing out" : "Connecting to DevHub"} rows={2} /></Centered>;
+  return <ShellSkeleton label={phase === "signingOut" ? "Signing out" : "Connecting to DevHub"} />;
 }

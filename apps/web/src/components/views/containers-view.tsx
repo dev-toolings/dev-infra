@@ -3,7 +3,8 @@ import type { ContainerInfo } from "../../../../../src/contracts";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../ui/card";
-import { EmptyState, ErrorState, LoadingState } from "../ui/state";
+import { EmptyState, ErrorState } from "../ui/state";
+import { ContainersSkeleton } from "./skeletons";
 import { ViewHeading } from "./shared";
 
 export interface ContainersViewProps {
@@ -43,7 +44,7 @@ export function ContainersView({ containers, loading = false, error, onSelectPro
         titleId="containers-heading"
         description="Observed containers are listed as inventory. Only explicitly mapped entries link back to a registered project."
       />
-      {error ? <ErrorState description={error} /> : loading ? <LoadingState label="Loading container inventory" rows={4} /> : null}
+      {error ? <ErrorState description={error} /> : loading ? <ContainersSkeleton /> : null}
       {!error && !loading && containers.length === 0 ? (
         <EmptyState title="No containers observed" description="The current Docker inventory returned no containers." icon={<Box aria-hidden="true" className="size-5" />} />
       ) : null}

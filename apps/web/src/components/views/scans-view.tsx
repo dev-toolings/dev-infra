@@ -4,7 +4,9 @@ import type { ContainerInfo, Scan, PublicChange } from "../../../../../src/contr
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../ui/card";
-import { EmptyState, ErrorState, LoadingState } from "../ui/state";
+import { EmptyState, ErrorState } from "../ui/state";
+import { Skeleton } from "../ui/skeleton";
+import { ScansSkeleton } from "./skeletons";
 import { Label } from "../ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
 import { ViewHeading, formatDateTime, type ViewTask } from "./shared";
@@ -13,6 +15,8 @@ export interface ScansViewProps {
   scans: Scan[];
   changes: PublicChange[];
   containers: ContainerInfo[];
+  /** The container inventory that feeds the image selector is still loading. */
+  inventoryLoading?: boolean;
   loading?: boolean;
   busy?: boolean;
   scanningImageId?: string;
@@ -34,7 +38,7 @@ function changeVariant(state: PublicChange["state"]): "default" | "secondary" | 
   return "outline";
 }
 
-export function ScansView({ scans, changes, containers, loading = false, busy = false, scanningImageId, error, onScan }: ScansViewProps) {
+export function ScansView({ scans, changes, containers, inventoryLoading = false, loading = false, busy = false, scanningImageId, error, onScan }: ScansViewProps) {
   const [selectedImageId, setSelectedImageId] = React.useState<string>();
   const imageGroups = Array.from(
     containers.reduce((groups, container) => {
@@ -88,12 +92,20 @@ export function ScansView({ scans, changes, containers, loading = false, busy = 
                 {scanBusy && scanningImageId === selectedImage?.imageId ? "Scanning image" : scanBusy ? "Scan in progress" : "Scan image"}
               </Button>
             </div>
+          ) : inventoryLoading ? (
+            <div role="status" aria-label="Loading observed images" className="flex items-end gap-2">
+              <div className="space-y-2">
+                <Skeleton className="h-3.5 w-32" />
+                <Skeleton className="h-8 w-64" />
+              </div>
+              <Skeleton className="h-8 w-28" />
+            </div>
           ) : (
             <p className="max-w-xs text-xs leading-5 text-muted-foreground">No observed local image IDs are available to scan.</p>
           )
         ) : undefined}
       />
-      {error ? <ErrorState description={error} /> : loading ? <LoadingState label="Loading scan and change records" rows={4} /> : null}
+      {error ? <ErrorState description={error} /> : loading ? <ScansSkeleton /> : null}
       {!error && !loading && scans.length === 0 && changes.length === 0 ? (
         <EmptyState
           title="No maintenance records"

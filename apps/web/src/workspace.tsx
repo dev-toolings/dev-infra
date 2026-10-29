@@ -16,6 +16,7 @@ import {
   ContainersView,
   LogsView,
   ProjectDetail,
+  ProjectDetailSkeleton,
   ProjectList,
   RemediationPanel,
   ScansView,
@@ -93,7 +94,7 @@ export function Workspace({ onLogout }: WorkspaceProps) {
       onLogout={onLogout}
     >
       {view === "projects" ? (
-        <div className={projectList.length > 0 ? "grid min-w-0 gap-6 lg:grid-cols-[minmax(17rem,22rem)_minmax(0,1fr)]" : "min-w-0"}>
+        <div className={projectList.length > 0 || projects.loading ? "grid min-w-0 gap-6 lg:grid-cols-[minmax(17rem,22rem)_minmax(0,1fr)]" : "min-w-0"}>
           <ProjectList
             projects={projectList}
             selectedProjectId={selectedId}
@@ -110,12 +111,13 @@ export function Workspace({ onLogout }: WorkspaceProps) {
               <ProjectDetail
                 project={selected}
                 status={status.data}
+                statusLoading={status.loading}
                 operations={lifecycle.operations}
                 busyComponentIds={lifecycle.busyComponentIds(selectedId)}
                 onAction={(action, componentIds) => lifecycle.run(selected.id, action, componentIds)}
               />
             </div>
-          ) : null}
+          ) : projects.loading ? <ProjectDetailSkeleton /> : null}
         </div>
       ) : null}
 
@@ -137,6 +139,7 @@ export function Workspace({ onLogout }: WorkspaceProps) {
               {logs.error && logs.entries.length > 0 ? <ActionBanner title="Log stream interrupted" message={logs.error} /> : null}
               <LogsView
                 entries={logs.entries}
+                loading={logs.loading}
                 componentFilter={componentFilter}
                 components={selected.components}
                 paused={paused}
@@ -166,6 +169,7 @@ export function Workspace({ onLogout }: WorkspaceProps) {
                 scans={maintenance.scans}
                 changes={maintenance.changes}
                 containers={containers.data ?? []}
+                inventoryLoading={containers.loading}
                 loading={maintenance.loading}
                 busy={maintenance.busy}
                 scanningImageId={maintenance.scanningImageId}

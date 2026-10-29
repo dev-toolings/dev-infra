@@ -22,6 +22,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Inter font, floating collapsible sidebar, page header bar, light/dark/system
   theme in the session menu (which now holds Log out), colored status badges
   and the radar favicon. Radix primitives now come from the `radix-ui` package.
+- Control panel loading states are page-shaped skeletons (shell, projects, project
+  detail, containers, logs, scans) instead of generic rows; component status,
+  readiness and the scan image selector show placeholders while they load, and the
+  log view shows a connecting state until the stream opens. `DESIGN.md` now
+  documents the control panel design system.
 - `devhub up` / `devhub restart` now start the `async` profile (RabbitMQ) by
   default alongside `core`. Projects relying on AMQP no longer crash-loop after
   a plain `devhub up`. `make up-async` remains an alias of `make up`.

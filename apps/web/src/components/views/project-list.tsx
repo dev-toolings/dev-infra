@@ -2,7 +2,8 @@ import { FolderGit2, Plus } from "lucide-react";
 import type { PublicProject } from "../../../../../src/contracts";
 import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
-import { EmptyState, ErrorState, LoadingState } from "../ui/state";
+import { EmptyState, ErrorState } from "../ui/state";
+import { ProjectListSkeleton } from "./skeletons";
 import { ViewHeading, formatDateTime } from "./shared";
 
 export interface ProjectListProps {
@@ -30,7 +31,7 @@ export function ProjectList({ projects, selectedProjectId, loading = false, erro
           </Button>
         ) : undefined}
       />
-      {error ? <ErrorState description={error} /> : loading ? <LoadingState label="Loading projects" rows={4} /> : null}
+      {error ? <ErrorState description={error} /> : loading ? <ProjectListSkeleton /> : null}
 
       {!error && !loading && projects.length === 0 ? (
         <EmptyState

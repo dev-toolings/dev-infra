@@ -2,7 +2,8 @@ import { Pause, Play, Trash2 } from "lucide-react";
 import type { ComponentKind, LogEntry, PublicComponent } from "../../../../../src/contracts";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
-import { EmptyState, ErrorState, LoadingState } from "../ui/state";
+import { EmptyState, ErrorState } from "../ui/state";
+import { LogsSkeleton } from "./skeletons";
 import { Label } from "../ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
 import { ViewHeading } from "./shared";
@@ -97,7 +98,7 @@ export function LogsView({
         </div>
       </div>
 
-      {error ? <ErrorState description={error} /> : loading ? <LoadingState label="Loading project logs" rows={3} /> : null}
+      {error ? <ErrorState description={error} /> : loading ? <LogsSkeleton /> : null}
       {!error && !loading && newestEntries.length === 0 ? (
         <EmptyState title="No log entries" description="No entries are available for the current project and component filter." />
       ) : null}

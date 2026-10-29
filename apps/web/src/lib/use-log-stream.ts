@@ -45,6 +45,8 @@ function reducer(state: LogState, action: LogAction): LogState {
 export interface LogStream {
   entries: LogEntry[];
   error: string | undefined;
+  /** No stream attempt has finished yet for the current project. */
+  loading: boolean;
   clear: () => void;
 }
 
@@ -56,6 +58,7 @@ export interface LogStream {
 export function useLogStream(projectId: string | undefined, active: boolean): LogStream {
   const [state, dispatch] = React.useReducer(reducer, undefined, () => empty(projectId));
   const [error, setError] = React.useState<{ projectId: string | undefined; message: string }>();
+  const [settledProjectId, setSettledProjectId] = React.useState<string>();
   const cursorRef = React.useRef<{ projectId: string | undefined; seq: number | undefined }>({ projectId, seq: undefined });
 
   React.useEffect(() => {
@@ -93,7 +96,10 @@ export function useLogStream(projectId: string | undefined, active: boolean): Lo
             cursor: cursor.seq,
             limit: cursor.seq === undefined ? INITIAL_LIMIT : MAX_LOG_ENTRIES,
             signal,
-            onOpen: () => setError(undefined),
+            onOpen: () => {
+              setError(undefined);
+              setSettledProjectId(projectId);
+            },
             onEntry: (entry) => {
               if (cursor.seq !== undefined && entry.seq <= cursor.seq) return;
               cursor.seq = entry.seq;
@@ -118,6 +124,7 @@ export function useLogStream(projectId: string | undefined, active: boolean): Lo
           failed = true;
         }
         flush();
+        if (!signal.aborted) setSettledProjectId(projectId);
         if (progressed) { failures = 0; resetsWithoutProgress = 0; }
         if (resetsWithoutProgress > MAX_RESETS_WITHOUT_PROGRESS) {
           setError({ projectId, message: "The log stream keeps resetting its cursor, so following was stopped. Switch views to try again." });
@@ -140,6 +147,7 @@ export function useLogStream(projectId: string | undefined, active: boolean): Lo
   return {
     entries: current ? state.entries : [],
     error: error && error.projectId === projectId ? error.message : undefined,
+    loading: Boolean(projectId) && active && settledProjectId !== projectId && !(current && state.entries.length > 0),
     clear,
   };
 }

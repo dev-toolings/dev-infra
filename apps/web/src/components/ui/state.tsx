@@ -1,7 +1,6 @@
 import * as React from "react";
 import { CircleAlert } from "lucide-react";
 import { cn } from "../../lib/utils";
-import { Skeleton } from "./skeleton";
 
 export interface EmptyStateProps extends React.HTMLAttributes<HTMLElement> {
   title: string;
@@ -64,29 +63,3 @@ export const ErrorState = React.forwardRef<HTMLElement, ErrorStateProps>(
   },
 );
 ErrorState.displayName = "ErrorState";
-
-export interface LoadingStateProps extends React.HTMLAttributes<HTMLDivElement> {
-  label?: string;
-  rows?: number;
-}
-
-export const LoadingState = React.forwardRef<HTMLDivElement, LoadingStateProps>(
-  ({ label = "Loading", rows = 3, className, ...props }, ref) => {
-    const rowCount = Math.max(1, Math.min(Math.floor(rows), 8));
-    return (
-      <div ref={ref} role="status" aria-label={label} aria-busy="true" className={cn("space-y-3", className)} {...props}>
-        {Array.from({ length: rowCount }, (_, index) => (
-          <div key={index} className="flex min-w-0 items-center gap-3 rounded-lg border border-border bg-card p-4">
-            <Skeleton className="size-9 shrink-0 rounded-md" />
-            <div className="min-w-0 flex-1 space-y-2">
-              <Skeleton className="h-3.5 w-2/5 max-w-48" />
-              <Skeleton className="h-3 w-4/5 max-w-80" />
-            </div>
-          </div>
-        ))}
-        <span className="sr-only">{label}</span>
-      </div>
-    );
-  },
-);
-LoadingState.displayName = "LoadingState";
