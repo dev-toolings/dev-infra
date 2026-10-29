@@ -98,7 +98,7 @@ export function RemediationPanel({
     input && change &&
     change.projectId === input.projectId &&
     change.componentId === input.componentId &&
-    change.file === input.file &&
+    (change.file === input.file || change.file === `${project?.root.replace(/\/$/, "")}/${input.file}`) &&
     change.replacement === input.replacement,
   );
   const freshPreview = Boolean(
@@ -115,7 +115,7 @@ export function RemediationPanel({
 
   function handlePreview(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!input || !inputKey || busy || error) return;
+    if (!input || !inputKey || busy) return;
     setPreviewedFormKey(inputKey);
     setChangeIdsBeforePreview(changes.map((item) => item.id));
     onPreview(input);
@@ -225,7 +225,7 @@ export function RemediationPanel({
                     required
                     onChange={(event) => setReplacement(event.currentTarget.value)}
                   />
-                  <p className="text-xs leading-5 text-muted-foreground">Enter an image reference, not file patch text or a command. Backend validation remains authoritative.</p>
+                  <p className="text-xs leading-5 text-muted-foreground">DevHub checks this reference against the configured source before creating a change.</p>
                 </div>
 
                 <div className="min-w-0 space-y-2">
@@ -236,10 +236,10 @@ export function RemediationPanel({
                     disabled={busy || !component || services.length === 0}
                   >
                     <SelectTrigger id="remediation-service">
-                      <SelectValue placeholder="All configured services" />
+                      <SelectValue placeholder="Use mapped source" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="none">All configured services</SelectItem>
+                      <SelectItem value="none">Use mapped source</SelectItem>
                       {services.map((item) => <SelectItem key={item} value={`service:${item}`}>{item}</SelectItem>)}
                     </SelectContent>
                   </Select>
@@ -258,7 +258,7 @@ export function RemediationPanel({
                 </div>
               </div>
 
-              <Button type="submit" disabled={!input || busy || Boolean(error)}>
+              <Button type="submit" disabled={!input || busy}>
                 {busy ? <LoaderCircle aria-hidden="true" className="animate-spin" /> : <FileCode2 aria-hidden="true" />}
                 Preview image change
               </Button>
