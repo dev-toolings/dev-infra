@@ -38,7 +38,8 @@ export interface CatalogPort {
  claimOperation(projectId: string, action: Action, componentIds: string[], idempotencyKey?: string): OperationClaim;
  updateOperation(id: string, patch: Partial<Pick<Operation,"state"|"error">>): Operation;
  getOperation(id: string): Operation; listOperations(projectId?: string): Operation[]; recoverOperations(): void;
- putRecord<T>(namespace: string, id: string, value: T): void; getRecord<T>(namespace: string, id: string): T | undefined; listRecords<T>(namespace: string): T[];
+ putRecord<T>(namespace: string, id: string, value: T): void;
+ updateRecord<T>(namespace: string, id: string, update: (current: T | undefined) => T): T; getRecord<T>(namespace: string, id: string): T | undefined; listRecords<T>(namespace: string): T[];
  close(): void;
 }
 export interface RuntimePort {
