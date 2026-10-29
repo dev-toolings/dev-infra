@@ -122,23 +122,29 @@ function currentUid(): number {
 function secureExistingPrivateFiles(statePath: string, uid: number, secureAllFiles: boolean): void {
   for (const name of readdirSync(statePath)) {
     const filePath = join(statePath, name);
-    const info = lstatSync(filePath);
-    const privateFile = secureAllFiles || PRIVATE_FILE_PATTERN.test(name);
-    if (info.isSymbolicLink() && privateFile) {
-      throw new Error(`Private state file cannot be a symlink: ${filePath}`);
+    try {
+      const info = lstatOrNull(filePath);
+      if (!info) continue;
+      const privateFile = secureAllFiles || PRIVATE_FILE_PATTERN.test(name);
+      if (info.isSymbolicLink() && privateFile) {
+        throw new Error(`Private state file cannot be a symlink: ${filePath}`);
+      }
+      if (info.isDirectory()) {
+        if (!secureAllFiles) continue;
+        if (info.uid !== uid) throw new Error(`Private state directory is not owned by the current user: ${filePath}`);
+        chmodSync(filePath, 0o700);
+        secureExistingPrivateFiles(filePath, uid, true);
+        continue;
+      }
+      if (!privateFile) continue;
+      if (!info.isFile()) throw new Error(`Private state entry must be a regular file: ${filePath}`);
+      if (info.uid !== uid) throw new Error(`Private state file is not owned by the current user: ${filePath}`);
+      if (info.nlink !== 1) throw new Error(`Private state file has a hard link; provide an independent single-link file: ${filePath}`);
+      chmodSync(filePath, 0o600);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT" && lstatOrNull(filePath) === null) continue;
+      throw error;
     }
-    if (info.isDirectory()) {
-      if (!secureAllFiles) continue;
-      if (info.uid !== uid) throw new Error(`Private state directory is not owned by the current user: ${filePath}`);
-      chmodSync(filePath, 0o700);
-      secureExistingPrivateFiles(filePath, uid, true);
-      continue;
-    }
-    if (!privateFile) continue;
-    if (!info.isFile()) throw new Error(`Private state entry must be a regular file: ${filePath}`);
-    if (info.uid !== uid) throw new Error(`Private state file is not owned by the current user: ${filePath}`);
-    if (info.nlink !== 1) throw new Error(`Private state file has a hard link; provide an independent single-link file: ${filePath}`);
-    chmodSync(filePath, 0o600);
   }
 }
 
@@ -183,6 +189,14 @@ export function ensureStateDir(stateDir: string, infraDir?: string): string {
   }
 
   secureExistingPrivateFiles(statePath, uid, !isAtOrBelow(home, statePath));
+  const securedRoot = lstatSync(statePath);
+  if (securedRoot.isSymbolicLink() || !securedRoot.isDirectory()) {
+    throw new Error(`State path must be a real directory: ${statePath}`);
+  }
+  if (securedRoot.uid !== uid) throw new Error(`State directory is not owned by the current user: ${statePath}`);
+  if ((securedRoot.mode & 0o777) !== 0o700) {
+    throw new Error(`Existing state directory must have mode 0700: ${statePath}`);
+  }
   process.umask(process.umask() | 0o077);
   return statePath;
 }

@@ -1,4 +1,5 @@
-import { afterEach, beforeEach, expect, test } from "bun:test";
+import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
+import * as fs from "node:fs";
 import {
   chmodSync,
   existsSync,
@@ -42,6 +43,32 @@ function sandbox() {
   mkdirSync(home, { mode: 0o700 });
   process.env.HOME = home;
   return { root, home, infra: join(root, "infra") };
+}
+
+function addPrivateSiblingsAndDirectory(statePath: string) {
+  const siblings = [join(statePath, "sibling-one.json"), join(statePath, "sibling-two.json")];
+  for (const filePath of siblings) {
+    writeFileSync(filePath, "private");
+    chmodSync(filePath, 0o644);
+  }
+
+  const directory = join(statePath, "surviving-directory");
+  mkdirSync(directory, { mode: 0o755 });
+  chmodSync(directory, 0o755);
+  const nestedFile = join(directory, "nested.json");
+  writeFileSync(nestedFile, "nested private");
+  chmodSync(nestedFile, 0o644);
+  return { siblings, directory, nestedFile };
+}
+
+function expectPrivateEntriesSecured(entries: ReturnType<typeof addPrivateSiblingsAndDirectory>) {
+  for (const filePath of entries.siblings) expect(fs.statSync(filePath).mode & 0o777).toBe(0o600);
+  expect(fs.statSync(entries.directory).mode & 0o777).toBe(0o700);
+  expect(fs.statSync(entries.nestedFile).mode & 0o777).toBe(0o600);
+}
+
+function listWithFirstName(names: string[], firstName: string): string[] {
+  return [firstName, ...names.filter((name) => name !== firstName)];
 }
 
 test("requires an absolute path and rejects parent traversal before creation", () => {
@@ -238,3 +265,207 @@ test("supports the dedicated default state directory under HOME", () => {
   expect(ensureStateDir(state, infra)).toBe(state);
   expect(statSync(state).mode & 0o777).toBe(0o700);
 });
+
+test("continues after a listed private file disappears before lstat", () => {
+  const { root, infra } = sandbox();
+  const statePath = ensureStateDir(join(root, "state"), infra);
+  const goneName = "gone.json";
+  const gonePath = join(statePath, goneName);
+  writeFileSync(gonePath, "private");
+  chmodSync(gonePath, 0o644);
+  const surviving = addPrivateSiblingsAndDirectory(statePath);
+  const originalReaddirSync = fs.readdirSync;
+  let rootScanSeen = false;
+  const readdirSpy = spyOn(fs, "readdirSync").mockImplementation(((path: fs.PathLike) => {
+    const names = originalReaddirSync(path);
+    if (path !== statePath) return names;
+    rootScanSeen = true;
+    expect(names).toContain(goneName);
+    rmSync(gonePath);
+    return listWithFirstName(names, goneName);
+  }) as typeof fs.readdirSync);
+
+  try {
+    expect(ensureStateDir(statePath, infra)).toBe(statePath);
+    expect(rootScanSeen).toBe(true);
+    expect(fs.existsSync(gonePath)).toBe(false);
+    expectPrivateEntriesSecured(surviving);
+  } finally {
+    readdirSpy.mockRestore();
+  }
+});
+
+test("continues when a child directory disappears before its recursive scan", () => {
+  const { root, infra } = sandbox();
+  const statePath = ensureStateDir(join(root, "state"), infra);
+  const vanishedDirectory = join(statePath, "vanished-directory");
+  mkdirSync(vanishedDirectory, { mode: 0o755 });
+  const nestedFile = join(vanishedDirectory, "nested.json");
+  writeFileSync(nestedFile, "private");
+  chmodSync(nestedFile, 0o644);
+  const surviving = addPrivateSiblingsAndDirectory(statePath);
+  const originalReaddirSync = fs.readdirSync;
+  const originalChmodSync = fs.chmodSync;
+  let rootScanSeen = false;
+  let childScanSeen = false;
+  let targetChmodSeen = false;
+  const readdirSpy = spyOn(fs, "readdirSync").mockImplementation(((path: fs.PathLike) => {
+    if (path === vanishedDirectory) {
+      childScanSeen = true;
+      return originalReaddirSync(path);
+    }
+    const names = originalReaddirSync(path);
+    if (path !== statePath) return names;
+    rootScanSeen = true;
+    return listWithFirstName(names, "vanished-directory");
+  }) as typeof fs.readdirSync);
+  const chmodSpy = spyOn(fs, "chmodSync").mockImplementation((path: fs.PathLike, mode: fs.Mode) => {
+    if (path === vanishedDirectory) {
+      targetChmodSeen = true;
+      originalChmodSync(path, mode);
+      rmSync(vanishedDirectory, { recursive: true });
+      return;
+    }
+    originalChmodSync(path, mode);
+  });
+
+  try {
+    expect(ensureStateDir(statePath, infra)).toBe(statePath);
+    expect(rootScanSeen).toBe(true);
+    expect(targetChmodSeen).toBe(true);
+    expect(childScanSeen).toBe(true);
+    expectPrivateEntriesSecured(surviving);
+  } finally {
+    chmodSpy.mockRestore();
+    readdirSpy.mockRestore();
+  }
+});
+
+test("fails if the state root disappears after its directory scan", () => {
+  const { root, infra } = sandbox();
+  const statePath = ensureStateDir(join(root, "state"), infra);
+  const originalReaddirSync = fs.readdirSync;
+  let rootScanSeen = false;
+  const readdirSpy = spyOn(fs, "readdirSync").mockImplementation(((path: fs.PathLike) => {
+    const names = originalReaddirSync(path);
+    if (path === statePath) {
+      rootScanSeen = true;
+      rmSync(statePath, { recursive: true });
+    }
+    return names;
+  }) as typeof fs.readdirSync);
+
+  try {
+    let caught: unknown;
+    try {
+      ensureStateDir(statePath, infra);
+    } catch (error) {
+      caught = error;
+    }
+    expect(rootScanSeen).toBe(true);
+    expect((caught as NodeJS.ErrnoException | undefined)?.code).toBe("ENOENT");
+  } finally {
+    readdirSpy.mockRestore();
+  }
+});
+
+test("continues when chmod gets ENOENT after the listed file is removed", () => {
+  const { root, infra } = sandbox();
+  const statePath = ensureStateDir(join(root, "state"), infra);
+  const goneName = "gone.json";
+  const gonePath = join(statePath, goneName);
+  writeFileSync(gonePath, "private");
+  chmodSync(gonePath, 0o644);
+  const surviving = addPrivateSiblingsAndDirectory(statePath);
+  const originalReaddirSync = fs.readdirSync;
+  const originalChmodSync = fs.chmodSync;
+  let rootScanSeen = false;
+  let targetChmodSeen = false;
+  const readdirSpy = spyOn(fs, "readdirSync").mockImplementation(((path: fs.PathLike) => {
+    const names = originalReaddirSync(path);
+    if (path !== statePath) return names;
+    rootScanSeen = true;
+    return listWithFirstName(names, goneName);
+  }) as typeof fs.readdirSync);
+  const chmodSpy = spyOn(fs, "chmodSync").mockImplementation((path: fs.PathLike, mode: fs.Mode) => {
+    if (path === gonePath) {
+      targetChmodSeen = true;
+      rmSync(gonePath);
+      return originalChmodSync(path, mode);
+    }
+    originalChmodSync(path, mode);
+  });
+
+  try {
+    expect(ensureStateDir(statePath, infra)).toBe(statePath);
+    expect(rootScanSeen).toBe(true);
+    expect(targetChmodSeen).toBe(true);
+    expectPrivateEntriesSecured(surviving);
+  } finally {
+    chmodSpy.mockRestore();
+    readdirSpy.mockRestore();
+  }
+});
+
+test("rethrows chmod ENOENT when the listed file still exists", () => {
+  const { root, infra } = sandbox();
+  const statePath = ensureStateDir(join(root, "state"), infra);
+  const targetPath = join(statePath, "still-present.json");
+  writeFileSync(targetPath, "private");
+  chmodSync(targetPath, 0o644);
+  const originalChmodSync = fs.chmodSync;
+  let targetChmodSeen = false;
+  const chmodSpy = spyOn(fs, "chmodSync").mockImplementation((path: fs.PathLike, mode: fs.Mode) => {
+    if (path === targetPath) {
+      targetChmodSeen = true;
+      throw Object.assign(new Error("simulated chmod ENOENT"), { code: "ENOENT" });
+    }
+    originalChmodSync(path, mode);
+  });
+
+  try {
+    let caught: unknown;
+    try {
+      ensureStateDir(statePath, infra);
+    } catch (error) {
+      caught = error;
+    }
+    expect(targetChmodSeen).toBe(true);
+    expect(fs.existsSync(targetPath)).toBe(true);
+    expect((caught as NodeJS.ErrnoException | undefined)?.code).toBe("ENOENT");
+  } finally {
+    chmodSpy.mockRestore();
+  }
+});
+
+for (const code of ["ENOTDIR", "EPERM"] as const) {
+  test(`rethrows chmod ${code}`, () => {
+    const { root, infra } = sandbox();
+    const statePath = ensureStateDir(join(root, "state"), infra);
+    const targetPath = join(statePath, "private.json");
+    writeFileSync(targetPath, "private");
+    chmodSync(targetPath, 0o644);
+    const originalChmodSync = fs.chmodSync;
+    let targetChmodSeen = false;
+    const chmodSpy = spyOn(fs, "chmodSync").mockImplementation((path: fs.PathLike, mode: fs.Mode) => {
+      if (path === targetPath) {
+        targetChmodSeen = true;
+        throw Object.assign(new Error(`simulated ${code}`), { code });
+      }
+      originalChmodSync(path, mode);
+    });
+
+    try {
+      let caught: unknown;
+      try {
+        ensureStateDir(statePath, infra);
+      } catch (error) {
+        caught = error;
+      }
+      expect(targetChmodSeen).toBe(true);
+      expect((caught as NodeJS.ErrnoException | undefined)?.code).toBe(code);
+    } finally {
+      chmodSpy.mockRestore();
+    }
+  });
+}
