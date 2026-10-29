@@ -241,7 +241,7 @@ Commands:
   setup [--install-deps]              Check local manager prerequisites
   root | project | maintenance|security Manage approved local projects
   presets                             List supported project presets
-  serve | pair                        Start the loopback panel API or create a pairing code
+  serve | pair                        Start the panel API (--dev adds Vite) or create a pairing code
   infra <legacy-command>              Run an existing infrastructure command
   version                             Show the installed DevHub version
   help                                Show this help

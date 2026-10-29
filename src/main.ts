@@ -89,9 +89,31 @@ export function controllerFetch(api: { fetch: (request: Request) => Response | P
     return staticAsset(distDir, pathname) ?? new Response("DevHub API is running. The control panel is not built: run `bun run web:build` in the DevHub checkout, or use `devhub serve --dev-origin http://127.0.0.1:5175` with the Vite dev server.\n", { status: 503, headers: { "content-type": "text/plain; charset=utf-8" } });
   };
 }
+type DevPanelSpawn = (argv: string[], options: { cwd: string; env: Record<string, string | undefined> }) => { exited: Promise<number>; kill: () => void };
+/**
+ * Development mode owns the Vite panel server, so `devhub serve --dev` alone gives a working panel.
+ * A server already answering on the dev origin is reused instead of starting a second one.
+ */
+export async function startDevPanel(devOrigin: string, checkout: string, apiPort: number, deps: {
+  probe?: (origin: string) => Promise<boolean>;
+  spawn?: DevPanelSpawn;
+  warn?: (message: string) => void;
+} = {}): Promise<{ state: "started" | "reused"; stop: () => void }> {
+  const probe = deps.probe ?? ((origin: string) => fetch(origin, { signal: AbortSignal.timeout(500) }).then(() => true, () => false));
+  if (await probe(devOrigin)) return { state: "reused", stop: () => {} };
+  const spawn = deps.spawn ?? ((argv, options) => Bun.spawn(argv, { ...options, stdin: "ignore", stdout: "inherit", stderr: "inherit" }));
+  const warn = deps.warn ?? ((message: string) => process.stderr.write(`${message}\n`));
+  // The Vite proxy reads the API port, so `--port` other than 8040 keeps /api working.
+  const child = spawn([process.execPath, "run", "web:dev", "--port", new URL(devOrigin).port || "80"], { cwd: checkout, env: { ...process.env, DEVHUB_API_PORT: String(apiPort) } });
+  let stopping = false;
+  void child.exited.then((code) => {
+    if (!stopping) warn(`devhub: the Vite panel server exited (code ${code}); ${devOrigin} is down. Run \`bun run web:dev\` in ${checkout} to restart it.`);
+  });
+  return { state: "started", stop: () => { stopping = true; child.kill(); } };
+}
 const paint = (code: string, text: string, enabled: boolean) => enabled ? `\u001b[${code}m${text}\u001b[0m` : text;
 /** Startup summary that says where the API and the panel actually are in each mode. */
-export function serveBanner(options: { port: number; devOrigin?: string; panelBuilt: boolean; checkout: string; color?: boolean }): string {
+export function serveBanner(options: { port: number; devOrigin?: string; devPanel?: "started" | "reused"; panelBuilt: boolean; checkout: string; color?: boolean }): string {
   const color = options.color ?? process.env.NO_COLOR === undefined;
   const label = (text: string) => paint("1", text.padEnd(8), color);
   const url = (text: string) => paint("36", text, color);
@@ -99,7 +121,7 @@ export function serveBanner(options: { port: number; devOrigin?: string; panelBu
   // Bound to 127.0.0.1; shown as localhost, which the API and Vite both accept.
   const api = `http://localhost:${options.port}`;
   const panel = options.devOrigin
-    ? `${url(`http://localhost:${new URL(options.devOrigin).port || "80"}`)}  ${hint(`served by Vite: run \`bun run web:dev\` in ${options.checkout}`)}`
+    ? `${url(`http://localhost:${new URL(options.devOrigin).port || "80"}`)}  ${hint(options.devPanel === "started" ? "served by Vite, started with the controller" : options.devPanel === "reused" ? "served by the Vite server already running" : `served by Vite: run \`bun run web:dev\` in ${options.checkout}`)}`
     : options.panelBuilt
       ? url(`${api}/`)
       : `${paint("33", "not built", color)}  ${hint(`run \`bun run web:build\` in ${options.checkout}, or use --dev-origin with Vite`)}`;
@@ -142,8 +164,15 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     const hostnames = [`127.0.0.1:${port}`, `localhost:${port}`, ...devHosts];
     const app = api!.createApp(appServices, { stateDir, hostnames, origins });
     const distDir = resolve(import.meta.dir, "..", "apps", "web", "dist");
+    const checkout = resolve(import.meta.dir, "..");
     listen(controllerFetch(app, distDir), port);
-    process.stdout.write(serveBanner({ port, devOrigin, panelBuilt: existsSync(join(distDir, "index.html")), checkout: resolve(import.meta.dir, "..") }));
+    const devPanel = devOrigin ? await startDevPanel(devOrigin, checkout, port) : undefined;
+    if (devPanel) {
+      // Ctrl+C or a stop signal takes the Vite child down with the controller.
+      for (const [signal, code] of [["SIGINT", 130], ["SIGTERM", 143]] as const) process.once(signal, () => { devPanel.stop(); process.exit(code); });
+      process.once("exit", () => devPanel.stop());
+    }
+    process.stdout.write(serveBanner({ port, devOrigin, devPanel: devPanel?.state, panelBuilt: existsSync(join(distDir, "index.html")), checkout }));
     return 0;
   }
   try {

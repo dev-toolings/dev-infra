@@ -27,6 +27,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   readiness and the scan image selector show placeholders while they load, and the
   log view shows a connecting state until the stream opens. `DESIGN.md` now
   documents the control panel design system.
+- `devhub serve --dev` (and `--dev-origin`) now starts the Vite panel server
+  itself, reuses one already answering on the dev origin, and stops it with the
+  controller. The Vite proxy follows `--port` through `DEVHUB_API_PORT` instead of
+  always targeting 8040.
 - `devhub up` / `devhub restart` now start the `async` profile (RabbitMQ) by
   default alongside `core`. Projects relying on AMQP no longer crash-loop after
   a plain `devhub up`. `make up-async` remains an alias of `make up`.

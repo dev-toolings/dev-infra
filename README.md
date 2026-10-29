@@ -181,7 +181,7 @@ devhub db create myapp  # create a PostgreSQL database + role
 | `devhub project discover\|add\|list\|show\|remove` | Detect and register projects in place |
 | `devhub project start\|stop\|restart\|check\|status\|logs <id>` | Project lifecycle, status and merged logs |
 | `devhub maintenance inventory\|scan\|scans\|changes\|preview\|apply\|validate\|activate` | Docker inventory, image scans and remediation |
-| `devhub serve [--port 8040] [--dev \| --dev-origin URL]` / `devhub pair` | Loopback control panel API and one-time pairing code |
+| `devhub serve [--port 8040] [--dev \| --dev-origin URL]` / `devhub pair` | Loopback control panel API and one-time pairing code; `--dev` also starts the Vite panel on 5175 (reused if already running) |
 
 **Make shortcuts:**
 

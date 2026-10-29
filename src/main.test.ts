@@ -96,3 +96,19 @@ test("serve banner names where the panel is in each mode", async () => {
   expect(serveBanner({ port: 8040, panelBuilt: false, checkout: "/opt/devhub", color: false })).toContain("not built  run `bun run web:build` in /opt/devhub");
   expect(serveBanner({ port: 8040, panelBuilt: true, checkout: "/opt/devhub", color: true })).toContain("\u001b[");
 });
+
+test("development mode starts the Vite panel once and reuses a running one", async () => {
+  const { startDevPanel, serveBanner } = await import("./main");
+  const calls: { argv: string[]; cwd: string; apiPort?: string }[] = [];
+  let killed = 0;
+  const spawn = (argv: string[], options: { cwd: string; env: Record<string, string | undefined> }) => { calls.push({ argv, cwd: options.cwd, apiPort: options.env.DEVHUB_API_PORT }); return { exited: new Promise<number>(() => {}), kill: () => { killed += 1; } }; };
+  const started = await startDevPanel("http://127.0.0.1:5175", "/opt/devhub", 8041, { probe: async () => false, spawn });
+  expect(started.state).toBe("started");
+  expect(calls).toEqual([{ argv: [process.execPath, "run", "web:dev", "--port", "5175"], cwd: "/opt/devhub", apiPort: "8041" }]);
+  started.stop();
+  expect(killed).toBe(1);
+  const reused = await startDevPanel("http://127.0.0.1:5175", "/opt/devhub", 8041, { probe: async () => true, spawn });
+  expect(reused.state).toBe("reused");
+  expect(calls).toHaveLength(1);
+  expect(serveBanner({ port: 8040, devOrigin: "http://127.0.0.1:5175", devPanel: "started", panelBuilt: false, checkout: "/opt/devhub", color: false })).toContain("http://localhost:5175  served by Vite, started with the controller");
+});

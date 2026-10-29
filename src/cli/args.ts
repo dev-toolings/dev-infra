@@ -128,6 +128,7 @@ const USAGE = [
   "",
   "Controller commands handled by src/main.ts:",
   "  serve [--port 8040] [--dev | --dev-origin http://localhost:5175]",
+  "        --dev also starts the Vite panel server and stops it with the controller",
   "  pair",
   "",
   "Use --json on manager data and action commands. Use --help after a command",
