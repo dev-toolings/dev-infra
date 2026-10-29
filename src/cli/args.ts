@@ -236,8 +236,8 @@ function collectOptions(args: string[], schema: OptionSchema, allowJson = true):
       const equals = token.indexOf("=");
       const name = token.slice(2, equals === -1 ? undefined : equals);
       const hasInlineValue = equals !== -1;
-      const definition = schema[name];
-      if (!definition) usageError("Unknown option: " + token + ".");
+      const definition = Object.hasOwn(schema, name) ? schema[name] : undefined;
+      if (!definition) usageError("Unknown option: --" + name + ".");
 
       if (definition.kind === "boolean") {
         if (hasInlineValue) usageError("Option --" + name + " does not take a value.");

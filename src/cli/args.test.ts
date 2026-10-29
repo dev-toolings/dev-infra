@@ -202,3 +202,13 @@ test("serve and pair remain owned by the composition entry point", () => {
   expect(() => parseCliArgs(["serve"])).toThrow("handled by src/main.ts");
   expect(() => parseCliArgs(["pair"])).toThrow("handled by src/main.ts");
 });
+
+ test("inherited option names are rejected without echoing option values", () => {
+  for (const name of ["__proto__", "constructor", "toString", "unknown"]) {
+    try { parseCliArgs(["project","list",`--${name}=private-value`]); throw new Error("Expected refusal"); }
+    catch (error) {
+      expect(error).toBeInstanceOf(DevHubError);
+      expect((error as Error).message).not.toContain("private-value");
+    }
+  }
+});
