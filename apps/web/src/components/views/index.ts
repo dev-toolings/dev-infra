@@ -12,5 +12,7 @@ export { ProjectDetail } from "./project-detail";
 export type { ProjectDetailProps } from "./project-detail";
 export { ProjectList } from "./project-list";
 export type { ProjectListProps } from "./project-list";
+export { RemediationPanel } from "./remediation-panel";
+export type { RemediationPanelProps } from "./remediation-panel";
 export { ScansView } from "./scans-view";
 export type { ScansViewProps } from "./scans-view";

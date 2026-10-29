@@ -1,15 +1,23 @@
+import * as React from "react";
+import { LoaderCircle, ScanLine } from "lucide-react";
 import type { ContainerInfo, Scan, PublicChange } from "../../../../../src/contracts";
 import { Badge } from "../ui/badge";
+import { Button } from "../ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../ui/card";
 import { EmptyState, ErrorState, LoadingState } from "../ui/state";
-import { ViewHeading, formatDateTime } from "./shared";
+import { Label } from "../ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
+import { ViewHeading, formatDateTime, type ViewTask } from "./shared";
 
 export interface ScansViewProps {
   scans: Scan[];
   changes: PublicChange[];
   containers: ContainerInfo[];
   loading?: boolean;
+  busy?: boolean;
+  scanningImageId?: string;
   error?: string;
+  onScan?: (imageId: string) => ViewTask;
 }
 
 function severityVariant(severity: string): "destructive" | "secondary" | "outline" {
@@ -26,14 +34,65 @@ function changeVariant(state: PublicChange["state"]): "default" | "secondary" | 
   return "outline";
 }
 
-export function ScansView({ scans, changes, containers, loading = false, error }: ScansViewProps) {
+export function ScansView({ scans, changes, containers, loading = false, busy = false, scanningImageId, error, onScan }: ScansViewProps) {
+  const [selectedImageId, setSelectedImageId] = React.useState<string>();
+  const imageGroups = Array.from(
+    containers.reduce((groups, container) => {
+      const group = groups.get(container.imageId) ?? { imageId: container.imageId, images: new Set<string>(), containers: [] as ContainerInfo[] };
+      group.images.add(container.image);
+      group.containers.push(container);
+      groups.set(container.imageId, group);
+      return groups;
+    }, new Map<string, { imageId: string; images: Set<string>; containers: ContainerInfo[] }>()),
+    ([, group]) => group,
+  );
+  const selectedImage = imageGroups.find((group) => group.imageId === selectedImageId) ?? imageGroups[0];
+  const scanBusy = busy || Boolean(scanningImageId);
+
   return (
     <section className="min-w-0 space-y-6" aria-labelledby="maintenance-heading">
       <ViewHeading
         title="Image maintenance"
         titleId="maintenance-heading"
-        description="Review scan results, database freshness, and existing source-change records. This view does not apply or activate changes."
+        description="Review local image scans, database freshness, source mappings, and change records."
         className="[&_h2]:text-lg"
+        action={onScan ? (
+          imageGroups.length > 0 ? (
+            <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-end">
+              <div className="w-full min-w-0 space-y-2 sm:w-64">
+                <Label htmlFor="scan-image-selector">Observed local image</Label>
+                <Select
+                  value={selectedImage ? `image:${selectedImage.imageId}` : ""}
+                  onValueChange={(value) => setSelectedImageId(value.slice("image:".length))}
+                  disabled={scanBusy}
+                >
+                  <SelectTrigger id="scan-image-selector">
+                    <SelectValue placeholder="Choose an observed image" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {imageGroups.map((group) => {
+                      const labels = Array.from(group.images).join(", ");
+                      const names = group.containers.map((container) => container.name).join(", ");
+                      return (
+                        <SelectItem key={group.imageId} value={`image:${group.imageId}`}>
+                          {labels || group.imageId} ({group.containers.length} {group.containers.length === 1 ? "container" : "containers"})
+                          {names ? `, ${names}` : ""}
+                        </SelectItem>
+                      );
+                    })}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs leading-5 text-muted-foreground">Only images already present in observed container inventory are available. Nothing is pulled.</p>
+              </div>
+              <Button type="button" aria-busy={scanBusy} disabled={scanBusy || !selectedImage} onClick={() => selectedImage && onScan(selectedImage.imageId)}>
+                {scanBusy ? <LoaderCircle aria-hidden="true" className="animate-spin" /> : <ScanLine aria-hidden="true" />}
+                {scanBusy && scanningImageId === selectedImage?.imageId ? "Scanning image" : scanBusy ? "Scan in progress" : "Scan image"}
+              </Button>
+            </div>
+          ) : (
+            <p className="max-w-xs text-xs leading-5 text-muted-foreground">No observed local image IDs are available to scan.</p>
+          )
+        ) : undefined}
       />
       {error ? <ErrorState description={error} /> : loading ? <LoadingState label="Loading scan and change records" rows={4} /> : null}
       {!error && !loading && scans.length === 0 && changes.length === 0 ? (
@@ -127,7 +186,7 @@ export function ScansView({ scans, changes, containers, loading = false, error }
         <section className="space-y-3" aria-labelledby="source-changes-heading">
           <div>
             <h3 id="source-changes-heading" className="text-sm font-semibold">Existing source changes</h3>
-            <p className="mt-1 text-xs leading-5 text-muted-foreground">Viewing only. Change review actions remain unavailable here.</p>
+            <p className="mt-1 text-xs leading-5 text-muted-foreground">Source change records and their current review state.</p>
           </div>
           <ul className="space-y-2">
             {changes.map((change) => (
