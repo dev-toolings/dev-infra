@@ -15,7 +15,7 @@ The manager is a local development tool, not a hosted platform or a hostile-code
 
 The existing Bash CLI in [bin/devhub](../bin/devhub) contains the shared-infrastructure commands **up**, **down**, **restart**, **ps**, **logs**, **open**, **db**, **doctor**, **version**, and **help**. The source tree also has shared contracts and local safety foundations in [src/contracts.ts](../src/contracts.ts), [src/state.ts](../src/state.ts), [src/guard.ts](../src/guard.ts), [src/git.ts](../src/git.ts), [src/runtime/executor.ts](../src/runtime/executor.ts), and a composition entry point in [src/main.ts](../src/main.ts).
 
-The manager is not fully operational yet. The catalog, discovery, runtime adapter, operations, maintenance, API, and CLI modules are absent. The React view components exist under [apps/web/src/components/views](../apps/web/src/components/views/), but they receive data through props and do not call a connected API. The CLI help and current Bash handlers therefore remain the source of truth for commands that work today.
+The CLI now defines root, project, preset, maintenance, setup, and legacy infrastructure command workflows against the shared service interfaces. Operational availability depends on the concrete manager services being composed by the checkout's `src/main.ts`. The React view components exist under [apps/web/src/components/views](../apps/web/src/components/views/); panel availability depends on the API and web integration.
 
 ## Stories
 
@@ -65,7 +65,7 @@ devhub down
 
 **Dependencies:** Catalog root policy, Discovery, and CLI approval flow.
 
-**Current status:** **Planned.** The shared interfaces and composition skeleton exist, but Catalog, Discovery, and CLI modules do not.
+**Current status:** **CLI implemented; end-to-end availability depends on composed Catalog and Discovery services.**
 
 **Planned command shape:**
 
@@ -94,7 +94,7 @@ devhub project list
 
 **Dependencies:** Discovery, Catalog validation, and CLI preview/apply flow.
 
-**Current status:** **Planned.** No project setup or preset implementation is present.
+**Current status:** **CLI preview/apply path implemented through DiscoveryPort. Preset behavior depends on the composed Discovery service.**
 
 **Planned command shape:**
 
@@ -123,7 +123,7 @@ devhub project show api
 
 **Dependencies:** Catalog, Runtime, Operations, guarded executor, and Discovery component definitions.
 
-**Current status:** **Partially implemented.** The bounded executor foundation exists. Runtime adapters and Operations are absent.
+**Current status:** **CLI lifecycle, status, and log paths use OperationsPort. Runtime behavior depends on the composed Runtime and Operations services.**
 
 **Planned command shape:**
 

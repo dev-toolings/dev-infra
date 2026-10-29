@@ -1,7 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+resolve_script_path() {
+  local source="${BASH_SOURCE[0]}"
+  while [ -L "$source" ]; do
+    local directory
+    directory="$(cd -P "$(dirname "$source")" && pwd)"
+    source="$(readlink "$source")"
+    [[ "$source" != /* ]] && source="$directory/$source"
+  done
+  cd -P "$(dirname "$source")/../.." && pwd
+}
+
+REPO_DIR="$(resolve_script_path)"
 DEVHUB_BIN="$REPO_DIR/bin/devhub"
 TARGET_BIN="$HOME/.local/bin/devhub"
 ZSH_SNIPPET_DIR="$HOME/.config/devhub"
@@ -9,6 +20,13 @@ ZSH_SNIPPET_FILE="$ZSH_SNIPPET_DIR/devhub.zsh"
 ZSHRC_FILE="$HOME/.zshrc"
 
 mkdir -p "$HOME/.local/bin" "$ZSH_SNIPPET_DIR"
+
+if ! command -v bun >/dev/null 2>&1; then
+  echo "Bun is required. Install it for your user with: curl -fsSL https://bun.sh/install | bash" >&2
+  exit 1
+fi
+
+(cd "$REPO_DIR" && bun install --frozen-lockfile)
 
 if [ ! -f "$REPO_DIR/.env" ] && [ -f "$REPO_DIR/.env.example" ]; then
   cp "$REPO_DIR/.env.example" "$REPO_DIR/.env"

@@ -1,0 +1,124 @@
+import { afterEach, describe, expect, it } from "bun:test";
+import type { AppServices, Component, Project, ProjectInput, SetupInput } from "../contracts";
+import { runCli } from "./index";
+
+const component: Component = { id: "web", name: "Web", kind: "native", cwd: "/tmp/project", argv: ["bun", "run", "dev", "ARGV_SENTINEL"], envFiles: ["/tmp/project/.env"], dependsOn: [] };
+const project: Project = { id: "shop", name: "Shop", root: "/tmp/project", components: [component], createdAt: "2026-01-01T00:00:00.000Z" };
+let output = "";
+let errors = "";
+const stdoutWrite = process.stdout.write.bind(process.stdout);
+const stderrWrite = process.stderr.write.bind(process.stderr);
+afterEach(() => { output = ""; errors = ""; });
+
+function capture(): void {
+  process.stdout.write = ((chunk: string | Uint8Array) => { output += String(chunk); return true; }) as typeof process.stdout.write;
+  process.stderr.write = ((chunk: string | Uint8Array) => { errors += String(chunk); return true; }) as typeof process.stderr.write;
+}
+
+function fixture() {
+  const roots = new Map<string, { id: string; path: string; label: string }>();
+  const projects = new Map<string, Project>([[project.id, structuredClone(project)]]);
+  const plan = { id: "plan-1", project: { id: "new", name: "New", root: "/tmp/new", components: [component] }, files: [], warnings: [], createdAt: "2026-01-01T00:00:00.000Z" };
+  let operationState: "succeeded" | "failed" = "succeeded";
+  let scanState: "succeeded" | "failed" = "succeeded";
+  const services = {
+    catalog: {
+      listRoots: () => [...roots.values()],
+      addRoot: (path: string, label = path) => { const root = { id: `root-${roots.size + 1}`, path, label }; roots.set(root.id, root); return root; },
+      removeRoot: (id: string) => { roots.delete(id); },
+      assertAllowedPath: (path: string) => path,
+      listProjects: () => [...projects.values()],
+      getProject: (id: string) => { const value = projects.get(id); if (!value) throw new Error("Project not found"); return value; },
+      createProject: (input: ProjectInput) => { const value = { ...input, createdAt: plan.createdAt }; projects.set(value.id, value); return value; },
+      removeProject: (id: string) => { projects.delete(id); },
+    },
+    discovery: {
+      presets: () => [{ id: "native", name: "Native", description: "Local process" }],
+      preview: async (input: SetupInput) => ({ ...plan, project: { ...plan.project, id: input.id ?? plan.project.id, name: input.name, root: input.path } }),
+      apply: async () => { const value = { ...plan.project, createdAt: plan.createdAt }; projects.set(value.id, value); return value; },
+      scan: async () => [], inspect: async () => { throw new Error("unused"); },
+    },
+    operations: {
+      execute: async (id: string, action: string, componentIds: string[]) => ({ id: "op-1", projectId: id, action, componentIds, state: operationState, createdAt: plan.createdAt, updatedAt: plan.createdAt }),
+      status: async (id: string) => ({ projectId: id, components: [{ componentId: "web", state: "running", ready: true }] }),
+      logs: async () => [{ seq: 1, time: plan.createdAt, projectId: "shop", componentId: "web", stream: "stdout" as const, message: "ready" }],
+      inventory: async () => [], submit: () => { throw new Error("unused"); }, getOperation: () => { throw new Error("unused"); }, listOperations: () => [],
+    },
+    maintenance: {
+      scan: async (imageId: string) => ({ id: "scan-1", imageId, state: scanState, scannedAt: plan.createdAt, scanner: "fixture", findings: [] }),
+      listScans: () => [], getScan: (id: string) => ({ id, imageId: "sha256:local", state: "succeeded" as const, scannedAt: plan.createdAt, scanner: "fixture", findings: [] }), preview: async () => ({ id: "change-1", projectId: "shop", componentId: "web", file: "Dockerfile", sourceHash: "h", original: "FROM old", proposed: "FROM new", replacement: "new", state: "preview" as const, createdAt: plan.createdAt }),
+      apply: async () => ({ id: "change-1", projectId: "shop", componentId: "web", file: "Dockerfile", sourceHash: "h", original: "FROM old", proposed: "FROM new", replacement: "new", state: "applied" as const, createdAt: plan.createdAt }),
+      validate: async () => ({ id: "change-1", projectId: "shop", componentId: "web", file: "Dockerfile", sourceHash: "h", original: "FROM old", proposed: "FROM new", replacement: "new", state: "validated" as const, createdAt: plan.createdAt }),
+      activate: async () => ({ id: "change-1", projectId: "shop", componentId: "web", file: "Dockerfile", sourceHash: "h", original: "FROM old", proposed: "FROM new", replacement: "new", state: "activated" as const, createdAt: plan.createdAt }), listChanges: () => [],
+    },
+  } as unknown as AppServices;
+  return { services, setOperationState: (value: "succeeded" | "failed") => { operationState = value; }, setScanState: (value: "succeeded" | "failed") => { scanState = value; } };
+}
+
+const options = { stateDir: "/tmp/state", infraDir: "/tmp/devhub", run: async () => ({ code: 0, stdout: "", stderr: "" }) };
+
+describe("runCli", () => {
+  afterEach(() => {
+    process.stdout.write = stdoutWrite;
+    process.stderr.write = stderrWrite;
+  });
+
+  it("handles root add, list, and remove", async () => {
+    capture(); const { services } = fixture();
+    expect(await runCli(["root", "add", "/tmp/work", "--label", "work"], services, options)).toBe(0);
+    expect(await runCli(["root", "list", "--json"], services, options)).toBe(0);
+    expect(output).toContain("/tmp/work");
+    expect(await runCli(["root", "remove", "root-1"], services, options)).toBe(0);
+    expect(await runCli(["root", "list", "--json"], services, options)).toBe(0);
+    expect(output.trimEnd().endsWith("[]")).toBe(true);
+  });
+
+  it("previews project add without applying and applies only with --apply", async () => {
+    capture(); const { services } = fixture();
+    expect(await runCli(["project", "add", "--path", "/tmp/new", "--name", "New", "--preset", "native", "--json"], services, options)).toBe(0);
+    expect(output).toContain('"preview": true');
+    expect(output).not.toContain("ARGV_SENTINEL");
+    output = "";
+    expect(await runCli(["project", "add", "--path", "/tmp/new", "--name", "New", "--preset", "native", "--apply", "--json"], services, options)).toBe(0);
+    expect(output).toContain('"id": "new"');
+    expect(() => JSON.parse(output)).not.toThrow();
+  });
+
+  it("returns operation, status, logs, and maintenance results with honest exit codes", async () => {
+    capture(); const { services, setOperationState, setScanState } = fixture();
+    expect(await runCli(["project", "start", "shop", "--json"], services, options)).toBe(0);
+    expect(await runCli(["project", "stop", "shop", "--json"], services, options)).toBe(0);
+    expect(await runCli(["project", "restart", "shop", "--json"], services, options)).toBe(0);
+    expect(await runCli(["project", "check", "shop", "--json"], services, options)).toBe(0);
+    expect(await runCli(["project", "status", "shop", "--json"], services, options)).toBe(0);
+    expect(await runCli(["project", "logs", "shop", "--json"], services, options)).toBe(0);
+    expect(await runCli(["maintenance", "inventory", "--json"], services, options)).toBe(0);
+    expect(await runCli(["maintenance", "scan", "sha256:local", "--json"], services, options)).toBe(0);
+    expect(await runCli(["maintenance", "scans", "--json"], services, options)).toBe(0);
+    expect(await runCli(["maintenance", "scans", "scan-1", "--json"], services, options)).toBe(0);
+    expect(await runCli(["maintenance", "changes", "--json"], services, options)).toBe(0);
+    expect(await runCli(["maintenance", "preview", "--project", "shop", "--component", "web", "--file", "Dockerfile", "--replacement", "new", "--json"], services, options)).toBe(0);
+    expect(await runCli(["maintenance", "apply", "change-1", "--json"], services, options)).toBe(0);
+    expect(await runCli(["maintenance", "validate", "change-1", "--json"], services, options)).toBe(0);
+    expect(await runCli(["maintenance", "activate", "change-1", "--json"], services, options)).toBe(0);
+    expect(output).not.toContain("original");
+    setOperationState("failed");
+    expect(await runCli(["project", "start", "shop"], services, options)).toBe(1);
+    setScanState("failed");
+    expect(await runCli(["maintenance", "scan", "sha256:bad"], services, options)).toBe(1);
+  });
+
+  it("returns a human-readable error and nonzero for invalid commands", async () => {
+    capture(); const { services } = fixture();
+    expect(await runCli(["root", "missing"], services, options)).toBe(1);
+    expect(errors).toContain("CLI usage error");
+  });
+
+  it("omits component argv and environment file values from JSON output", async () => {
+    capture(); const { services } = fixture();
+    expect(await runCli(["project", "show", "shop", "--json"], services, options)).toBe(0);
+    expect(output).not.toContain("argv");
+    expect(output).not.toContain("ARGV_SENTINEL");
+    expect(output).not.toContain("envFiles");
+  });
+});

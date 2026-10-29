@@ -59,7 +59,7 @@ resolve_ref() {
       tag="$(curl -fsSL "https://api.github.com/repos/${REPO_SLUG}/releases/latest" \
         | jq -r '.tag_name // empty')"
       if [ -z "$tag" ]; then
-        warn "No published release found — falling back to 'main'."
+        warn "No published release found; falling back to 'main'."
         REF="main"; REF_KIND="branch"
       else
         REF="$tag"; REF_KIND="tag"
@@ -99,7 +99,7 @@ download() {
     info "Cloning $REF via git..."
     git clone --depth 1 --branch "$REF" "$REPO_URL" "$DEVHUB_DIR"
   else
-    info "git not found — downloading tarball..."
+    info "git not found; downloading tarball..."
     mkdir -p "$DEVHUB_DIR"
     local tarball_url
     if [ "$REF_KIND" = "branch" ]; then
@@ -120,6 +120,11 @@ install_cli() {
   fi
 
   chmod +x "$DEVHUB_DIR/bin/devhub"
+  if ! command -v bun >/dev/null 2>&1; then
+    warn "Bun is required for project management. Install it for your user with: curl -fsSL https://bun.sh/install | bash"
+    exit 1
+  fi
+  (cd "$DEVHUB_DIR" && bun install --frozen-lockfile)
   ln -sfn "$DEVHUB_DIR/bin/devhub" "$BIN_DIR/devhub"
 
   cat > "$ZSH_SNIPPET_FILE" <<'ZSH'
@@ -159,7 +164,7 @@ summary() {
 
 main() {
   echo ""
-  printf "${BOLD}DevHub — Local Docker Development Infrastructure${RESET}\n"
+  printf "${BOLD}DevHub: Local Docker Development Infrastructure${RESET}\n"
   echo ""
 
   preflight

@@ -37,6 +37,7 @@ export type ProjectAddCommand =
 
 export type ParsedCommand =
   | { command: "help"; topic: string[]; text: string }
+  | ({ command: "presets" } & JsonOption)
   | ({ command: "setup"; installDeps: boolean } & JsonOption)
   | ({ command: "root"; action: "list" } & JsonOption)
   | ({ command: "root"; action: "add"; path: string; label?: string } & JsonOption)
@@ -107,8 +108,9 @@ const USAGE = [
   "  db create|import|list",
   "  doctor | version | help",
   "",
-  "Manager commands (planned):",
+  "Manager commands:",
   "  setup [--install-deps] [--json]",
+  "  presets",
   "  root list | add PATH [--label LABEL] | remove ID",
   "  project list | show ID | discover PATH [--depth N]",
   "  project add [PATH] [--path PATH] [--name NAME] [--preset PRESET]",
@@ -129,7 +131,7 @@ const USAGE = [
   "  pair",
   "",
   "Use --json on manager data and action commands. Use --help after a command",
-  "to show its usage. Manager commands marked planned may not be wired yet.",
+  "to show its usage.",
 ].join("\n");
 
 const COMMAND_USAGE: Record<string, string> = {
@@ -543,6 +545,12 @@ export function parseCliArgs(argv: string[]): ParsedCommand {
   if (command === "help") {
     if (rest.some((argument) => !isHelpToken(argument))) usageError("The help command takes no arguments.");
     return makeHelp();
+  }
+
+  if (command === "presets") {
+    const parsed = collectOptions(rest, {});
+    noPositionals(parsed);
+    return { command: "presets", json: parsed.json };
   }
 
   if (command === "serve" || command === "pair") {
