@@ -41,9 +41,9 @@ function changeStateLabel(state: PublicChange["state"]): string {
   }
 }
 
-function changeStateVariant(state: PublicChange["state"]): "default" | "secondary" | "destructive" | "outline" {
-  if (state === "failed") return "destructive";
-  if (state === "validated" || state === "activated") return "secondary";
+function changeStateVariant(state: PublicChange["state"]): "default" | "secondary" | "destructive" | "outline" | "muted" | "up" | "degraded" | "down" {
+  if (state === "failed") return "down";
+  if (state === "validated" || state === "activated") return "up";
   if (state === "applied") return "default";
   return "outline";
 }
@@ -152,7 +152,6 @@ export function RemediationPanel({
         title="Source image change"
         titleId="remediation-heading"
         description="Preview an image-reference change, apply it on its reviewed branch, validate a candidate, then confirm activation separately."
-        className="[&_h2]:text-lg"
       />
 
       {error ? (
@@ -303,7 +302,7 @@ export function RemediationPanel({
 
         {change ? (
           <Card className="min-w-0">
-            <CardHeader className="flex-row flex-wrap items-start justify-between gap-3">
+            <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-3">
               <div className="min-w-0 space-y-1">
                 <CardTitle className="break-all text-sm">{change.file}</CardTitle>
                 <CardDescription className="break-all">Project {change.projectId} · Component {change.componentId}</CardDescription>

@@ -121,7 +121,7 @@ export function AddProjectDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl">
+      <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>Add an existing project</DialogTitle>
           <DialogDescription>Inspect an approved folder, review the generated setup plan, then explicitly confirm it.</DialogDescription>
@@ -241,7 +241,7 @@ export function AddProjectDialog({
                   {detections.map((detection) => (
                     <li key={detection.path}>
                       <Card>
-                        <CardHeader className="flex-row flex-wrap items-start justify-between gap-3">
+                        <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-3">
                           <div className="min-w-0 space-y-1">
                             <CardTitle className="break-words text-sm">{detection.name}</CardTitle>
                             <CardDescription className="break-all">{detection.path}</CardDescription>

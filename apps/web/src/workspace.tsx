@@ -1,5 +1,4 @@
 import * as React from "react";
-import { LogOut } from "lucide-react";
 import { getProjectStatus, listContainers, listProjects } from "./lib/api";
 import { useAddProject } from "./lib/use-add-project";
 import { useLifecycle } from "./lib/use-lifecycle";
@@ -9,7 +8,6 @@ import { useMaintenance } from "./lib/use-maintenance";
 import { useResource } from "./lib/use-resource";
 import { ActionBanner } from "./components/action-banner";
 import { ProjectPicker } from "./components/project-picker";
-import { Button } from "./components/ui/button";
 import { EmptyState } from "./components/ui/state";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./components/ui/tabs";
 import {
@@ -92,12 +90,7 @@ export function Workspace({ onLogout }: WorkspaceProps) {
       onNavigate={setView}
       title={viewCopy[view].title}
       description={viewCopy[view].description}
-      toolbar={(
-        <Button type="button" variant="outline" onClick={onLogout}>
-          <LogOut aria-hidden="true" />
-          Log out
-        </Button>
-      )}
+      onLogout={onLogout}
     >
       {view === "projects" ? (
         <div className={projectList.length > 0 ? "grid min-w-0 gap-6 lg:grid-cols-[minmax(17rem,22rem)_minmax(0,1fr)]" : "min-w-0"}>

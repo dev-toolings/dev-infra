@@ -1,5 +1,6 @@
 import * as React from "react";
-import { KeyRound, LoaderCircle, ServerCog } from "lucide-react";
+import { KeyRound, LoaderCircle } from "lucide-react";
+import { LogoMark } from "../brand/logo";
 import { Button } from "../ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../ui/card";
 import { Input } from "../ui/input";
@@ -24,14 +25,12 @@ export function PairingForm({ busy, error, onPair }: PairingFormProps) {
   }
 
   return (
-    <main className="flex min-h-[100svh] items-center justify-center px-4 py-8">
+    <main className="flex min-h-[100svh] items-center justify-center bg-muted px-4 py-8">
       <Card className="w-full max-w-md">
         <CardHeader className="gap-4">
-          <span className="flex size-11 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-            <ServerCog aria-hidden="true" className="size-5" />
-          </span>
+          <LogoMark className="size-10 [&_svg]:size-6" />
           <div className="space-y-1.5">
-            <CardTitle className="text-lg">Connect to DevHub</CardTitle>
+            <CardTitle className="text-base">Connect to DevHub</CardTitle>
             <CardDescription>Enter the one-time pairing code shown by the local DevHub command.</CardDescription>
           </div>
         </CardHeader>

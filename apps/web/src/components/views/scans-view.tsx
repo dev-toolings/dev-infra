@@ -20,16 +20,16 @@ export interface ScansViewProps {
   onScan?: (imageId: string) => ViewTask;
 }
 
-function severityVariant(severity: string): "destructive" | "secondary" | "outline" {
+function severityVariant(severity: string): "down" | "degraded" | "outline" {
   const normalized = severity.toLowerCase();
-  if (normalized === "critical" || normalized === "high") return "destructive";
-  if (normalized === "medium" || normalized === "moderate") return "secondary";
+  if (normalized === "critical" || normalized === "high") return "down";
+  if (normalized === "medium" || normalized === "moderate") return "degraded";
   return "outline";
 }
 
-function changeVariant(state: PublicChange["state"]): "default" | "secondary" | "destructive" | "outline" {
-  if (state === "failed") return "destructive";
-  if (state === "validated" || state === "activated") return "secondary";
+function changeVariant(state: PublicChange["state"]): "default" | "secondary" | "destructive" | "outline" | "muted" | "up" | "degraded" | "down" {
+  if (state === "failed") return "down";
+  if (state === "validated" || state === "activated") return "up";
   if (state === "applied") return "default";
   return "outline";
 }
@@ -55,7 +55,6 @@ export function ScansView({ scans, changes, containers, loading = false, busy = 
         title="Image maintenance"
         titleId="maintenance-heading"
         description="Review local image scans, database freshness, source mappings, and change records."
-        className="[&_h2]:text-lg"
         action={onScan ? (
           imageGroups.length > 0 ? (
             <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-end">
@@ -112,12 +111,12 @@ export function ScansView({ scans, changes, containers, loading = false, busy = 
               return (
                 <li key={scan.id}>
                   <Card className="min-w-0">
-                    <CardHeader className="flex-row flex-wrap items-start justify-between gap-3">
+                    <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-3">
                       <div className="min-w-0 space-y-1">
                         <CardTitle className="text-sm">Image scan</CardTitle>
                         <CardDescription className="break-all font-mono">{scan.imageId}</CardDescription>
                       </div>
-                      <Badge variant={scan.state === "failed" ? "destructive" : "secondary"}>
+                      <Badge variant={scan.state === "failed" ? "down" : "muted"}>
                         {scan.state === "failed" ? "Failed" : "Completed"}
                       </Badge>
                     </CardHeader>
@@ -192,7 +191,7 @@ export function ScansView({ scans, changes, containers, loading = false, busy = 
             {changes.map((change) => (
               <li key={change.id}>
                 <Card>
-                  <CardHeader className="flex-row flex-wrap items-start justify-between gap-3">
+                  <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-3">
                     <div className="min-w-0 space-y-1">
                       <CardTitle className="break-all text-sm">{change.file}</CardTitle>
                       <CardDescription className="break-all">Project {change.projectId} · Component {change.componentId}</CardDescription>

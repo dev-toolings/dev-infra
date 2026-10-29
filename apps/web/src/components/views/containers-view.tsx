@@ -27,11 +27,11 @@ function formatBytes(value?: number): string {
   return `${amount.toFixed(1)} ${unit}`;
 }
 
-function stateVariant(state: string): "default" | "secondary" | "destructive" | "outline" {
+function stateVariant(state: string): "default" | "secondary" | "destructive" | "outline" | "muted" | "up" | "degraded" | "down" {
   const normalized = state.toLowerCase();
-  if (normalized === "running") return "default";
-  if (normalized === "exited" || normalized === "stopped") return "secondary";
-  if (normalized.includes("unhealthy") || normalized.includes("error")) return "destructive";
+  if (normalized === "running") return "up";
+  if (normalized === "exited" || normalized === "stopped") return "muted";
+  if (normalized.includes("unhealthy") || normalized.includes("error")) return "down";
   return "outline";
 }
 
@@ -59,7 +59,7 @@ export function ContainersView({ containers, loading = false, error, onSelectPro
             return (
               <li key={container.id} className="min-w-0">
                 <Card className="h-full min-w-0">
-                  <CardHeader className="flex-row items-start gap-3">
+                  <CardHeader className="flex flex-row items-start gap-3">
                     <span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
                       <Box aria-hidden="true" className="size-4" />
                     </span>

@@ -23,7 +23,6 @@ export function ProjectList({ projects, selectedProjectId, loading = false, erro
         title="Projects"
         titleId="projects-heading"
         description="Choose a registered project to inspect its components and recent operations."
-        className="[&_h2]:text-lg"
         action={onAddProject && projects.length > 0 ? (
           <Button type="button" onClick={onAddProject}>
             <Plus aria-hidden="true" />
@@ -53,13 +52,13 @@ export function ProjectList({ projects, selectedProjectId, loading = false, erro
                   aria-pressed={selected}
                   onClick={() => onSelect(project.id)}
                   className={cn(
-                    "flex min-h-28 w-full min-w-0 flex-col items-start gap-2 rounded-lg border bg-card p-4 text-left shadow-sm transition-colors hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
-                    selected ? "border-primary/60 bg-primary/5" : "border-border",
+                    "flex min-h-28 w-full min-w-0 flex-col items-start gap-2 rounded-lg border bg-card p-4 text-left shadow-xs transition-colors hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+                    selected ? "border-foreground/25 bg-muted" : "border-border",
                   )}
                 >
                   <span className="flex w-full min-w-0 items-start justify-between gap-3">
                     <span className="flex min-w-0 items-center gap-2.5">
-                      <FolderGit2 aria-hidden="true" className="size-4 shrink-0 text-primary" />
+                      <FolderGit2 aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
                       <span className="truncate font-medium">{project.name}</span>
                     </span>
                     <span className="shrink-0 text-xs text-muted-foreground">

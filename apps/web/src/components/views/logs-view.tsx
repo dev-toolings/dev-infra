@@ -59,7 +59,6 @@ export function LogsView({
         title="Project logs"
         titleId="logs-heading"
         description="Merged native and Docker output for the selected project. This view keeps at most the newest 1,000 entries."
-        className="[&_h2]:text-lg"
         action={(
           <>
             <Button type="button" variant="outline" aria-pressed={paused} onClick={() => onPausedChange(!paused)}>

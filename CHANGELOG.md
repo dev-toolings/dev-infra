@@ -18,6 +18,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`devhub serve`, `devhub pair`) and a connected React control panel.
 
 ### Changed
+- Control panel restyled on the shared design system: neutral tokens, local
+  Inter font, floating collapsible sidebar, page header bar, light/dark/system
+  theme in the session menu (which now holds Log out), colored status badges
+  and the radar favicon. Radix primitives now come from the `radix-ui` package.
 - `devhub up` / `devhub restart` now start the `async` profile (RabbitMQ) by
   default alongside `core`. Projects relying on AMQP no longer crash-loop after
   a plain `devhub up`. `make up-async` remains an alias of `make up`.

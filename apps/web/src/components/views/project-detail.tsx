@@ -32,10 +32,10 @@ const componentActions: { action: Action; label: string; icon: typeof Play }[] =
   { action: "check", label: "Check", icon: Stethoscope },
 ];
 
-function stateVariant(state?: State): "default" | "secondary" | "destructive" | "outline" {
-  if (state === "unhealthy") return "destructive";
-  if (state === "running") return "default";
-  if (state === "stopped") return "secondary";
+function stateVariant(state?: State): "default" | "secondary" | "destructive" | "outline" | "muted" | "up" | "degraded" | "down" {
+  if (state === "unhealthy") return "down";
+  if (state === "running") return "up";
+  if (state === "stopped") return "muted";
   return "outline";
 }
 
@@ -68,7 +68,7 @@ export function ProjectDetail({ project, status, operations = [], busyComponentI
     <section className="min-w-0 space-y-5" aria-labelledby="project-detail-heading">
       <header className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
-          <h2 id="project-detail-heading" className="break-words text-xl font-semibold tracking-tight">{project.name}</h2>
+          <h2 id="project-detail-heading" className="break-words text-base font-semibold tracking-tight">{project.name}</h2>
           <code className="mt-1 block break-all text-xs leading-5 text-muted-foreground">{project.root}</code>
         </div>
         <Badge variant="outline" className="shrink-0">{project.components.length} {project.components.length === 1 ? "component" : "components"}</Badge>
@@ -89,7 +89,7 @@ export function ProjectDetail({ project, status, operations = [], busyComponentI
               return (
                 <li key={component.id} className="min-w-0">
                   <Card className="h-full min-w-0">
-                    <CardHeader className="flex-row flex-wrap items-start gap-x-3 gap-y-2">
+                    <CardHeader className="flex flex-row flex-wrap items-start gap-x-3 gap-y-2">
                       <div className="min-w-0 flex-1 space-y-1">
                         <CardTitle className="break-words">{component.name}</CardTitle>
                         <CardDescription className="break-all">{component.cwd}</CardDescription>
@@ -169,7 +169,7 @@ export function ProjectDetail({ project, status, operations = [], busyComponentI
                     <div className="min-w-0 space-y-1">
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="font-medium capitalize">{operation.action}</span>
-                        <Badge variant={operation.state === "failed" ? "destructive" : operation.state === "succeeded" ? "secondary" : "outline"}>
+                        <Badge variant={operation.state === "failed" ? "down" : operation.state === "succeeded" ? "up" : "outline"}>
                           {operationStateLabel(operation)}
                         </Badge>
                       </div>
