@@ -335,9 +335,10 @@ export class Catalog implements CatalogPort {
         this.validateArgv(component.argv,"argv"); if (component.validation) this.validateArgv(component.validation.argv,"validation argv");
         this.validateLimits(component.limits);
       } else this.validateCompose(component);
+      // Component file references are relative to the component working directory, as Runtime and Discovery resolve them.
       for (const file of [...(component.compose?.files ?? []),...(component.envFiles ?? []),...(component.sources ?? []).map((source) => source.file)]) {
-        if (typeof file !== "string" || !file || isAbsolute(file) || file.split(/[\\/]/).includes("..")) error("Configuration file must be relative to project root");
-        const absolute = resolve(rootPath,file); this.assertAllowedPath(absolute,true); if (!isBelow(absolute,rootPath)) error("Configuration file is outside project root", "path_forbidden",403);
+        if (typeof file !== "string" || !file || isAbsolute(file) || file.split(/[\\/]/).includes("..")) error("Configuration file must be relative to the component directory");
+        const absolute = resolve(cwd,file); this.assertAllowedPath(absolute,true); if (!isBelow(absolute,rootPath)) error("Configuration file is outside project root", "path_forbidden",403);
         const info = lstatSync(absolute); if (info.isSymbolicLink() || !info.isFile()) error("Configuration files must be regular files", "path_forbidden",403);
       }
       for (const url of [component.url,component.health?.url]) if (url) ports.push({componentId:component.id,port:loopbackUrl(url,reserved).port});
