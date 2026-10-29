@@ -137,6 +137,7 @@ function secureExistingPrivateFiles(statePath: string, uid: number, secureAllFil
     if (!privateFile) continue;
     if (!info.isFile()) throw new Error(`Private state entry must be a regular file: ${filePath}`);
     if (info.uid !== uid) throw new Error(`Private state file is not owned by the current user: ${filePath}`);
+    if (info.nlink !== 1) throw new Error(`Private state file has a hard link; provide an independent single-link file: ${filePath}`);
     chmodSync(filePath, 0o600);
   }
 }

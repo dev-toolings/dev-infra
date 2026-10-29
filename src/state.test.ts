@@ -2,6 +2,7 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import {
   chmodSync,
   existsSync,
+  linkSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -133,6 +134,24 @@ test("requires an existing state root to be owned and mode 0700", () => {
   chmodSync(statePath, 0o750);
 
   expect(() => ensureStateDir(statePath, infra)).toThrow("mode 0700");
+});
+
+test("rejects a hard link without changing the outside file", () => {
+  const { root, infra } = sandbox();
+  mkdirSync(infra);
+  const target = join(infra, "executable.sh");
+  writeFileSync(target, "fixture preserved");
+  chmodSync(target, 0o755);
+  const state = join(root, "state");
+  mkdirSync(state, { mode: 0o700 });
+  const linked = join(state, "private.json");
+  linkSync(target, linked);
+
+  expect(() => ensureStateDir(state, infra)).toThrow(/hard link/i);
+  expect(statSync(target).mode & 0o777).toBe(0o755);
+  expect(readFileSync(target, "utf8")).toBe("fixture preserved");
+  expect(existsSync(linked)).toBe(true);
+  expect(statSync(linked).nlink).toBe(2);
 });
 
 test("creates a private directory and secures existing database and credential files without rewriting them", () => {
