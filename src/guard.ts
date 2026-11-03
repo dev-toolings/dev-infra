@@ -3,6 +3,11 @@ import type { Executor } from "./contracts";
 import { DevHubError } from "./contracts";
 import { isTrustedGitOptions } from "./git";
 
+/** Keys of a dotenv file as Compose reads them: `KEY=value` and also the YAML-style `KEY: value`. */
+export function envFileKeys(text: string): string[] {
+  return [...text.matchAll(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*[=:]/gm)].map((match) => match[1]!);
+}
+
 const dockerGlobalValueOptions = new Set(["--config", "--context", "--host", "-H", "--log-level", "-l"]);
 const composeGlobalValueOptions = new Set([
   "--ansi", "--env-file", "--file", "-f", "--parallel", "--profile", "--progress",

@@ -131,6 +131,8 @@ test("project .env Compose controls are rejected without exposing values", async
   const catalog = new MemoryCatalog(); catalog.addRoot(root);
   const discovery = new Discovery({ catalog, run: async () => response("") });
   await expect(discovery.inspect(path)).rejects.toThrow("unsupported Compose control");
+  writeFileSync(join(path, ".env"), "COMPOSE_REMOVE_ORPHANS: 1\n");
+  await expect(discovery.inspect(path)).rejects.toThrow("unsupported Compose control");
   const serialized = JSON.stringify(catalog.listRecords("discovery-plans"));
   expect(serialized).not.toContain("value-that-must-not-leak");
 });

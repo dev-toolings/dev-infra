@@ -5,6 +5,7 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { parseDocument } from "yaml";
 import { assertSharedDataUntouched, type ComposeModel } from "./mounts";
 import { approvedOverride } from "../security/override";
+import { envFileKeys } from "../guard";
 import { DevHubError, type CatalogPort, type Component, type ContainerInfo, type Executor, type LogEntry, type Project, type RuntimePort, type ComponentStatus } from "../contracts";
 
 type Options = { run: Executor; stateDir: string; assertAllowedPath: CatalogPort["assertAllowedPath"]; fetch?: (input: string, init?: BunFetchRequestInit) => Promise<Response>; resolveExecutable?: (command: string) => string | null };
@@ -83,9 +84,7 @@ function checkEnvControls(cwd: string, file = ".env"): void {
   if (!info.isFile() || info.isSymbolicLink() || info.size > 1024 * 1024 || realpathSync(path) !== path) throw err(`Compose ${file} must be a canonical regular file no larger than 1 MiB`);
   const text = readFileSync(path, "utf8");
   const execution = new Set(["DOCKER_HOST", "DOCKER_CONTEXT", "DOCKER_CONFIG", "DOCKER_TLS_VERIFY", "DOCKER_CERT_PATH", "DOCKER_DEFAULT_PLATFORM", "DOCKER_BUILDKIT"]);
-  // Compose dotenv also accepts the YAML-style `KEY: value` form.
-  for (const match of text.matchAll(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*[=:]/gm)) {
-    const key = match[1]!;
+  for (const key of envFileKeys(text)) {
     if ((key.startsWith("COMPOSE_") && key !== "COMPOSE_PROJECT_NAME" && key !== "COMPOSE_PROFILES") || execution.has(key)) throw err(`Compose ${file} setting ${key} is not allowed`, "unsafe_environment", 403);
   }
 }

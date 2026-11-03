@@ -5,6 +5,7 @@ import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "nod
 import { parseDocument } from "yaml";
 import { DevHubError, type CatalogPort, type Component, type Detection, type DiscoveryPort, type Executor, type PlannedFile, type Preset, type Project, type ProjectInput, type SetupInput, type SetupPlan } from "../contracts";
 import { classifyManifests, parseMakeTargets } from "./manifests";
+import { envFileKeys } from "../guard";
 
 const PLAN_NS = "discovery-plans";
 const PLAN_LIMIT = 100;
@@ -86,10 +87,8 @@ function fingerprint(path: string): string {
 }
 function parseEnvControls(path: string): void {
   if (!regular(path)) return;
-  const text = readBounded(path);
-  for (const line of text.split(/\r?\n/)) {
-    const m = /^\s*(?:export\s+)?(COMPOSE_[A-Za-z0-9_]+)\s*=/.exec(line);
-    if (m && !["COMPOSE_PROJECT_NAME", "COMPOSE_PROFILES"].includes(m[1]!)) fail("Project .env contains an unsupported Compose control setting", "unsafe_environment", 409);
+  for (const key of envFileKeys(readBounded(path))) {
+    if (key.startsWith("COMPOSE_") && !["COMPOSE_PROJECT_NAME", "COMPOSE_PROFILES"].includes(key)) fail("Project .env contains an unsupported Compose control setting", "unsafe_environment", 409);
   }
 }
 function validateCommand(argv: string[]): void {

@@ -9,6 +9,7 @@ import { redactText } from "../operations/logger";
 import { ensureStateDir } from "../state";
 import { assertSharedDataUntouched, type ComposeModel } from "../runtime/mounts";
 import { approvedOverride, overrideContent, overrideFile, retireOverrides } from "./override";
+import { envFileKeys } from "../guard";
 
 const READ = { timeoutMs: 20_000, maxOutputBytes: 8 * 1024 * 1024 } as const;
 const DOCKER = { timeoutMs: 900_000, maxOutputBytes: 8 * 1024 * 1024 } as const;
@@ -112,8 +113,8 @@ function checkProjectEnv(cwd: string): void {
   if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 1024 * 1024 || canonical(path) !== path) throw fail("Compose .env must be a canonical regular file no larger than 1 MiB", "unsafe_environment", 403);
   const allowed = new Set(["COMPOSE_PROJECT_NAME", "COMPOSE_PROFILES"]);
   const protectedKeys = /^(?:COMPOSE_|DOCKER_)/;
-  for (const [, key] of readFileSync(path, "utf8").matchAll(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=/gm)) {
-    if (protectedKeys.test(key!) && !allowed.has(key!)) throw fail(`Compose .env setting ${key} is not allowed`, "unsafe_environment", 403);
+  for (const key of envFileKeys(readFileSync(path, "utf8"))) {
+    if (protectedKeys.test(key) && !allowed.has(key)) throw fail(`Compose .env setting ${key} is not allowed`, "unsafe_environment", 403);
   }
 }
 function assertSafeDockerArgv(argv: string[], candidate: boolean): void {

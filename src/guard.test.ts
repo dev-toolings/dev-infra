@@ -4,7 +4,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gitRun, isTrustedGitOptions } from "./git";
 import type { Executor } from "./contracts";
-import { guardExecutor } from "./guard";
+import { envFileKeys, guardExecutor } from "./guard";
+
+test("env keys include the colon form Compose accepts", () => {
+  expect(envFileKeys("A=1\nexport B=2\nCOMPOSE_REMOVE_ORPHANS: 1\n  export D : 4\n# E=5\n")).toEqual(["A", "B", "COMPOSE_REMOVE_ORPHANS", "D"]);
+});
 
 const fixtures: string[] = [];
 afterEach(() => { for (const path of fixtures.splice(0)) rmSync(path, { recursive: true, force: true }); });
