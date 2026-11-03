@@ -118,6 +118,6 @@ export const followLines: Follower = (argv, onLine) => {
     }
     if (rest) onLine(rest, stream);
   };
-  const done = Promise.all([child.exited, pump(child.stdout, "stdout"), pump(child.stderr, "stderr")]).then(() => undefined).finally(() => running.delete(child.pid));
+  const done = Promise.all([child.exited, pump(child.stdout, "stdout"), pump(child.stderr, "stderr")]).then(([code]) => code).finally(() => running.delete(child.pid));
   return { stop: () => { signalGroup(child.pid, "SIGKILL"); }, done };
 };

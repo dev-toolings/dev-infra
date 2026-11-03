@@ -11,7 +11,7 @@ const project: Project = {
 };
 
 function setup(now = () => Date.now()) {
-  const follow = { start: async (_id: string, _since: string | undefined, _onLine: (line: ContainerLogLine) => void): Promise<FollowHandle> => ({ stop() {}, done: Promise.resolve() }) };
+  const follow = { start: async (_id: string, _since: string | undefined, _onLine: (line: ContainerLogLine) => void): Promise<FollowHandle> => ({ stop() {}, done: Promise.resolve(0) }) };
   const stateDir = mkdtempSync(join("/dev/shm", "devhub-api-test-")); fixtures.push(stateDir);
   const code = "PAIRING_TEST_CODE_" + "x".repeat(40);
   const calls: unknown[][] = [];
@@ -155,12 +155,23 @@ describe("local API authentication", () => {
     const context = setup(); const session = await paired(context);
     context.follow.start = async (_id, _since, onLine) => {
       for (let index = 0; index < 650; index += 1) onLine({ time: "2026-11-03T22:00:00.000000000Z", stream: "stdout", message: `line ${index}` });
-      return { stop() {}, done: Promise.resolve() };
+      return { stop() {}, done: Promise.resolve(0) };
     };
     const response = await context.request(`/api/v1/containers/${"b".repeat(12)}/logs`, { headers: { cookie: session.cookie } });
     const text = await response.text();
     expect(text.match(/event: log/g)?.length).toBe(500);
     expect(text).toContain('event: dropped\ndata: {"count":150}');
+  });
+
+  test("reports a failing docker logs and keeps stack trace indentation", async () => {
+    const context = setup(); const session = await paired(context);
+    context.follow.start = async (_id, _since, onLine) => {
+      onLine({ time: "2026-11-03T22:00:00.000000000Z", stream: "stderr", message: "    at main (app.ts:1)" });
+      return { stop() {}, done: Promise.resolve(1) };
+    };
+    const text = await (await context.request(`/api/v1/containers/${"c".repeat(12)}/logs`, { headers: { cookie: session.cookie } })).text();
+    expect(text).toContain('"message":"    at main (app.ts:1)"');
+    expect(text).toContain("event: error");
   });
 
   test("refuses malformed container log queries before following", async () => {

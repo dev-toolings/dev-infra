@@ -32,7 +32,7 @@ export interface ExecOptions { cwd?: string; timeoutMs?: number; maxOutputBytes?
 export interface ExecResult { code: number; stdout: string; stderr: string }
 export type Executor = (argv: string[], options?: ExecOptions) => Promise<ExecResult>;
 export type LogStreamName = "stdout" | "stderr";
-export interface FollowHandle { stop: () => void; done: Promise<void> }
+export interface FollowHandle { stop: () => void; /** Resolves with the exit code. */ done: Promise<number> }
 /** Runs a long-lived read-only command and hands over its output line by line. */
 export type Follower = (argv: string[], onLine: (line: string, stream: LogStreamName) => void) => FollowHandle;
 export interface ContainerLogLine { time: string; stream: LogStreamName; message: string }

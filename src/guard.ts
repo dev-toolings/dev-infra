@@ -4,26 +4,14 @@ import { DevHubError } from "./contracts";
 import { isTrustedGitOptions } from "./git";
 
 /**
- * Keys of a dotenv file as Compose reads them: `KEY=value`, the YAML-style `KEY: value`, and a
- * further key right after a closing quote (`A="x" B=y`). Quoted values may span lines.
+ * Every name a dotenv file could set for Compose. It over-matches on purpose (values, inline comments):
+ * Compose accepts `KEY: value`, `A="x" B=y`, odd key characters and unclosed quotes, and a copy of its
+ * parser let those through. Only a whole comment line with no quote is skipped, since a quote could
+ * close a multi-line value and put a live key after it.
  */
 export function envFileKeys(text: string): string[] {
-  const keys: string[] = [], statement = /\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_.-]*)\s*[=:][ \t]*/y;
-  const lineEnd = (from: number) => { const end = text.indexOf("\n", from); return end < 0 ? text.length : end + 1; };
-  let index = 0;
-  while (index < text.length) {
-    statement.lastIndex = index;
-    const match = statement.exec(text);
-    if (!match) { index = lineEnd(index); continue; }
-    keys.push(match[1]!);
-    index = statement.lastIndex;
-    const quote = text[index];
-    if (quote !== '"' && quote !== "'") { index = lineEnd(index); continue; }
-    index += 1;
-    while (index < text.length && text[index] !== quote) index += text[index] === "\\" ? 2 : 1;
-    index += 1;
-  }
-  return keys;
+  const live = text.split(/\r?\n/).filter((line) => !/^\s*#[^"']*$/.test(line)).join("\n");
+  return [...live.matchAll(/([A-Za-z_][A-Za-z0-9_]*)\s*[=:]/g)].map((match) => match[1]!);
 }
 
 const dockerGlobalValueOptions = new Set(["--config", "--context", "--host", "-H", "--log-level", "-l"]);

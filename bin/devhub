@@ -178,7 +178,7 @@ cmd_open() {
 
 postgres_user() {
   local pg_user
-  pg_user=$(sed -nE "s/^[[:space:]]*(export[[:space:]]+)?POSTGRES_USER=[\"']?([^\"']*)[\"']?[[:space:]]*\$/\2/p" "$ENV_FILE" | tail -n1)
+  pg_user=$(sed -nE "s/^[[:space:]]*(export[[:space:]]+)?POSTGRES_USER=[\"']?([^\"'#[:space:]]*)[\"']?[[:space:]]*(#.*)?\$/\2/p" "$ENV_FILE" | tail -n1)
   echo "${pg_user:-test}"
 }
 

@@ -71,7 +71,8 @@ export function useContainerLogs(containerId: string, live: boolean): ContainerL
           flush();
           if (isUnauthorized(caught)) break;
           setLogs((current) => ({ ...current, error: errorMessage(caught), loading: false }));
-          if (caught instanceof ApiRequestError && caught.status >= 400 && caught.status < 500 && caught.status !== 429) break;
+          // Docker refused this container (no logging driver, removed): retrying would only repeat the error.
+          if (caught instanceof ApiRequestError && (caught.code === "stream_error" || (caught.status >= 400 && caught.status < 500 && caught.status !== 429))) break;
           failures += 1;
         }
         flush();

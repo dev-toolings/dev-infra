@@ -43,7 +43,7 @@ export function ContainerLogs({ containerId, live }: { containerId: string; live
   };
 
   return (
-    <section aria-labelledby="container-logs" className="flex min-h-96 min-w-0 flex-1 flex-col gap-2">
+    <section aria-labelledby="container-logs" className="flex min-h-96 min-w-0 flex-1 flex-col gap-2 lg:min-h-0">
       <div className="flex flex-wrap items-center gap-2">
         <h3 id="container-logs" className="text-sm font-semibold">Logs</h3>
         <Badge variant={live ? "outline" : "muted"}>{live ? "Live" : "Stopped"}</Badge>
@@ -66,7 +66,7 @@ export function ContainerLogs({ containerId, live }: { containerId: string; live
           aria-live="off"
           className="min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden rounded-lg border border-log-panel bg-log-panel py-2"
         >
-          {entries.map((entry, index) => <LogRow key={`${entry.time}:${entry.seq}:${index}`} entry={entry} />)}
+          {entries.map((entry) => <LogRow key={`${entry.time}:${entry.seq}`} entry={entry} />)}
         </ol>
       ) : null}
     </section>

@@ -23,6 +23,8 @@ const CONTAINER_LOG_LINES_PER_SECOND = 500;
 const CONTAINER_LOG_MAX_QUEUED = 64;
 const CONTAINER_LOG_MAX_LINE = 2_048;
 const SESSION_CHECK_MS = 30_000;
+// Bun closes a connection idle for 10 s by default, and a quiet container sends nothing.
+const CONTAINER_LOG_HEARTBEAT_MS = 5_000;
 const CONTAINER_ID = /^[a-f0-9]{12,64}$/;
 const LOG_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$/;
 const TOKEN_BYTES = 32;
@@ -372,13 +374,15 @@ export function createApp(services: AppServices, options: ApiOptions): Hono<ApiE
     const stream = new ReadableStream<Uint8Array>({
       start(controller) {
         const encoder = new TextEncoder();
-        let closed = false, seq = 0, sentThisSecond = 0, ticks = 0, dropped = 0, output = "";
+        let closed = false, seq = 0, sentThisSecond = 0, ticks = 0, quietMs = 0, dropped = 0, output = "";
         let follower: FollowHandle | undefined, sessionTimer: ReturnType<typeof setInterval> | undefined, lifetimeTimer: ReturnType<typeof setTimeout> | undefined;
         const send = () => {
           if (dropped) { output += `event: dropped\ndata: ${JSON.stringify({ count: dropped })}\n\n`; dropped = 0; }
           if (output) { controller.enqueue(encoder.encode(output)); output = ""; }
         };
         const flushTimer = setInterval(() => {
+          quietMs = output || dropped ? 0 : quietMs + CONTAINER_LOG_FLUSH_MS;
+          if (quietMs >= CONTAINER_LOG_HEARTBEAT_MS) { quietMs = 0; output = ": ping\n\n"; }
           send();
           ticks += 1;
           if (ticks * CONTAINER_LOG_FLUSH_MS >= 1000) { ticks = 0; sentThisSecond = 0; }
@@ -389,23 +393,23 @@ export function createApp(services: AppServices, options: ApiOptions): Hono<ApiE
           if (close) { try { send(); controller.close(); } catch {} }
         };
         streamCancel = () => finish(false);
+        const failed = () => { output += "event: error\ndata: {\"code\":\"stream_error\",\"message\":\"Docker cannot read the logs of this container.\"}\n\n"; };
         // Over budget or behind a slow client, lines are counted and skipped before any redaction work.
         const onLine = (line: ContainerLogLine) => {
           if (closed) return;
           if (sentThisSecond >= CONTAINER_LOG_LINES_PER_SECOND || (controller.desiredSize ?? 0) < -CONTAINER_LOG_MAX_QUEUED) { dropped += 1; return; }
           sentThisSecond += 1; seq += 1;
-          output += `event: log\ndata: ${JSON.stringify({ seq, time: line.time, stream: line.stream, message: redactText(line.message.slice(0, CONTAINER_LOG_MAX_LINE)) })}\n\n`;
+          // Redaction collapses spaces, so the indent that makes a stack trace readable is put back.
+          const message = (/^[ \t]{0,64}/.exec(line.message)?.[0] ?? "") + redactText(line.message.slice(0, CONTAINER_LOG_MAX_LINE));
+          output += `event: log\ndata: ${JSON.stringify({ seq, time: line.time, stream: line.stream, message })}\n\n`;
         };
         sessionTimer = setInterval(() => { if (!sessionAlive(c.req.raw)) finish(); }, SESSION_CHECK_MS);
         lifetimeTimer = setTimeout(() => finish(), CONTAINER_LOG_TTL);
         void services.operations.followContainer(containerId, since, onLine).then((handle) => {
           follower = handle;
           if (closed) { handle.stop(); return; }
-          void handle.done.then(() => finish());
-        }).catch(() => {
-          output += "event: error\ndata: {\"code\":\"stream_error\",\"message\":\"Log stream failed.\"}\n\n";
-          finish();
-        });
+          void handle.done.then((code) => { if (code !== 0) failed(); finish(); });
+        }).catch(() => { failed(); finish(); });
       },
       cancel() { streamCancel?.(); },
     });

@@ -6,12 +6,14 @@ import { gitRun, isTrustedGitOptions } from "./git";
 import type { Executor } from "./contracts";
 import { envFileKeys, guardExecutor } from "./guard";
 
-test("env keys include the colon form Compose accepts", () => {
-  expect(envFileKeys("A=1\nexport B=2\nCOMPOSE_REMOVE_ORPHANS: 1\n  export D : 4\n# E=5\n")).toEqual(["A", "B", "COMPOSE_REMOVE_ORPHANS", "D"]);
+test("env keys catch every form Compose reads as a control", () => {
+  for (const text of ["COMPOSE_FILE=a", "COMPOSE_FILE: a", "  export COMPOSE_FILE : a", 'A="x" COMPOSE_FILE=a', "B='y' C=1 COMPOSE_FILE=a", '1X="a\nB="\nCOMPOSE_FILE=a', '.X="a\nB="\nCOMPOSE_FILE=a', 'X[0]="a\nB="\nCOMPOSE_FILE=a', 'A=\v"\nB="\nCOMPOSE_FILE=a', 'A="\n# x" COMPOSE_FILE=a']) {
+    expect(envFileKeys(text)).toContain("COMPOSE_FILE");
+  }
 });
 
-test("env keys follow Compose past quoted values", () => {
-  expect(envFileKeys(`A="x" COMPOSE_FILE=/tmp/e.yml\nB='y' C=1 COMPOSE_NOPE=2\nD="one\nCOMPOSE_INSIDE=no\ntwo\\" still" # note\nE=5\n`)).toEqual(["A", "COMPOSE_FILE", "B", "C", "D", "E"]);
+test("env keys skip plain comment lines", () => {
+  expect(envFileKeys("# COMPOSE_FILE=old\n  #DOCKER_HOST=old\nA=1\n")).toEqual(["A"]);
 });
 
 const fixtures: string[] = [];

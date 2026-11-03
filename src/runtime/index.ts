@@ -293,10 +293,10 @@ export class Runtime implements RuntimePort {
       await this.dockerContext(); const records = await this.composeRecords(project, component, cwd);
       const state = (r: Record<string, unknown>) => String(r.State ?? r.state).toLowerCase();
       const health = (r: Record<string, unknown>) => String(r.Health ?? r.health ?? "").toLowerCase();
-      running = component.compose!.services.every((service) => records.some((r) => labels(r)["com.docker.compose.service"] === service && state(r) === "running"));
-      // Health is "" without a healthcheck; records holds every replica of the selected services.
-      // A leftover `compose run` container shares the service label but is not a replica.
+      // A `compose run` container shares the service label but is not a replica.
       const replicas = records.filter((r) => labels(r)["com.docker.compose.oneoff"] !== "True");
+      running = component.compose!.services.every((service) => replicas.some((r) => labels(r)["com.docker.compose.service"] === service && state(r) === "running"));
+      // Health is "" without a healthcheck; replicas holds every container of the selected services.
       if (running && replicas.some((r) => state(r) !== "running" || health(r) === "unhealthy")) { blocked = "unhealthy"; detail = "A selected container is unhealthy or not running"; }
       else if (running && replicas.some((r) => health(r) === "starting")) { blocked = "starting"; detail = "A selected container healthcheck is still starting"; }
     } else if (component.kind === "native") {

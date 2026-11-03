@@ -140,6 +140,9 @@ describe("Runtime Compose readiness", () => {
   test("a leftover compose run container does not make the service unhealthy", async () => {
     expect(await checkReplicas([{ State: "running", Health: "" }, { State: "exited", Health: "", labels: { "com.docker.compose.oneoff": "True" } }])).toMatchObject({ state: "running", ready: true });
   });
+  test("an active compose run container does not count as a running service", async () => {
+    expect(await checkReplicas([{ State: "running", Health: "", labels: { "com.docker.compose.oneoff": "True" } }])).toMatchObject({ state: "stopped", ready: false });
+  });
   test("a container failing its healthcheck reports unhealthy", async () => {
     expect(await checkReplicas([{ State: "running", Health: "unhealthy" }])).toMatchObject({ state: "unhealthy", ready: false });
   });
@@ -243,7 +246,7 @@ test("followContainer reads any local container by exact ID and parses timestamp
     calls.push(argv);
     onLine("2026-11-03T22:00:00.123456789Z hello world", "stdout");
     onLine("Error response from daemon: gone", "stderr");
-    return { stop() {}, done: Promise.resolve() };
+    return { stop() {}, done: Promise.resolve(0) };
   };
   const runtime = new Runtime({ run: f.run, follow, stateDir: join(f.root, "state"), assertAllowedPath: (path) => path });
   await runtime.followContainer(id, undefined, (line) => lines.push(line));
