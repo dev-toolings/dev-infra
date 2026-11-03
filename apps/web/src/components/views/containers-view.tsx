@@ -1,6 +1,7 @@
 import * as React from "react";
 import { Box, ExternalLink } from "lucide-react";
 import type { ContainerInfo } from "../../../../../src/contracts";
+import { DEFAULT_CONTAINER_STATE, type ContainerState } from "../../lib/router";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Card } from "../ui/card";
@@ -15,13 +16,13 @@ export interface ContainersViewProps {
   containers: ContainerInfo[];
   loading?: boolean;
   error?: string;
+  filter: ContainerState;
+  onFilterChange: (filter: ContainerState) => void;
   onSelectProject?: (projectId: string) => void | Promise<void>;
   onSelectComponent?: (projectId: string, componentId: string) => void | Promise<void>;
 }
 
-type StateFilter = "all" | "running" | "unhealthy" | "stopped" | "linked";
-
-const stateFilters: { value: StateFilter; label: string }[] = [
+const stateFilters: { value: ContainerState; label: string }[] = [
   { value: "all", label: "All states" },
   { value: "running", label: "Running" },
   { value: "unhealthy", label: "Unhealthy" },
@@ -81,9 +82,8 @@ function rank(container: ContainerInfo): number {
   return isRunning(container) ? 1 : 2;
 }
 
-export function ContainersView({ containers, loading = false, error, onSelectProject, onSelectComponent }: ContainersViewProps) {
+export function ContainersView({ containers, loading = false, error, filter, onFilterChange, onSelectProject, onSelectComponent }: ContainersViewProps) {
   const [query, setQuery] = React.useState("");
-  const [filter, setFilter] = React.useState<StateFilter>("all");
   const [openId, setOpenId] = React.useState<string>();
 
   const counts = React.useMemo(() => ({
@@ -104,7 +104,7 @@ export function ContainersView({ containers, loading = false, error, onSelectPro
     .sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name)), [containers, filter, query]);
 
   const open = containers.find((container) => container.id === openId);
-  const toggle = (next: StateFilter) => setFilter((current) => (current === next ? "all" : next));
+  const toggle = (next: ContainerState) => onFilterChange(filter === next ? "all" : next);
 
   if (error) return <ErrorState description={error} />;
   if (loading) return <ContainersSkeleton />;
@@ -123,7 +123,7 @@ export function ContainersView({ containers, loading = false, error, onSelectPro
 
       <div className="flex flex-wrap items-center gap-2">
         <SearchField value={query} onChange={setQuery} label="Search name, image or compose project" />
-        <Select value={filter} onValueChange={(value) => setFilter(value as StateFilter)}>
+        <Select value={filter} onValueChange={(value) => onFilterChange(value as ContainerState)}>
           <SelectTrigger size="sm" className="w-44" aria-label="Filter by state">
             <SelectValue />
           </SelectTrigger>
@@ -131,8 +131,8 @@ export function ContainersView({ containers, loading = false, error, onSelectPro
             {stateFilters.map((item) => <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}
           </SelectContent>
         </Select>
-        {filter !== "all" || query ? (
-          <Button type="button" variant="ghost" size="sm" onClick={() => { setFilter("all"); setQuery(""); }}>Reset</Button>
+        {filter !== DEFAULT_CONTAINER_STATE || query ? (
+          <Button type="button" variant="ghost" size="sm" onClick={() => { onFilterChange(DEFAULT_CONTAINER_STATE); setQuery(""); }}>Reset</Button>
         ) : null}
         <span className="tabular ml-auto text-xs text-muted-foreground">
           {visible.length === containers.length ? `${containers.length} containers` : `${visible.length} of ${containers.length} containers`}

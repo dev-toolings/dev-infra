@@ -6,7 +6,7 @@ import { useLifetime } from "./lib/use-lifetime";
 import { useLogStream } from "./lib/use-log-stream";
 import { useMaintenance } from "./lib/use-maintenance";
 import { useResource } from "./lib/use-resource";
-import { useRoute } from "./lib/router";
+import { DEFAULT_CONTAINER_STATE, useRoute } from "./lib/router";
 import { ActionBanner } from "./components/action-banner";
 import { ProjectPicker } from "./components/project-picker";
 import { EmptyState } from "./components/ui/state";
@@ -139,6 +139,8 @@ export function Workspace({ onLogout }: WorkspaceProps) {
           containers={containers.data ?? []}
           loading={containers.loading}
           error={containers.error && !containers.data ? containers.error : undefined}
+          filter={route.containerState ?? DEFAULT_CONTAINER_STATE}
+          onFilterChange={(containerState) => navigate({ view: "containers", containerState }, { replace: true })}
           onSelectProject={openProject}
           onSelectComponent={openProject}
         />
