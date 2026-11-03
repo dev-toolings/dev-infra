@@ -176,6 +176,12 @@ cmd_open() {
   open_url "http://localhost:$published"
 }
 
+postgres_user() {
+  local pg_user
+  pg_user=$(awk -F= '$1=="POSTGRES_USER"{print $2}' "$ENV_FILE" | tail -n1)
+  echo "${pg_user:-test}"
+}
+
 cmd_db() {
   local sub="${1:-}"
   shift || true
@@ -183,7 +189,7 @@ cmd_db() {
     create)
       ensure_network
       COMPOSE_PROFILES="core" dc up -d postgres >/dev/null
-      "$SCRIPTS_DIR/create-project-db.sh" "$@"
+      POSTGRES_ADMIN_USER="${POSTGRES_ADMIN_USER:-$(postgres_user)}" "$SCRIPTS_DIR/create-project-db.sh" "$@"
       ;;
     import)
       local importer="${DEVHUB_IMPORT_SCRIPT:-$SCRIPTS_DIR/import-db.sh}"
@@ -194,8 +200,7 @@ cmd_db() {
       ;;
     list)
       local pg_user
-      pg_user=$(awk -F= '$1=="POSTGRES_USER"{print $2}' "$ENV_FILE" | tail -n1)
-      pg_user="${pg_user:-test}"
+      pg_user=$(postgres_user)
       docker exec "$POSTGRES_CONTAINER" psql -U "$pg_user" -d postgres -Atc "SELECT datname FROM pg_database WHERE datistemplate=false ORDER BY datname;"
       ;;
     *)

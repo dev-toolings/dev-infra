@@ -107,6 +107,41 @@ describe("Runtime Compose adapter", () => {
   });
 });
 
+describe("Runtime Compose readiness", () => {
+  // Real `docker compose ps --format json` rows: one JSON object per line, Health "" without a healthcheck.
+  const checkReplicas = (replicas: Array<{ State: string; Health: string }>) => {
+    const f = fixture();
+    const rows = replicas.map((replica, index) => JSON.stringify({ ID: `0123456789abcde${index}`, ...replica, Labels: { "com.docker.compose.project": "sample", "com.docker.compose.service": "web", "com.docker.compose.project.working_dir": f.app, "com.docker.compose.project.config_files": join(f.app, "compose.yml") } }));
+    const run: Executor = async (argv, options) => argv.includes("ps") ? { code: 0, stdout: rows.join("\n"), stderr: "" } : f.run(argv, options);
+    return new Runtime({ run, stateDir: join(f.root, "state"), assertAllowedPath: (path) => path }).check(f.project, f.component);
+  };
+  test("a container still in its healthcheck start window is not ready yet", async () => {
+    expect(await checkReplicas([{ State: "running", Health: "starting" }])).toMatchObject({ state: "starting", ready: false });
+  });
+  test("a container failing its healthcheck reports unhealthy", async () => {
+    expect(await checkReplicas([{ State: "running", Health: "unhealthy" }])).toMatchObject({ state: "unhealthy", ready: false });
+  });
+  test("a healthy container is ready", async () => {
+    expect(await checkReplicas([{ State: "running", Health: "healthy" }])).toMatchObject({ state: "running", ready: true });
+  });
+  test("a container without a healthcheck stays ready while running", async () => {
+    const status = await checkReplicas([{ State: "running", Health: "" }]);
+    expect(status).toEqual({ componentId: "web", state: "running", ready: true });
+  });
+  test("a stopped container stays stopped without a detail", async () => {
+    const status = await checkReplicas([{ State: "exited", Health: "" }]);
+    expect(status).toEqual({ componentId: "web", state: "stopped", ready: false });
+  });
+  test("every replica of a selected service must pass", async () => {
+    const healthy = { State: "running", Health: "healthy" };
+    expect(await checkReplicas([healthy, { State: "running", Health: "starting" }])).toMatchObject({ state: "starting", ready: false });
+    expect(await checkReplicas([healthy, { State: "running", Health: "unhealthy" }])).toMatchObject({ state: "unhealthy", ready: false });
+    expect(await checkReplicas([healthy, { State: "exited", Health: "" }])).toMatchObject({ state: "unhealthy", ready: false });
+    expect(await checkReplicas([{ State: "running", Health: "starting" }, { State: "running", Health: "unhealthy" }])).toMatchObject({ state: "unhealthy", ready: false });
+    expect(await checkReplicas([healthy, healthy])).toMatchObject({ state: "running", ready: true });
+  });
+});
+
 test("unit escaping protects quotes, percent, and backslash, and rejects newline values", async () => {
   const f = fixture();
   const previousRuntime = process.env.XDG_RUNTIME_DIR, previousBus = process.env.DBUS_SESSION_BUS_ADDRESS;
