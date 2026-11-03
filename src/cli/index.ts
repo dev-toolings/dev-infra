@@ -6,7 +6,7 @@ import { DevHubError, type Action, type AppServices, type Component, type Execut
 import { publicChange, publicProject, publicSetupPlan } from "../public";
 import { parseCliArgs, usage } from "./args";
 import { resolveSelection } from "../operations/graph";
-import { redactFields, redactText } from "../operations/logger";
+import { redactOutput, redactText } from "../operations/logger";
 
 export type CliOptions = { stateDir: string; infraDir: string; run: Executor };
 
@@ -16,8 +16,7 @@ function stable(value: unknown): string {
     if (item && typeof item === "object") return Object.fromEntries(Object.entries(item).sort(([a], [b]) => a.localeCompare(b)).map(([key, child]) => [key, sort(child)]));
     return item;
   };
-  const safe = redactFields({ value });
-  return JSON.stringify(sort(safe.value), null, 2);
+  return JSON.stringify(sort(redactOutput(value)), null, 2);
 }
 
 function write(value: unknown, json: boolean, human?: string): void {
@@ -148,7 +147,7 @@ export async function runCli(argv: string[], services: AppServices, options: Cli
     }
     if (command.command === "project") {
       if (command.action === "list") { write(services.catalog.listProjects().map(projectSummary), command.json); return 0; }
-      if (command.action === "add") { const result = await addProject(command, services); if (command.mode !== "wizard" || !command.group) write(result, command.json); else write(projectSummary(result as Project), command.json); return 0; }
+      if (command.action === "add") { write(await addProject(command, services), command.json); return 0; }
       if (command.action === "discover") {
         const detections = await services.discovery.scan(command.path, command.depth);
         write(detections.map(({ components, ...detection }) => ({ ...detection, components: components.map(({ argv: _argv, envFiles: _envFiles, validation: _validation, ...component }) => component) })), command.json);
