@@ -112,3 +112,42 @@ test("development mode starts the Vite panel once and reuses a running one", asy
   expect(calls).toHaveLength(1);
   expect(serveBanner({ port: 8040, devOrigin: "http://127.0.0.1:5175", devPanel: "started", panelBuilt: false, checkout: "/opt/devhub", color: false })).toContain("http://localhost:5175  served by Vite, started with the controller");
 });
+
+test("a stop signal ends the running command group before the CLI exits", async () => {
+  const { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const base = mkdtempSync(join(tmpdir(), "devhub-signal-")), pidFile = join(base, "member.pid"), members: number[] = [];
+  const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+  try {
+    mkdirSync(join(base, "bin"));
+    writeFileSync(join(base, "bin", "docker"), `#!/bin/sh\nsleep 30 &\necho $! > ${pidFile}.tmp\nmv ${pidFile}.tmp ${pidFile}\nwait\n`, { mode: 0o700 });
+    for (const [signal, code] of [["SIGINT", 130], ["SIGTERM", 143]] as const) {
+      rmSync(pidFile, { force: true });
+      const cli = Bun.spawn([process.execPath, "--no-env-file", join(import.meta.dir, "main.ts"), "maintenance", "inventory"], { cwd: base, env: { ...process.env, PATH: `${join(base, "bin")}:${process.env.PATH}`, XDG_STATE_HOME: join(base, "state") }, stdout: "ignore", stderr: "ignore" });
+      while (!existsSync(pidFile)) await Bun.sleep(10);
+      const member = Number(readFileSync(pidFile, "utf8")); members.push(member);
+      cli.kill(signal);
+      const exited = await cli.exited;
+      expect(alive(member)).toBe(false);
+      expect(exited).toBe(code);
+      expect(cli.signalCode).toBeNull();
+    }
+  } finally {
+    for (const member of members) if (alive(member)) process.kill(member, "SIGKILL");
+    rmSync(base, { recursive: true, force: true });
+  }
+}, 20_000);
+
+test("serve exits with the stop signal's code without the Vite panel", async () => {
+  const { mkdtempSync, rmSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const base = mkdtempSync(join(tmpdir(), "devhub-serve-"));
+  const free = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response() }), port = free.port!; free.stop(true);
+  try {
+    const serve = Bun.spawn([process.execPath, "--no-env-file", join(import.meta.dir, "main.ts"), "serve", "--port", String(port)], { cwd: base, env: { ...process.env, XDG_STATE_HOME: join(base, "state") }, stdout: "pipe", stderr: "ignore" });
+    await serve.stdout.getReader().read();
+    serve.kill("SIGTERM");
+    expect(await serve.exited).toBe(143);
+    expect(serve.signalCode).toBeNull();
+  } finally { rmSync(base, { recursive: true, force: true }); }
+}, 20_000);

@@ -1,4 +1,7 @@
 import { expect, test } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { execCommand } from "./executor";
 test("executor rejects excess output and enforces a finite deadline", async () => {
   await expect(execCommand([process.execPath, "--eval", "process.stdout.write('x'.repeat(65536))"], { maxOutputBytes: 64 })).rejects.toThrow("output exceeded");
@@ -32,3 +35,25 @@ test("executor passes only inherited safe values and explicit locale/color value
     for (const key of ["timeoutMs", "maxOutputBytes"]) await expect(execCommand(["never-spawn"], { [key]: value })).rejects.toThrow("positive finite integers");
   }
 });
+
+test("termination kills a child that ignores SIGTERM, waits for it and refuses new commands", async () => {
+  const base = mkdtempSync(join(tmpdir(), "devhub-terminate-")), pidFile = join(base, "child.pid");
+  const stubborn = `process.on("SIGTERM", () => {}); require("node:fs").writeFileSync(${JSON.stringify(`${pidFile}.tmp`)}, String(process.pid)); require("node:fs").renameSync(${JSON.stringify(`${pidFile}.tmp`)}, ${JSON.stringify(pidFile)}); setInterval(() => {}, 1000);`;
+  const script = `
+    import { existsSync, readFileSync } from "node:fs";
+    import { execCommand, terminateChildren } from ${JSON.stringify(join(import.meta.dir, "executor.ts"))};
+    void execCommand([process.execPath, "--eval", ${JSON.stringify(stubborn)}]).catch(() => {});
+    while (!existsSync(${JSON.stringify(pidFile)})) await Bun.sleep(10);
+    const pid = Number(readFileSync(${JSON.stringify(pidFile)}, "utf8"));
+    await terminateChildren(100);
+    let alive = true; try { process.kill(pid, 0); } catch { alive = false; }
+    const refused = await execCommand(["sleep", "30"]).then(() => "ran", (error) => error.code);
+    process.stdout.write(JSON.stringify({ alive, refused }));
+    process.exit(0);
+  `;
+  try {
+    const fixture = Bun.spawn([process.execPath, "--no-env-file", "--eval", script], { cwd: base, stdout: "pipe", stderr: "inherit" });
+    expect(await new Response(fixture.stdout).text()).toBe(JSON.stringify({ alive: false, refused: "shutting_down" }));
+    expect(await fixture.exited).toBe(0);
+  } finally { rmSync(base, { recursive: true, force: true }); }
+}, 20_000);
