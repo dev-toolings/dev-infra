@@ -89,14 +89,30 @@ const LogRow = React.memo(function LogRow({ entry }: { entry: ContainerLogEntry 
 export function ContainerLogs({ containerId, live }: { containerId: string; live: boolean }) {
   const { entries, dropped, error, loading } = useContainerLogs(containerId, live);
   const scroller = React.useRef<HTMLDivElement>(null);
+  const list = React.useRef<HTMLOListElement>(null);
+  const following = React.useRef(true);
   const [stuck, setStuck] = React.useState(true);
+  const hasEntries = entries.length > 0;
 
-  // The list is laid out from the bottom (column-reverse): scrollTop 0 is the newest line, so the
-  // browser keeps following on its own, and scrollTop goes negative when the reader moves up.
+  const follow = React.useCallback((next: boolean) => {
+    following.current = next;
+    setStuck(next);
+  }, []);
   const toBottom = () => {
-    if (scroller.current) scroller.current.scrollTop = 0;
-    setStuck(true);
+    if (scroller.current) scroller.current.scrollTop = scroller.current.scrollHeight;
+    follow(true);
   };
+
+  // ResizeObserver runs after layout and before paint, so a new line is never drawn above the bottom.
+  // Do not use flex-col-reverse here: the Sheet scroll lock misreads its negative scrollTop and cancels the wheel.
+  React.useEffect(() => {
+    const box = scroller.current;
+    if (!box || !list.current) return;
+    const observer = new ResizeObserver(() => { if (following.current) box.scrollTop = box.scrollHeight; });
+    observer.observe(list.current);
+    observer.observe(box);
+    return () => observer.disconnect();
+  }, [hasEntries]);
 
   return (
     <section aria-labelledby="container-logs" className="flex min-h-96 min-w-0 flex-1 flex-col gap-2 lg:min-h-0">
@@ -116,10 +132,13 @@ export function ContainerLogs({ containerId, live }: { containerId: string; live
       {entries.length > 0 ? (
         <div
           ref={scroller}
-          onScroll={(event) => setStuck(event.currentTarget.scrollTop > -STICK_THRESHOLD_PX)}
-          className="flex min-h-0 min-w-0 flex-1 flex-col-reverse overflow-y-auto overflow-x-hidden rounded-lg border border-log-panel bg-log-panel py-2 [scrollbar-color:var(--log-muted)_transparent] [scrollbar-width:thin]"
+          onScroll={(event) => {
+            const { scrollHeight, scrollTop, clientHeight } = event.currentTarget;
+            follow(scrollHeight - scrollTop - clientHeight < STICK_THRESHOLD_PX);
+          }}
+          className="min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden rounded-lg border border-log-panel bg-log-panel py-2 [scrollbar-color:var(--log-muted)_transparent] [scrollbar-width:thin]"
         >
-          <ol role="log" aria-label="Container log output" aria-live="off" className="mb-auto min-w-0">
+          <ol ref={list} role="log" aria-label="Container log output" aria-live="off" className="min-w-0">
             {entries.map((entry) => <LogRow key={`${entry.time}:${entry.seq}`} entry={entry} />)}
           </ol>
         </div>
