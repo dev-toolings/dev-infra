@@ -310,13 +310,16 @@ test("a later activation retires the superseded override", async () => {
   await expect(f.runtime.stop(f.project, f.component)).rejects.toThrow("Compose container ownership labels do not match");
 });
 
-test("a failed activation keeps the running container owned and leaves no new override", async () => {
+test("a failed activation keeps both containers it may leave behind owned", async () => {
   const f = await activated();
   await f.commit(); await f.maintenance.scan(CANDIDATE);
   const next = await f.remediate("local/app:v3");
   f.docker.upFails = true;
   await expect(f.maintenance.activate(next.id)).rejects.toThrow("Candidate activation failed");
-  expect(readdirSync(dirname(f.override))).toEqual([basename(f.override)]);
+  const failed = readdirSync(dirname(f.override)).map((name) => join(dirname(f.override), name)).find((file) => file !== f.override)!;
+  expect(existsSync(f.override)).toBe(true);
+  expect(await owned(f)).toBe(1);
+  f.docker.containers[0]!.files = [f.composeFile, failed];
   expect(await owned(f)).toBe(1);
 });
 

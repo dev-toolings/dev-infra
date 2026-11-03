@@ -155,7 +155,7 @@ SH
 
 @test "db create runs psql as the configured POSTGRES_USER" {
   cp "$REPO_DIR/data/scripts/create-project-db.sh" "$DEVHUB_DIR/data/scripts/"
-  printf 'POSTGRES_USER=first\nPOSTGRES_USER=custom_admin\n' > "$DEVHUB_DIR/.env"
+  printf 'POSTGRES_USER=first\nexport POSTGRES_USER="custom_admin"\n' > "$DEVHUB_DIR/.env"
   run "$REPO_DIR/bin/devhub" db create app
   [ "$status" -eq 0 ]
   [ "$(grep -o 'psql -U [^ ]*' "$DOCKER_CALLS" | sort -u)" = 'psql -U custom_admin' ]

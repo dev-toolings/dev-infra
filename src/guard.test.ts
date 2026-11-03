@@ -10,6 +10,10 @@ test("env keys include the colon form Compose accepts", () => {
   expect(envFileKeys("A=1\nexport B=2\nCOMPOSE_REMOVE_ORPHANS: 1\n  export D : 4\n# E=5\n")).toEqual(["A", "B", "COMPOSE_REMOVE_ORPHANS", "D"]);
 });
 
+test("env keys follow Compose past quoted values", () => {
+  expect(envFileKeys(`A="x" COMPOSE_FILE=/tmp/e.yml\nB='y' C=1 COMPOSE_NOPE=2\nD="one\nCOMPOSE_INSIDE=no\ntwo\\" still" # note\nE=5\n`)).toEqual(["A", "COMPOSE_FILE", "B", "C", "D", "E"]);
+});
+
 const fixtures: string[] = [];
 afterEach(() => { for (const path of fixtures.splice(0)) rmSync(path, { recursive: true, force: true }); });
 

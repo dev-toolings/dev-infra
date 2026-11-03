@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { lstatSync, mkdirSync, readFileSync, realpathSync, writeFileSync, unlinkSync } from "node:fs";
+import { lstatSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { parseDocument, stringify } from "yaml";
@@ -511,15 +511,13 @@ export class Maintenance implements MaintenancePort {
       const serviceName = snapshot.selectedService;
       const scope = { stateDir: this.stateDir, projectId: project.id, componentId: component.id, service: serviceName };
       const overridePath = overrideFile(scope, evidence.candidateImageId);
-      // The same image can be activated twice: reuse its override, and never remove one that live containers name.
-      const created = !approvedOverride(scope, overridePath);
-      if (created) { mkdirSync(dirname(overridePath), { recursive: true, mode: 0o700 }); writeFileSync(overridePath, overrideContent(serviceName, evidence.candidateImageId), { mode: 0o600, flag: "wx" }); }
-      try {
-        const argv = [...base, "--file", overridePath, "up", "-d", "--no-build", "--no-deps", serviceName];
-        assertSafeDockerArgv(argv, false);
-        await this.dockerContext();
-        const result = await this.run(argv, DOCKER); if (result.code !== 0) throw fail("Candidate activation failed", "activation_failed", 502);
-      } catch (caught) { if (created) try { unlinkSync(overridePath); } catch {} throw caught; }
+      // The same image can be activated twice: reuse its override. A failed `up` may already have recreated
+      // the container, whose label then names this file, so it stays until the next successful activation.
+      if (!approvedOverride(scope, overridePath)) { mkdirSync(dirname(overridePath), { recursive: true, mode: 0o700 }); writeFileSync(overridePath, overrideContent(serviceName, evidence.candidateImageId), { mode: 0o600, flag: "wx" }); }
+      const argv = [...base, "--file", overridePath, "up", "-d", "--no-build", "--no-deps", serviceName];
+      assertSafeDockerArgv(argv, false);
+      await this.dockerContext();
+      const result = await this.run(argv, DOCKER); if (result.code !== 0) throw fail("Candidate activation failed", "activation_failed", 502);
       retireOverrides(scope, overridePath);
       const after = await this.inspectContainers(project, component);
       const selectedIds = await this.run([...base, "ps", "-q", snapshot.selectedService], READ);
