@@ -2,16 +2,21 @@ import { afterEach, expect, test } from "bun:test";
 import { chmodSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { CatalogPort, Component, ContainerInfo, ExecOptions, Operation, Project, RuntimePort } from "../contracts";
+import { parse } from "yaml";
+import { Catalog } from "../catalog";
+import type { CatalogPort, Component, ContainerInfo, ExecOptions, Executor, Operation, Project, RuntimePort } from "../contracts";
 import { publicChange } from "../public";
+import { Runtime } from "../runtime";
 import { execCommand } from "../runtime/executor";
 import { gitRun } from "../git";
 
 import { Maintenance } from "./index";
 
 const dirs: string[] = [];
+const catalogs: Catalog[] = [];
 const BASE = "sha256:" + "a".repeat(64);
 const CANDIDATE = "sha256:" + "b".repeat(64);
+const THIRD = "sha256:" + "e".repeat(64);
 function fixture() {
   const temp = mkdtempSync(join(tmpdir(), "devhub-security-")); dirs.push(temp);
   const root = join(temp, "project"); const state = join(temp, "state"); mkdirSync(root); mkdirSync(state); chmodSync(state, 0o700);
@@ -64,7 +69,7 @@ async function initGit(f: ReturnType<typeof fixture>) {
   expect((await gitRun(execCommand, ["-C", f.root, "add", "Dockerfile", "compose.yaml"])).code).toBe(0);
   expect((await gitRun(execCommand, ["-C", f.root, "commit", "-m", "fixture"])).code).toBe(0);
 }
-afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
+afterEach(() => { for (const catalog of catalogs.splice(0)) catalog.close(); for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
 
 test("scanner failure is recorded as failed without inventing findings", async () => {
   const f = fixture();
@@ -191,4 +196,61 @@ test("preview selects a dotted Dockerfile stage name", async () => {
   writeFileSync(join(f.root, "Dockerfile"), "FROM alpine:3.20 AS build.prod\nFROM busybox:1.36\n");
   const change = await f.maintenance.preview({ projectId: "fixture", componentId: "app", file: "Dockerfile", service: "app", stage: "build.prod", replacement: "alpine:3.21" });
   expect(change.proposed).toBe("FROM alpine:3.21 AS build.prod\nFROM busybox:1.36\n");
+});
+
+/** Real Catalog and Runtime; only the Docker CLI is simulated, including the config_files label Compose writes. */
+async function registered(compose = "services:\n  app:\n    image: local/app:v1\n", sources: Component["sources"] = [{ file: "compose.yaml", service: "app" }]) {
+  const temp = mkdtempSync(join(tmpdir(), "devhub-registered-")); dirs.push(temp);
+  const roots = join(temp, "roots"), root = join(roots, "project"), state = join(temp, "state"), infra = join(temp, "infra");
+  mkdirSync(root, { recursive: true }); mkdirSync(infra);
+  writeFileSync(join(root, "Dockerfile"), "FROM alpine:3.20\n"); writeFileSync(join(root, "compose.yaml"), compose);
+  const catalog = new Catalog({ stateDir: state, infraDir: infra }); catalogs.push(catalog); catalog.addRoot(roots, "Fixtures");
+  const project = catalog.createProject({ id: "fixture", name: "Fixture", root, components: [{ id: "app", name: "App", kind: "compose", cwd: root, compose: { files: ["compose.yaml"], projectName: "fixture-app", profiles: [], services: ["app"] }, dependsOn: [], sources, validation: { argv: ["/bin/true"] } }] });
+  const composeFile = join(root, "compose.yaml"), images = new Map([["local/app:v1", BASE], ["local/app:v2", CANDIDATE], ["local/app:v3", THIRD]]);
+  const docker = { upFails: false, containers: [{ id: "d".repeat(64), image: BASE, service: "app", files: [composeFile] }] };
+  const labels = (item: typeof docker.containers[number]) => ({ "com.docker.compose.project": "fixture-app", "com.docker.compose.service": item.service, "com.docker.compose.project.working_dir": root, "com.docker.compose.project.config_files": item.files.join(",") });
+  const ok = (stdout: unknown) => ({ code: 0, stdout: typeof stdout === "string" ? stdout : JSON.stringify(stdout), stderr: "" });
+  const run: Executor = async (argv, options) => {
+    if (argv[0] === "git") return execCommand(argv, options);
+    if (argv[0] === "trivy") return argv[1] === "--version" ? ok("Version: 0.60.0") : ok({ ArtifactID: argv.at(-1), Results: [] });
+    if (argv[1] === "context") return ok({ Endpoints: { docker: { Host: "unix:///var/run/docker.sock" } } });
+    if (argv[1] === "image") { const target = argv.at(-1)!; return ok(images.get(target) ?? target); }
+    if (argv[1] === "run") return ok("ok");
+    if (argv[1] === "ps") return ok(docker.containers.map((item) => ({ ID: item.id, Names: "app", Image: item.image, State: "running" })));
+    if (argv[1] === "stats") return ok("");
+    if (argv[1] === "inspect") return ok(docker.containers.filter((item) => argv.includes(item.id)).map((item) => ({ Id: item.id, Image: item.image, State: { Status: "running" }, Config: { Labels: labels(item) }, Mounts: [{ Type: "volume", Name: "fixture_data", Destination: "/data" }] })));
+    if (argv[1] === "compose" && argv.includes("config")) return ok(parse(readFileSync(composeFile, "utf8")));
+    if (argv[1] === "compose" && argv.includes("-q")) return ok(docker.containers.map((item) => item.id).join("\n"));
+    if (argv[1] === "compose" && argv.includes("ps")) return ok(docker.containers.map((item) => ({ ID: item.id, State: "running", Labels: labels(item) })));
+    if (argv[1] === "compose" && argv.includes("stop")) return ok("");
+    if (argv[1] === "compose" && argv.includes("up")) {
+      if (docker.upFails) return { code: 1, stdout: "", stderr: "up failed" };
+      const files = argv.flatMap((arg, index) => arg.startsWith("--file=") ? [arg.slice(7)] : arg === "--file" ? [argv[index + 1]!] : []);
+      const image = /image: (\S+)/.exec(readFileSync(files.at(-1)!, "utf8"))![1]!;
+      docker.containers = [{ id: image.slice(7), image, service: "app", files }];
+      return ok("");
+    }
+    throw new Error(`Unexpected injected command: ${argv.join(" ")}`);
+  };
+  const runtime = new Runtime({ run, stateDir: state, assertAllowedPath: catalog.assertAllowedPath.bind(catalog) });
+  const maintenance = new Maintenance({ catalog, runtime, run, stateDir: state });
+  for (const args of [["init"], ["config", "user.name", "Fixture"], ["config", "user.email", "fixture@example.invalid"], ["add", "Dockerfile", "compose.yaml"], ["commit", "-m", "fixture"]]) expect((await gitRun(execCommand, ["-C", root, ...args])).code).toBe(0);
+  const remediate = async (replacement: string) => {
+    const change = await maintenance.preview({ projectId: "fixture", componentId: "app", file: "compose.yaml", service: "app", replacement });
+    await maintenance.apply(change.id); return maintenance.validate(change.id);
+  };
+  return { root, state, catalog, project, component: project.components[0]!, runtime, maintenance, docker, composeFile, remediate };
+}
+
+test("a real catalog stores a preview that maps no Dockerfile stage", async () => {
+  const f = await registered("services:\n  app:\n    build: .\n", [{ file: "Dockerfile", service: "app" }]);
+  const change = await f.maintenance.preview({ projectId: "fixture", componentId: "app", file: "Dockerfile", service: "app", replacement: "alpine:3.21" });
+  expect(change.state).toBe("preview");
+  expect(f.catalog.getRecord("security-change-mappings", change.id)).toEqual({ service: "app" });
+});
+
+test("a real catalog stores validation evidence for an image-only service", async () => {
+  const f = await registered();
+  await f.maintenance.scan(BASE);
+  expect(await f.remediate("local/app:v2")).toMatchObject({ state: "validated", evidence: { candidateImageId: CANDIDATE } });
 });

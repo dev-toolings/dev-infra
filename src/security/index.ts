@@ -281,7 +281,7 @@ export class Maintenance implements MaintenancePort {
         proposed = replaceReference(source.content, currentRef, input.replacement, lines.indexOf(selected[0]!));
       }
       const change: Change = { id: randomUUID(), projectId: project.id, componentId: component.id, file: input.file, sourceHash: source.sourceHash, original: source.content, proposed, replacement: input.replacement, state: "preview", createdAt: new Date().toISOString() };
-      this.save(change); this.catalog.putRecord(RECORD_MAPPING, change.id, { service: selectedService, stage: selectedStage }); return change;
+      this.save(change); this.catalog.putRecord(RECORD_MAPPING, change.id, { ...(selectedService ? { service: selectedService } : {}), ...(selectedStage ? { stage: selectedStage } : {}) }); return change;
     } catch (caught) { error = caught; throw caught; } finally { lock.release(error); }
   }
   private async git(cwd: string, args: string[]) { return gitRun(this.run, ["-C", cwd, ...args], READ); }
@@ -472,7 +472,7 @@ export class Maintenance implements MaintenancePort {
       const candidateChange: Change = { ...change, imageId: candidateImageId, scanId: candidateScan.id };
       const findingsImproved = candidateScan.state === "succeeded" && sortedFindings(candidateScan.findings).join("\n") !== sortedFindings(baselineScan.findings).join("\n") && candidateScan.findings.length < baselineScan.findings.length;
       const evidence: ValidationEvidence = { baselineImageId, candidateImageId, baselineScanId: baselineScan.id, candidateScanId: candidateScan.id, sourceHash: sourceHashOf(change.proposed), runtimeHash, containerIds: snap.containers.map((x) => x.id).sort(), volumes: snap.volumes, checksPassed: check.code === 0 && candidateScan.state === "succeeded", findingsImproved, validatedAt: new Date().toISOString() };
-      this.catalog.putRecord(RECORD_SNAPSHOT, change.id, { evidence, selectedService: selected, imageTag, candidateRef, composeHash: hash(stable(model)), envInputsHash: this.envInputsHash(component, model), base });
+      this.catalog.putRecord(RECORD_SNAPSHOT, change.id, { evidence, selectedService: selected, ...(imageTag ? { imageTag } : {}), candidateRef, composeHash: hash(stable(model)), envInputsHash: this.envInputsHash(component, model), base });
       candidateChange.evidence = evidence; candidateChange.state = evidence.checksPassed ? "validated" : "failed";
       if (!evidence.checksPassed) candidateChange.error = check.code !== 0 ? "Configured application validation failed" : candidateScan.error ?? "Candidate scan failed";
       this.save(candidateChange); if (!evidence.checksPassed) throw fail(candidateChange.error!, "validation_failed", 409); return candidateChange;
