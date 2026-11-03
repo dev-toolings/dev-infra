@@ -34,6 +34,7 @@ const MAX_ENTRIES = 64;
 const MAX_STRING_LENGTH = 1024;
 const MAX_KEY_LENGTH = 80;
 const MAX_INPUT_STRING_LENGTH = 8192;
+const MAX_JSON_LOG_LINE = 65_536;
 const MAX_OUTPUT_LENGTH = 8192;
 const MAX_FIELD_VALUE_LENGTH = 1200;
 const TRUNCATED = "[truncated]";
@@ -242,6 +243,29 @@ export function redactFields(fields: Record<string, unknown>): Record<string, un
 /** Applies the redactFields secret rules with no size limit, for complete command output. */
 export function redactOutput(value: unknown): unknown {
   return cloneSafe(value, { seen: new WeakSet(), entries: 0, limits: NO_LIMITS }, 0);
+}
+
+const SGR_SPLIT = /(\u001b\[[0-9;]*m)/;
+
+/** Keeps color codes and spacing, drops every other terminal control. */
+function displayControls(line: string): string {
+  return line.split(SGR_SPLIT).map((part, index) => index % 2 ? part : part.replace(ANSI_SEQUENCE, "").replace(/[\u0000-\u0008\u000a-\u001f\u007f-\u009f]/g, "")).join("");
+}
+
+/**
+ * One line of container output for display. JSON is redacted by structure so it stays valid JSON.
+ * Text keeps its colors and spacing unless a secret was found, then it falls back to the plain redacted form.
+ */
+export function redactLogLine(line: string): string {
+  if (line.length <= MAX_JSON_LOG_LINE && /^\s*[{[]/.test(line)) {
+    try {
+      const parsed: unknown = JSON.parse(line);
+      if (parsed && typeof parsed === "object") return JSON.stringify(redactOutput(parsed));
+    } catch { /* A line that only looks like JSON is plain text. */ }
+  }
+  const bounded = line.length > MAX_INPUT_STRING_LENGTH ? `${line.slice(0, MAX_INPUT_STRING_LENGTH)}${TRUNCATED}` : line;
+  const safe = redactSecrets(bounded);
+  return safe === cleanControls(bounded) ? displayControls(bounded) : safe;
 }
 
 function resolveMode(mode?: LoggerOptions["mode"]): "development" | "production" {

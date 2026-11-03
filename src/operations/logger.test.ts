@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import {
+  redactLogLine,
   createLogger,
   formatLogLine,
   LOG_REDACT_PATHS,
@@ -171,4 +172,19 @@ test("nested data, errors, cycles, and excessive entries stay bounded", () => {
   expect(line).toContain("actual message");
   expect(line).not.toContain("GET /forged 200");
   expect(Object.hasOwn(redactFields(fields),"__proto__")).toBe(true);
+});
+
+test("container log lines keep JSON valid, colors and spacing, but never a secret", () => {
+  const json = JSON.parse(redactLogLine(JSON.stringify({ message: "password=hunter2 ok", context: { token: "abc", big: "x".repeat(3000) }, level_name: "INFO" })));
+  expect(json).toMatchObject({ message: "password=[redacted] ok", context: { token: "[redacted]" }, level_name: "INFO" });
+  expect(json.context.big.length).toBe(3000);
+
+  expect(redactLogLine("\u001b[32m  INFO\u001b[0m   app  started\u0007\u001b]0;title\u0007")).toBe("\u001b[32m  INFO\u001b[0m   app  started");
+  expect(redactLogLine("\tat main (app.ts:1)")).toBe("\tat main (app.ts:1)");
+
+  const colored = redactLogLine("\u001b[31mpassword=\u001b[0mhunter2 next");
+  expect(colored).not.toContain("hunter2");
+  expect(colored).not.toContain("\u001b");
+
+  expect(redactLogLine("{not json password=hunter2")).not.toContain("hunter2");
 });
