@@ -2,7 +2,7 @@
 
 This document defines the intended workflows for bringing existing applications under the DevHub project manager and connecting them to shared local services. The stories are acceptance criteria, not a release promise.
 
-Status below reflects the repository on 2026-10-29. Update a status when implementation lands. Any command labeled **planned** describes the target interface and may not work yet.
+Status below reflects the repository on 2026-11-03. Update a status when implementation lands. Any command labeled **planned** describes the target interface and may not work yet.
 
 ## Product boundary and current status
 
@@ -15,7 +15,7 @@ The manager is a local development tool, not a hosted platform or a hostile-code
 
 The existing Bash CLI in [bin/devhub](../bin/devhub) contains the shared-infrastructure commands **up**, **down**, **restart**, **ps**, **logs**, **open**, **db**, **doctor**, **version**, and **help**. The source tree also has shared contracts and local safety foundations in [src/contracts.ts](../src/contracts.ts), [src/state.ts](../src/state.ts), [src/guard.ts](../src/guard.ts), [src/git.ts](../src/git.ts), [src/runtime/executor.ts](../src/runtime/executor.ts), and a composition entry point in [src/main.ts](../src/main.ts).
 
-The CLI now defines root, project, preset, maintenance, setup, and legacy infrastructure command workflows against the shared service interfaces. Operational availability depends on the concrete manager services being composed by the checkout's `src/main.ts`. The React view components exist under [apps/web/src/components/views](../apps/web/src/components/views/); panel availability depends on the API and web integration.
+The manager services are implemented and composed by [src/main.ts](../src/main.ts): Catalog ([src/catalog](../src/catalog/)), Discovery ([src/discovery](../src/discovery/)), Runtime ([src/runtime](../src/runtime/)), Operations ([src/operations](../src/operations/)), Maintenance ([src/security](../src/security/)) and the loopback API ([src/api](../src/api/)). [bin/devhub](../bin/devhub) dispatches **root**, **project**, **maintenance**, **security**, **setup**, **serve**, **pair**, and **presets** to Bun, and **infra ...** to the existing Bash commands. The React control panel under [apps/web](../apps/web/) is connected to the API.
 
 ## Stories
 
@@ -36,7 +36,7 @@ The CLI now defines root, project, preset, maintenance, setup, and legacy infras
 
 **Dependencies:** Existing Compose and Bash CLI; lead-owned compatibility dispatch.
 
-**Current status:** **Partially implemented.** The current stack and Bash commands are present. Manager dispatch and ownership checks are not.
+**Current status:** **Implemented.** The stack and Bash commands are unchanged (checked by `tests/infra-contract.py`). **devhub infra ...** delegates to the Bash implementation with its original arguments and Compose identity (`tests/cli.bats`). Catalog and Runtime refuse shared infrastructure Compose identities (`devhub`, `dev-infra`, `devhub-infra`, `dev-shared-net`, `infra-*`) and shared data volumes; project stop issues only `stop` on the component's own services, and project removal deletes catalog rows only.
 
 **Current command example:**
 
@@ -65,9 +65,9 @@ devhub down
 
 **Dependencies:** Catalog root policy, Discovery, and CLI approval flow.
 
-**Current status:** **CLI implemented; end-to-end availability depends on composed Catalog and Discovery services.**
+**Current status:** **Implemented.** Catalog root policy and Discovery are composed; tests cover symlink escapes, skipped subtrees, paths outside approved roots, and grouping a Compose backend with a native Vite frontend.
 
-**Planned command shape:**
+**Command example:**
 
 ~~~sh
 devhub root add ~/code
@@ -94,9 +94,9 @@ devhub project list
 
 **Dependencies:** Discovery, Catalog validation, and CLI preview/apply flow.
 
-**Current status:** **CLI preview/apply path implemented through DiscoveryPort. Preset behavior depends on the composed Discovery service.**
+**Current status:** **Implemented.** The six presets are served by Discovery. Tests cover side-effect-free preview, refusal of existing target files without modification, rollback of only the files created by a failed apply, expired setup plans, and rejected project `.env` Compose controls.
 
-**Planned command shape:**
+**Command example:**
 
 ~~~sh
 devhub project add --path ~/code/api --name api --preset laravel-docker --apply
@@ -123,9 +123,9 @@ devhub project show api
 
 **Dependencies:** Catalog, Runtime, Operations, guarded executor, and Discovery component definitions.
 
-**Current status:** **CLI lifecycle, status, and log paths use OperationsPort. Runtime behavior depends on the composed Runtime and Operations services.**
+**Current status:** **Implemented.** Runtime verifies the local Docker context and drives Compose and user systemd units; Operations covers topological start, reverse stop, readiness deadlines, idempotency, and partial-start failure that leaves started components running.
 
-**Planned command shape:**
+**Command example:**
 
 ~~~sh
 devhub project start shop
@@ -153,13 +153,14 @@ devhub project stop shop
 
 **Dependencies:** API, Catalog, Operations, CLI pairing, and control-panel integration.
 
-**Current status:** **Partially implemented.** Presentational views, including project, pairing, and log components, exist. The API and client integration are absent, so the panel is not yet operational.
+**Current status:** **Implemented.** The API covers pairing expiry and attempt limits, Host and Origin checks, eight-hour sessions, logout, capped log streams, and DTOs that never return argv, env files, or validation commands. The control panel is connected, with page URLs per view. **devhub serve --dev** also starts the Vite panel server.
 
-**Planned command shape:**
+**Command example:**
 
 ~~~sh
 devhub pair
 devhub serve
+devhub serve --dev
 devhub serve --dev-origin http://127.0.0.1:5175
 ~~~
 
@@ -181,7 +182,7 @@ devhub serve --dev-origin http://127.0.0.1:5175
 
 **Dependencies:** Runtime inventory, Maintenance scanner adapter, API, and panel integration.
 
-**Current status:** **Partially implemented.** Inventory and scan views can display typed data, but the inventory and scanner services and API are absent.
+**Current status:** **Implemented.** Runtime inventory keeps unlabeled containers observed-only; Maintenance runs Trivy only on explicit request and records scanner, scan time, findings, and database freshness when reported. Scanner absence, malformed output, and remote Docker contexts are recorded as failures. The panel shows filterable container and scan inventories with a per-image Scan action.
 
 ### US-07: Review and validate a replacement image reference
 
@@ -202,7 +203,7 @@ devhub serve --dev-origin http://127.0.0.1:5175
 
 **Dependencies:** Catalog source mapping, Runtime snapshots, Maintenance, Git safety helper, API, and panel integration.
 
-**Current status:** **Partially implemented.** The panel can display existing scan and change DTOs as read-only data. Maintenance and its checked image-reference input are absent.
+**Current status:** **Implemented.** Maintenance previews one Dockerfile **FROM** operand (named and dotted stages included) or one Compose **image** scalar, refuses database major changes, stale or dirty sources, and unmapped sources, applies on a dedicated local branch, validates the candidate with `--network none`, and activates only the exact validated image. The panel exposes the remediation flow under `/maintenance/remediation`.
 
 ### US-08: Adopt shared services one project at a time
 
@@ -222,4 +223,4 @@ devhub serve --dev-origin http://127.0.0.1:5175
 
 **Dependencies:** Existing shared infrastructure, project approval and discovery, safe preview/apply, and a user-provided connection configuration.
 
-**Current status:** **Partially implemented.** Shared services, the external network, **devhub db create**, and the network helper exist. There is no manager workflow for staged application adoption, and no data transfer is included in this scope.
+**Current status:** **Guidance only; manager workflow not started.** Shared services, the external network, **devhub db create**, the network helper (`data/scripts/connect-project-network.sh`), and the README connection guidance exist. The presets register a project with its existing Docker configuration but do not propose a shared-service connection mapping. There is no adoption preview, connection check, or adopted state, and no data transfer is included in this scope.
