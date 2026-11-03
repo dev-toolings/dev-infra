@@ -32,6 +32,7 @@ export const LOG_REDACT_PATHS = Object.freeze([
 const MAX_DEPTH = 5;
 const MAX_ENTRIES = 64;
 const MAX_STRING_LENGTH = 1024;
+const MAX_KEY_LENGTH = 80;
 const MAX_INPUT_STRING_LENGTH = 8192;
 const MAX_OUTPUT_LENGTH = 8192;
 const MAX_FIELD_VALUE_LENGTH = 1200;
@@ -84,10 +85,8 @@ function decodedKey(value: string): string {
   }
 }
 
-/** Removes terminal controls and credential-shaped values before any formatting. */
-export function redactText(text: string): string {
-  if (text.length > MAX_INPUT_STRING_LENGTH) return TRUNCATED;
-
+/** Removes terminal controls and credential-shaped values at any length. Quadratic on one unbroken multi-kilobyte token. */
+function redactSecrets(text: string): string {
   let safe = cleanControls(text.replace(/\b(?:set-cookie|cookie)\s*:\s*[^\r\n]*/gi, (header) => `${header.slice(0, header.indexOf(":") + 1)} ${REDACTED}`));
   safe = safe.replace(URL_USERINFO, (_match, scheme: string) => `${scheme}${REDACTED}@`);
   safe = safe.replace(/([?&])([^=&#\s]+)=([^&#\s]*)/g, (match, separator: string, key: string, value: string) =>
@@ -101,14 +100,31 @@ export function redactText(text: string): string {
     const scheme = /^\S+/.exec(match)?.[0] ?? "Bearer";
     return `${scheme} ${REDACTED}`;
   });
-  safe = safe.replace(EMAIL, REDACTED);
+  return safe.replace(EMAIL, REDACTED);
+}
+
+/** Bounded redactSecrets for logs and other diagnostics. */
+export function redactText(text: string): string {
+  if (text.length > MAX_INPUT_STRING_LENGTH) return TRUNCATED;
+  const safe = redactSecrets(text);
   if (safe.length > MAX_STRING_LENGTH) return `${safe.slice(0, MAX_STRING_LENGTH - TRUNCATED.length)}${TRUNCATED}`;
   return safe;
 }
 
+interface RedactionLimits {
+  depth: number;
+  entries: number;
+  keyLength: number;
+  text: (value: string) => string;
+}
+
+const LOG_LIMITS: RedactionLimits = { depth: MAX_DEPTH, entries: MAX_ENTRIES, keyLength: MAX_KEY_LENGTH, text: redactText };
+const NO_LIMITS: RedactionLimits = { depth: Infinity, entries: Infinity, keyLength: Infinity, text: redactSecrets };
+
 interface CloneContext {
   seen: WeakSet<object>;
   entries: number;
+  limits: RedactionLimits;
 }
 
 function ownDataEntries(value: object, limit = MAX_ENTRIES): { entries: Array<[string, unknown]>; truncated: boolean } {
@@ -134,13 +150,13 @@ function ownDataEntries(value: object, limit = MAX_ENTRIES): { entries: Array<[s
 
 function cloneSafe(value: unknown, context: CloneContext, depth: number, key?: string): unknown {
   if (key && isSensitiveKey(key)) return REDACTED;
-  if (typeof value === "string") return redactText(value);
+  if (typeof value === "string") return context.limits.text(value);
   if (value === null || typeof value === "boolean") return value;
   if (typeof value === "number") return Number.isFinite(value) ? value : String(value);
   if (typeof value === "bigint") return value.toString();
   if (typeof value === "undefined") return undefined;
   if (typeof value !== "object") return UNSUPPORTED;
-  if (depth >= MAX_DEPTH) return MAX_DEPTH_MARKER;
+  if (depth >= context.limits.depth) return MAX_DEPTH_MARKER;
   if (context.seen.has(value)) return CIRCULAR;
 
   context.seen.add(value);
@@ -150,32 +166,32 @@ function cloneSafe(value: unknown, context: CloneContext, depth: number, key?: s
     }
     if (value instanceof Error) {
       const result: Record<string, unknown> = {
-        name: redactText(value.name || "Error"),
-        message: redactText(value.message),
+        name: context.limits.text(value.name || "Error"),
+        message: context.limits.text(value.message),
       };
       const cause = Object.getOwnPropertyDescriptor(value, "cause");
       if (cause && "value" in cause && cause.value !== undefined) {
         context.entries += 1;
         result.cause = cloneSafe(cause.value, context, depth + 1, "cause");
       }
-      const ownEntries = ownDataEntries(value, MAX_ENTRIES - context.entries);
+      const ownEntries = ownDataEntries(value, context.limits.entries - context.entries);
       for (const [entryKey, entryValue] of ownEntries.entries) {
         if (entryKey === "name" || entryKey === "message" || entryKey === "stack" || entryKey === "cause") continue;
-        if (context.entries >= MAX_ENTRIES) {
+        if (context.entries >= context.limits.entries) {
           result[TRUNCATED] = true;
           break;
         }
         context.entries += 1;
-        result[redactText(entryKey)] = cloneSafe(entryValue, context, depth + 1, entryKey);
+        result[context.limits.text(entryKey)] = cloneSafe(entryValue, context, depth + 1, entryKey);
       }
       if (ownEntries.truncated) result[TRUNCATED] = true;
       return result;
     }
     if (Array.isArray(value)) {
       const result: unknown[] = [];
-      const length = Math.min(value.length, MAX_ENTRIES);
+      const length = Math.min(value.length, context.limits.entries);
       for (let index = 0; index < length; index += 1) {
-        if (context.entries >= MAX_ENTRIES) {
+        if (context.entries >= context.limits.entries) {
           result.push(TRUNCATED);
           break;
         }
@@ -191,19 +207,19 @@ function cloneSafe(value: unknown, context: CloneContext, depth: number, key?: s
           ? cloneSafe(descriptor.value, context, depth + 1)
           : UNSUPPORTED);
       }
-      if (value.length > length && result.length < MAX_ENTRIES) result.push(TRUNCATED);
+      if (value.length > length && result.length < context.limits.entries) result.push(TRUNCATED);
       return result;
     }
 
     const result: Record<string, unknown> = Object.create(null);
-    const ownEntries = ownDataEntries(value, MAX_ENTRIES - context.entries);
+    const ownEntries = ownDataEntries(value, context.limits.entries - context.entries);
     for (const [entryKey, entryValue] of ownEntries.entries) {
-      if (context.entries >= MAX_ENTRIES) {
+      if (context.entries >= context.limits.entries) {
         result[TRUNCATED] = true;
         break;
       }
       context.entries += 1;
-      const safeKey = redactText(entryKey).slice(0, 80);
+      const safeKey = context.limits.text(entryKey).slice(0, context.limits.keyLength);
       if (!safeKey) continue;
       result[safeKey] = cloneSafe(entryValue, context, depth + 1, entryKey);
     }
@@ -218,9 +234,14 @@ function cloneSafe(value: unknown, context: CloneContext, depth: number, key?: s
 
 /** Creates a bounded sanitized copy. Inputs and nested values are never mutated. */
 export function redactFields(fields: Record<string, unknown>): Record<string, unknown> {
-  const safe = cloneSafe(fields, { seen: new WeakSet(), entries: 0 }, 0);
+  const safe = cloneSafe(fields, { seen: new WeakSet(), entries: 0, limits: LOG_LIMITS }, 0);
   if (safe && typeof safe === "object" && !Array.isArray(safe)) return safe as Record<string, unknown>;
   return { fields: UNSUPPORTED };
+}
+
+/** Applies the redactFields secret rules with no size limit, for complete command output. */
+export function redactOutput(value: unknown): unknown {
+  return cloneSafe(value, { seen: new WeakSet(), entries: 0, limits: NO_LIMITS }, 0);
 }
 
 function resolveMode(mode?: LoggerOptions["mode"]): "development" | "production" {

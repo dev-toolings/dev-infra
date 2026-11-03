@@ -6,7 +6,7 @@ import { DevHubError, type Action, type AppServices, type Component, type Execut
 import { publicChange, publicProject, publicSetupPlan } from "../public";
 import { parseCliArgs, usage } from "./args";
 import { resolveSelection } from "../operations/graph";
-import { redactFields, redactText } from "../operations/logger";
+import { redactOutput, redactText } from "../operations/logger";
 
 export type CliOptions = { stateDir: string; infraDir: string; run: Executor };
 
@@ -16,8 +16,7 @@ function stable(value: unknown): string {
     if (item && typeof item === "object") return Object.fromEntries(Object.entries(item).sort(([a], [b]) => a.localeCompare(b)).map(([key, child]) => [key, sort(child)]));
     return item;
   };
-  const safe = redactFields({ value });
-  return JSON.stringify(sort(safe.value), null, 2);
+  return JSON.stringify(sort(redactOutput(value)), null, 2);
 }
 
 function write(value: unknown, json: boolean, human?: string): void {
