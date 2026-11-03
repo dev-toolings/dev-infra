@@ -192,6 +192,7 @@ make down                        # stop all
 make ps                          # status
 make doctor                      # diagnostics
 make dev                         # control panel (Vite on 5175) and its local API
+make pair                        # one-time pairing code for the panel
 ```
 
 ## Database Management
