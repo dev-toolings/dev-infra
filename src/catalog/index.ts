@@ -361,7 +361,8 @@ export class Catalog implements CatalogPort {
     if (["devhub","dev-infra","devhub-infra","dev-shared-net"].includes(name) || name.startsWith("infra-")) error("Shared infrastructure Compose identity is forbidden", "unsafe_identity",403);
     const protectedNames = [this.infraDir,process.env.DEVHUB_DIR,join(resolve(process.env.HOME || homedir()),".local/share/devhub")].filter((x):x is string=>Boolean(x)).map((p)=>normalizedComposeName(basename(resolve(p))));
     if (protectedNames.includes(name)) error("Infrastructure Compose identity is forbidden", "unsafe_identity",403);
-    if (component.argv || component.validation) error("Compose components cannot define arbitrary argv");
+    if (component.argv) error("Compose components cannot define arbitrary argv");
+    if (component.validation) this.validateArgv(component.validation.argv,"validation argv");
   }
   private validateLimits(limits: Component["limits"]): void {
     if (limits) assertKeys(limits,["memoryMb","cpuPercent","tasks"],"resource limit");
