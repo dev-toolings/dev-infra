@@ -98,6 +98,24 @@ describe("Runtime Compose adapter", () => {
     const runtime = new Runtime({ run: async () => { throw new Error("must not run"); }, stateDir: join(f.root, "state"), assertAllowedPath: (path) => path });
     await expect(runtime.start(f.project, f.component)).rejects.toThrow("COMPOSE_REMOVE_ORPHANS");
   });
+  test("rejects Compose controls in component env files before any Executor call", async () => {
+    const f = fixture(); writeFileSync(join(f.app, "app.env"), "APP_PORT=8080\nCOMPOSE_REMOVE_ORPHANS=1\n");
+    const component = { ...f.component, envFiles: ["app.env"] }, project = { ...f.project, components: [component] };
+    const runtime = new Runtime({ run: async () => { throw new Error("must not run"); }, stateDir: join(f.root, "state"), assertAllowedPath: (path) => path });
+    await expect(runtime.start(project, component)).rejects.toThrow("Compose app.env setting COMPOSE_REMOVE_ORPHANS is not allowed");
+    await expect(runtime.stop(project, component)).rejects.toThrow("COMPOSE_REMOVE_ORPHANS");
+  });
+  test("rejects Compose controls written in the YAML-style dotenv form", async () => {
+    const f = fixture(); writeFileSync(join(f.app, ".env"), "COMPOSE_REMOVE_ORPHANS: 1\n");
+    const runtime = new Runtime({ run: async () => { throw new Error("must not run"); }, stateDir: join(f.root, "state"), assertAllowedPath: (path) => path });
+    await expect(runtime.start(f.project, f.component)).rejects.toThrow("COMPOSE_REMOVE_ORPHANS");
+  });
+  test("still passes a component env file without Compose controls to Compose", async () => {
+    const f = fixture(); writeFileSync(join(f.app, "app.env"), "APP_PORT=8080\nCOMPOSE_PROFILES=local\n");
+    const component = { ...f.component, envFiles: ["app.env"] }, project = { ...f.project, components: [component] };
+    await f.runtime.start(project, component);
+    expect(f.calls.at(-1)?.argv).toContain(`--env-file=${join(f.app, "app.env")}`);
+  });
   test("refuses recursive remote includes before making any Docker call", async () => {
     const f = fixture();
     writeFileSync(join(f.app, "compose.yml"), "include:\n  - path: nested.yml\nservices:\n  web:\n    image: nginx\n");

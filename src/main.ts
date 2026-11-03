@@ -4,6 +4,7 @@ import { existsSync, lstatSync, realpathSync } from "node:fs";
 import { ensureStateDir } from "./state";
 import { parseCliArgs } from "./cli/args";
 import { guardExecutor } from "./guard";
+import { terminateChildren } from "./runtime/executor";
 import type { AppServices, CatalogPort, DiscoveryPort, RuntimePort, OperationsPort, MaintenancePort, Executor } from "./contracts";
 
 export const LISTEN_HOST = "127.0.0.1" as const;
@@ -153,6 +154,13 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     process.stdout.write(`${paint("1", "Pairing code", color)}  ${paint("1;32", pairing.code, color)}\n${paint("90", `Single use, expires ${pairing.expiresAt}. Paste it in the DevHub panel.`, color)}\n`);
     return 0;
   }
+  // Command children are detached from the terminal: end them before exit, or they keep mutating Docker after the operation lock is gone.
+  let stopping = false;
+  for (const [signal, code] of [["SIGINT", 130], ["SIGTERM", 143]] as const) process.on(signal, () => {
+    if (stopping) return;
+    stopping = true;
+    void terminateChildren().finally(() => process.exit(code));
+  });
   const reservedPorts = [...CONTROLLER_PORTS, serveOptions?.port ?? DEFAULT_PORT, ...(serveOptions?.devOrigin ? [Number(new URL(serveOptions.devOrigin).port || 80)] : [])];
   const appServices = await services(stateDir, reservedPorts);
   if (argv[0] === "serve") {
@@ -169,7 +177,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     const devPanel = devOrigin ? await startDevPanel(devOrigin, checkout, port) : undefined;
     if (devPanel) {
       // Ctrl+C or a stop signal takes the Vite child down with the controller.
-      for (const [signal, code] of [["SIGINT", 130], ["SIGTERM", 143]] as const) process.once(signal, () => { devPanel.stop(); process.exit(code); });
+      for (const signal of ["SIGINT", "SIGTERM"] as const) process.once(signal, () => devPanel.stop());
       process.once("exit", () => devPanel.stop());
     }
     process.stdout.write(serveBanner({ port, devOrigin, devPanel: devPanel?.state, panelBuilt: existsSync(join(distDir, "index.html")), checkout }));
