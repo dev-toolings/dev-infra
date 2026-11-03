@@ -272,11 +272,16 @@ export class Runtime implements RuntimePort {
   }
   async check(project: Project, component: Component): Promise<ComponentStatus> {
     const { cwd } = this.validate(project, component);
-    let running = false, detail: string | undefined;
+    let running = false, detail: string | undefined, blocked: "starting" | "unhealthy" | undefined;
     if (component.kind === "compose") {
       this.preflightCompose(project, component, cwd);
       await this.dockerContext(); const records = await this.composeRecords(project, component, cwd);
-      running = component.compose!.services.every((service) => records.some((r) => labels(r)["com.docker.compose.service"] === service && String(r.State ?? r.state).toLowerCase() === "running"));
+      const state = (r: Record<string, unknown>) => String(r.State ?? r.state).toLowerCase();
+      const health = (r: Record<string, unknown>) => String(r.Health ?? r.health ?? "").toLowerCase();
+      running = component.compose!.services.every((service) => records.some((r) => labels(r)["com.docker.compose.service"] === service && state(r) === "running"));
+      // Health is "" without a healthcheck; records holds every replica of the selected services.
+      if (running && records.some((r) => state(r) !== "running" || health(r) === "unhealthy")) { blocked = "unhealthy"; detail = "A selected container is unhealthy or not running"; }
+      else if (running && records.some((r) => health(r) === "starting")) { blocked = "starting"; detail = "A selected container healthcheck is still starting"; }
     } else if (component.kind === "native") {
       assertLocalBus(); const unit = await this.nativeUnit(project, component, cwd, false);
       if (!(await this.unitOwned(unit))) return { componentId: component.id, state: "stopped", ready: false };
@@ -284,9 +289,9 @@ export class Runtime implements RuntimePort {
       if (result.code !== 0) throw err("systemd status failed", "runtime_status", 502);
       running = showProperties(result.stdout).ActiveState === "active";
     } else throw err("Unsupported runtime kind");
-    let ready = running;
-    if (running && component.health?.url) { ready = await this.probe(component.health.url); if (!ready) detail = "Health probe did not return a successful response"; }
-    return { componentId: component.id, state: running ? (ready ? "running" : "unhealthy") : "stopped", ready, ...(detail ? { detail } : {}), ...(component.url ? { url: component.url } : {}) };
+    let ready = running && !blocked;
+    if (ready && component.health?.url) { ready = await this.probe(component.health.url); if (!ready) detail = "Health probe did not return a successful response"; }
+    return { componentId: component.id, state: running ? (ready ? "running" : blocked === "starting" ? "starting" : "unhealthy") : "stopped", ready, ...(detail ? { detail } : {}), ...(component.url ? { url: component.url } : {}) };
   }
   private async probe(raw: string): Promise<boolean> {
     let url: URL; try { url = new URL(raw); } catch { throw err("Invalid health URL"); }
