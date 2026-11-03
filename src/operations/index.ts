@@ -5,6 +5,8 @@ import {
   type Component,
   type ContainerInfo,
   type LogEntry,
+  type ContainerLogLine,
+  type FollowHandle,
   type LogOptions,
   type Operation,
   type OperationsPort,
@@ -137,6 +139,10 @@ export class Operations implements OperationsPort {
     const projects = this.catalog.listProjects();
     for (const project of projects) this.validateProjectShape(project);
     return this.runtime.inventory(projects);
+  }
+
+  followContainer(id: string, since: string | undefined, onLine: (line: ContainerLogLine) => void): Promise<FollowHandle> {
+    return this.runtime.followContainer(id, since, onLine);
   }
 
   private validatedProject(projectId: string, componentIds: string[] | undefined, action: Action): Project {

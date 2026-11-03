@@ -7,7 +7,7 @@ import { ensureStateDir } from "../state";
 import { publicChange, publicProject, publicSetupPlan } from "../public";
 import { resolveSelection } from "../operations/graph";
 import { logEvent, redactText } from "../operations/logger";
-import { DevHubError, type AppServices, type RemediationInput } from "../contracts";
+import { DevHubError, type AppServices, type ContainerLogLine, type FollowHandle, type RemediationInput } from "../contracts";
 
 const PREFIX = "/api/v1";
 const DB_NAME = "api-auth.sqlite";
@@ -17,6 +17,14 @@ const BODY_LIMIT = 64 * 1024;
 const STREAM_LIMIT = 32;
 const STREAM_TTL = 30_000;
 const LOG_POLL_MS = 2_000;
+const CONTAINER_LOG_TTL = 15 * 60_000;
+const CONTAINER_LOG_FLUSH_MS = 100;
+const CONTAINER_LOG_LINES_PER_SECOND = 500;
+const CONTAINER_LOG_MAX_QUEUED = 64;
+const CONTAINER_LOG_MAX_LINE = 2_048;
+const SESSION_CHECK_MS = 30_000;
+const CONTAINER_ID = /^[a-f0-9]{12,64}$/;
+const LOG_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$/;
 const TOKEN_BYTES = 32;
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
 const KNOWN_PRESETS = new Set(["symfony-docker", "laravel-docker", "node-docker", "compose-existing", "native", "custom"]);
@@ -157,6 +165,10 @@ export function createApp(services: AppServices, options: ApiOptions): Hono<ApiE
     db.query("INSERT INTO api_pairing(id,hash,expires) VALUES(1,?,?) ON CONFLICT(id) DO UPDATE SET hash=excluded.hash, expires=excluded.expires").run(digest(options.pairingCode), expires);
   }
   let streams = 0;
+  const sessionAlive = (request: Request) => {
+    const token = cookieToken(request), row = token && db.query<{ expires: number }, [string]>("SELECT expires FROM api_sessions WHERE hash=?").get(digest(token));
+    return Boolean(row && row.expires > clock(options));
+  };
 
   app.use("*", async (c, next) => {
     const host = c.req.header("host") ?? "";
@@ -327,8 +339,7 @@ export function createApp(services: AppServices, options: ApiOptions): Hono<ApiE
         streamCancel = () => finish(false);
         const pump = async () => {
           if (closed) return;
-          const token = cookieToken(c.req.raw), row = token && db.query<{ expires: number }, [string]>("SELECT expires FROM api_sessions WHERE hash=?").get(digest(token));
-          if (!row || row.expires <= clock(options)) return finish();
+          if (!sessionAlive(c.req.raw)) return finish();
           try {
             const entries = await services.operations.logs(projectId, { componentId, cursor, limit: Math.min(limit, 100) });
             let output = "";
@@ -347,6 +358,54 @@ export function createApp(services: AppServices, options: ApiOptions): Hono<ApiE
         };
         void pump();
         lifetimeTimer = setTimeout(() => finish(), STREAM_TTL);
+      },
+      cancel() { streamCancel?.(); },
+    });
+    return new Response(stream, { headers: { "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-store", "Connection": "keep-alive", "X-Accel-Buffering": "no" } });
+  });
+  app.get(`${PREFIX}/containers/:id/logs`, (c) => {
+    const containerId = c.req.param("id"), since = c.req.query("since");
+    if (!CONTAINER_ID.test(containerId) || (since !== undefined && !LOG_TIME.test(since))) return fail("invalid_query", "Invalid log query.", 400);
+    if (streams >= STREAM_LIMIT) return fail("stream_limit", "Log stream capacity is full.", 429);
+    streams += 1;
+    let streamCancel: (() => void) | undefined;
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        const encoder = new TextEncoder();
+        let closed = false, seq = 0, sentThisSecond = 0, ticks = 0, dropped = 0, output = "";
+        let follower: FollowHandle | undefined, sessionTimer: ReturnType<typeof setInterval> | undefined, lifetimeTimer: ReturnType<typeof setTimeout> | undefined;
+        const send = () => {
+          if (dropped) { output += `event: dropped\ndata: ${JSON.stringify({ count: dropped })}\n\n`; dropped = 0; }
+          if (output) { controller.enqueue(encoder.encode(output)); output = ""; }
+        };
+        const flushTimer = setInterval(() => {
+          send();
+          ticks += 1;
+          if (ticks * CONTAINER_LOG_FLUSH_MS >= 1000) { ticks = 0; sentThisSecond = 0; }
+        }, CONTAINER_LOG_FLUSH_MS);
+        const finish = (close = true) => {
+          if (closed) return;
+          closed = true; clearInterval(flushTimer); clearInterval(sessionTimer); clearTimeout(lifetimeTimer); follower?.stop(); streams = Math.max(0, streams - 1);
+          if (close) { try { send(); controller.close(); } catch {} }
+        };
+        streamCancel = () => finish(false);
+        // Over budget or behind a slow client, lines are counted and skipped before any redaction work.
+        const onLine = (line: ContainerLogLine) => {
+          if (closed) return;
+          if (sentThisSecond >= CONTAINER_LOG_LINES_PER_SECOND || (controller.desiredSize ?? 0) < -CONTAINER_LOG_MAX_QUEUED) { dropped += 1; return; }
+          sentThisSecond += 1; seq += 1;
+          output += `event: log\ndata: ${JSON.stringify({ seq, time: line.time, stream: line.stream, message: redactText(line.message.slice(0, CONTAINER_LOG_MAX_LINE)) })}\n\n`;
+        };
+        sessionTimer = setInterval(() => { if (!sessionAlive(c.req.raw)) finish(); }, SESSION_CHECK_MS);
+        lifetimeTimer = setTimeout(() => finish(), CONTAINER_LOG_TTL);
+        void services.operations.followContainer(containerId, since, onLine).then((handle) => {
+          follower = handle;
+          if (closed) { handle.stop(); return; }
+          void handle.done.then(() => finish());
+        }).catch(() => {
+          output += "event: error\ndata: {\"code\":\"stream_error\",\"message\":\"Log stream failed.\"}\n\n";
+          finish();
+        });
       },
       cancel() { streamCancel?.(); },
     });

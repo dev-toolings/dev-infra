@@ -1,11 +1,29 @@
 import { basename } from "node:path";
-import type { Executor } from "./contracts";
+import type { Executor, Follower } from "./contracts";
 import { DevHubError } from "./contracts";
 import { isTrustedGitOptions } from "./git";
 
-/** Keys of a dotenv file as Compose reads them: `KEY=value` and also the YAML-style `KEY: value`. */
+/**
+ * Keys of a dotenv file as Compose reads them: `KEY=value`, the YAML-style `KEY: value`, and a
+ * further key right after a closing quote (`A="x" B=y`). Quoted values may span lines.
+ */
 export function envFileKeys(text: string): string[] {
-  return [...text.matchAll(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*[=:]/gm)].map((match) => match[1]!);
+  const keys: string[] = [], statement = /\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_.-]*)\s*[=:][ \t]*/y;
+  const lineEnd = (from: number) => { const end = text.indexOf("\n", from); return end < 0 ? text.length : end + 1; };
+  let index = 0;
+  while (index < text.length) {
+    statement.lastIndex = index;
+    const match = statement.exec(text);
+    if (!match) { index = lineEnd(index); continue; }
+    keys.push(match[1]!);
+    index = statement.lastIndex;
+    const quote = text[index];
+    if (quote !== '"' && quote !== "'") { index = lineEnd(index); continue; }
+    index += 1;
+    while (index < text.length && text[index] !== quote) index += text[index] === "\\" ? 2 : 1;
+    index += 1;
+  }
+  return keys;
 }
 
 const dockerGlobalValueOptions = new Set(["--config", "--context", "--host", "-H", "--log-level", "-l"]);
@@ -141,6 +159,15 @@ function dockerCommandError(argv: string[]): string | undefined {
   }
 
   return undefined;
+}
+
+/** Same Docker policy for long-lived commands, which never run Git. */
+export function guardFollower(follow: Follower): Follower {
+  return (argv, onLine) => {
+    const denied = dockerCommandError(argv);
+    if (denied) throw new DevHubError(denied, "unsafe_command", 403);
+    return follow(argv, onLine);
+  };
 }
 
 /** Gate process execution against untrusted Git and destructive Docker argv. */

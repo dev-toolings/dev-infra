@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import type { AppServices, Project } from "../contracts";
+import type { AppServices, ContainerLogLine, FollowHandle, Project } from "../contracts";
 import { createApp, issuePairingCode } from "./index";
 
 const fixtures: string[] = [];
@@ -11,6 +11,7 @@ const project: Project = {
 };
 
 function setup(now = () => Date.now()) {
+  const follow = { start: async (_id: string, _since: string | undefined, _onLine: (line: ContainerLogLine) => void): Promise<FollowHandle> => ({ stop() {}, done: Promise.resolve() }) };
   const stateDir = mkdtempSync(join("/dev/shm", "devhub-api-test-")); fixtures.push(stateDir);
   const code = "PAIRING_TEST_CODE_" + "x".repeat(40);
   const calls: unknown[][] = [];
@@ -30,12 +31,13 @@ function setup(now = () => Date.now()) {
       getOperation: () => { throw new Error("not found"); },
       logs: async () => [{ seq: 1, time: "now", projectId: "sample", componentId: "api", stream: "stdout", message: "safe" }],
       inventory: async () => [],
+      followContainer: (id: string, since: string | undefined, onLine: (line: ContainerLogLine) => void) => follow.start(id, since, onLine),
     },
     maintenance: { scan: async () => { throw new Error("not used"); }, listScans: () => [], getScan: () => { throw new Error("not used"); }, preview: async () => { throw new Error("not used"); }, apply: async () => { throw new Error("not used"); }, validate: async () => { throw new Error("not used"); }, activate: async () => { throw new Error("not used"); }, listChanges: () => [] },
   } as unknown as AppServices;
   const app = createApp(services, { stateDir, pairingCode: code, origins: ["http://127.0.0.1:8040"], hostnames: ["127.0.0.1:8040"], now });
   const request = (path: string, init: RequestInit = {}) => app.request(path, { ...init, headers: { host: "127.0.0.1:8040", ...init.headers as Record<string, string> } });
-  return { app, code, calls, request, stateDir };
+  return { app, code, calls, follow, request, stateDir };
 }
 
 async function paired(context: ReturnType<typeof setup>) {
@@ -127,6 +129,46 @@ describe("local API authentication", () => {
     const chunk = await reader.read();
     expect(new TextDecoder().decode(chunk.value)).toContain("event: log");
     await reader.cancel();
+  });
+
+  test("streams redacted container logs and stops the follower on disconnect", async () => {
+    const context = setup(); const session = await paired(context), id = "a".repeat(64);
+    let stopped = 0, since: string | undefined;
+    context.follow.start = async (_id, from, onLine) => {
+      since = from;
+      onLine({ time: "2026-11-03T22:00:00.000000000Z", stream: "stderr", message: "password=hunter2 ready" });
+      return { stop: () => { stopped += 1; }, done: new Promise(() => {}) };
+    };
+    const response = await context.request(`/api/v1/containers/${id}/logs?since=2026-11-03T21:00:00.5Z`, { headers: { cookie: session.cookie } });
+    expect(response.headers.get("content-type")).toContain("text/event-stream");
+    const reader = response.body!.getReader();
+    const text = new TextDecoder().decode((await reader.read()).value);
+    expect(text).toContain("event: log");
+    expect(text).toContain('"stream":"stderr"');
+    expect(text).not.toContain("hunter2");
+    expect(since).toBe("2026-11-03T21:00:00.5Z");
+    await reader.cancel();
+    expect(stopped).toBe(1);
+  });
+
+  test("skips container log lines over the rate budget and reports how many", async () => {
+    const context = setup(); const session = await paired(context);
+    context.follow.start = async (_id, _since, onLine) => {
+      for (let index = 0; index < 650; index += 1) onLine({ time: "2026-11-03T22:00:00.000000000Z", stream: "stdout", message: `line ${index}` });
+      return { stop() {}, done: Promise.resolve() };
+    };
+    const response = await context.request(`/api/v1/containers/${"b".repeat(12)}/logs`, { headers: { cookie: session.cookie } });
+    const text = await response.text();
+    expect(text.match(/event: log/g)?.length).toBe(500);
+    expect(text).toContain('event: dropped\ndata: {"count":150}');
+  });
+
+  test("refuses malformed container log queries before following", async () => {
+    const context = setup(); const session = await paired(context);
+    context.follow.start = async () => { throw new Error("must not run"); };
+    for (const path of ["--help/logs", `${"a".repeat(64)}/logs?since=yesterday`]) {
+      expect((await context.request(`/api/v1/containers/${path}`, { headers: { cookie: session.cookie } })).status).toBe(400);
+    }
   });
 
   test("expires authenticated sessions after eight hours and caps concurrent log streams", async () => {

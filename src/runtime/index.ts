@@ -5,12 +5,15 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { parseDocument } from "yaml";
 import { assertSharedDataUntouched, type ComposeModel } from "./mounts";
 import { approvedOverride } from "../security/override";
-import { envFileKeys } from "../guard";
-import { DevHubError, type CatalogPort, type Component, type ContainerInfo, type Executor, type LogEntry, type Project, type RuntimePort, type ComponentStatus } from "../contracts";
+import { envFileKeys, guardFollower } from "../guard";
+import { followLines } from "./executor";
+import { DevHubError, type CatalogPort, type Component, type ContainerInfo, type Executor, type LogEntry, type Project, type RuntimePort, type ComponentStatus, type ContainerLogLine, type FollowHandle, type Follower } from "../contracts";
 
-type Options = { run: Executor; stateDir: string; assertAllowedPath: CatalogPort["assertAllowedPath"]; fetch?: (input: string, init?: BunFetchRequestInit) => Promise<Response>; resolveExecutable?: (command: string) => string | null };
+type Options = { run: Executor; follow?: Follower; stateDir: string; assertAllowedPath: CatalogPort["assertAllowedPath"]; fetch?: (input: string, init?: BunFetchRequestInit) => Promise<Response>; resolveExecutable?: (command: string) => string | null };
 const SLUG = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 const ID = /^[a-f0-9]{12,64}$/;
+const LOG_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$/;
+const CONTAINER_LOG_TAIL = "300";
 const PROTECTED = new Set(["devhub", "dev-infra", "devhub-infra", "dev-shared-net"]);
 const TIME = { timeoutMs: 30_000, maxOutputBytes: 4 * 1024 * 1024 } as const;
 const READ = { timeoutMs: 10_000, maxOutputBytes: 4 * 1024 * 1024 } as const;
@@ -96,6 +99,7 @@ function checkComposeEnv(component: Component, cwd: string, root: string): void 
 
 export class Runtime implements RuntimePort {
   private readonly run: Executor;
+  private readonly follow: Follower;
   private readonly stateDir: string;
   private readonly assertAllowedPath: CatalogPort["assertAllowedPath"];
   private readonly fetcher: NonNullable<Options["fetch"]>;
@@ -103,7 +107,7 @@ export class Runtime implements RuntimePort {
   private seq = 0;
 
   constructor(options: Options) {
-    this.run = options.run; this.stateDir = resolve(options.stateDir); this.assertAllowedPath = options.assertAllowedPath;
+    this.run = options.run; this.follow = options.follow ?? guardFollower(followLines); this.stateDir = resolve(options.stateDir); this.assertAllowedPath = options.assertAllowedPath;
     this.fetcher = options.fetch ?? ((input, init) => fetch(input, init)); this.resolver = options.resolveExecutable ?? ((command) => Bun.which(command));
   }
   private validate(project: Project, component: Component): { root: string; cwd: string } {
@@ -243,8 +247,13 @@ export class Runtime implements RuntimePort {
     const { cwd } = this.validate(project, component);
     if (component.kind === "compose") {
       this.preflightCompose(project, component, cwd);
-      await this.dockerContext(); await this.composeRecords(project, component, cwd);
-      const base = this.composeBase(project, component, cwd);
+      await this.dockerContext(); const records = await this.composeRecords(project, component, cwd);
+      // Without the override its containers were activated with, a restart would recreate them from the registered image.
+      const overrides = new Set(records.flatMap((record) => {
+        const l = labels(record), scope = { stateDir: this.stateDir, projectId: project.id, componentId: component.id, service: String(l["com.docker.compose.service"]) };
+        return String(l["com.docker.compose.project.config_files"] ?? "").split(",").filter((file) => approvedOverride(scope, file));
+      }));
+      const base = [...this.composeBase(project, component, cwd), ...[...overrides].map((file) => `--file=${file}`)];
       const config = await this.run([...base, "config", "--format", "json", "--no-env-resolution", ...component.compose!.services], { timeoutMs: 30_000, maxOutputBytes: 8 * 1024 * 1024 });
       if (config.code !== 0) throw err("Compose configuration validation failed", "runtime_config", 400);
       const model = outputJson(config.stdout) as ComposeModel;
@@ -286,8 +295,10 @@ export class Runtime implements RuntimePort {
       const health = (r: Record<string, unknown>) => String(r.Health ?? r.health ?? "").toLowerCase();
       running = component.compose!.services.every((service) => records.some((r) => labels(r)["com.docker.compose.service"] === service && state(r) === "running"));
       // Health is "" without a healthcheck; records holds every replica of the selected services.
-      if (running && records.some((r) => state(r) !== "running" || health(r) === "unhealthy")) { blocked = "unhealthy"; detail = "A selected container is unhealthy or not running"; }
-      else if (running && records.some((r) => health(r) === "starting")) { blocked = "starting"; detail = "A selected container healthcheck is still starting"; }
+      // A leftover `compose run` container shares the service label but is not a replica.
+      const replicas = records.filter((r) => labels(r)["com.docker.compose.oneoff"] !== "True");
+      if (running && replicas.some((r) => state(r) !== "running" || health(r) === "unhealthy")) { blocked = "unhealthy"; detail = "A selected container is unhealthy or not running"; }
+      else if (running && replicas.some((r) => health(r) === "starting")) { blocked = "starting"; detail = "A selected container healthcheck is still starting"; }
     } else if (component.kind === "native") {
       assertLocalBus(); const unit = await this.nativeUnit(project, component, cwd, false);
       if (!(await this.unitOwned(unit))) return { componentId: component.id, state: "stopped", ready: false };
@@ -346,6 +357,16 @@ export class Runtime implements RuntimePort {
     }
     if (component.kind === "compose") entries.sort((a, b) => a.time.localeCompare(b.time));
     return entries.slice(-count);
+  }
+  /** Read-only and open to every local container: DevHub observes unlinked containers without owning them. */
+  async followContainer(id: string, since: string | undefined, onLine: (line: ContainerLogLine) => void): Promise<FollowHandle> {
+    if (!ID.test(id) || (since !== undefined && !LOG_TIME.test(since))) throw err("Invalid container log request");
+    await this.dockerContext();
+    const window = since ? ["--since", since] : ["--tail", CONTAINER_LOG_TAIL];
+    return this.follow(["docker", "logs", "--follow", "--timestamps", ...window, id], (line, stream) => {
+      const split = line.indexOf(" "), time = line.slice(0, split);
+      onLine(LOG_TIME.test(time) ? { time, stream, message: line.slice(split + 1) } : { time: new Date().toISOString(), stream, message: line });
+    });
   }
   async inventory(projects: Project[]): Promise<ContainerInfo[]> {
     await this.dockerContext();

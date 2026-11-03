@@ -1,4 +1,4 @@
-import type { Executor } from "../contracts";
+import type { Executor, Follower, LogStreamName } from "../contracts";
 import { DevHubError } from "../contracts";
 import { isTrustedGitOptions } from "../git";
 
@@ -35,6 +35,8 @@ export async function terminateChildren(graceMs = 5_000): Promise<void> {
   for (const pid of pids) signalGroup(pid, "SIGKILL");
   await groupsExited(pids, 1_000);
 }
+
+const MAX_FOLLOW_LINE = 64 * 1024;
 
 function commandEnvironment(options: Parameters<Executor>[1]): Record<string, string> {
   const env: Record<string, string> = {};
@@ -99,4 +101,23 @@ export const execCommand: Executor = async (argv, options = {}) => {
     for (const reader of readers) void reader.cancel().catch(() => {});
     throw error;
   } finally { if (timer) clearTimeout(timer); running.delete(child.pid); }
+};
+
+/** Streams a read-only command until it exits or stop() kills its group; the shutdown path tracks it like any other child. */
+export const followLines: Follower = (argv, onLine) => {
+  if (shuttingDown) throw new DevHubError("Controller is shutting down", "shutting_down", 503);
+  const child = Bun.spawn(argv, { env: commandEnvironment({}), stdin: "ignore", stdout: "pipe", stderr: "pipe", detached: true });
+  running.add(child.pid);
+  const pump = async (source: ReadableStream<Uint8Array>, stream: LogStreamName) => {
+    const decoder = new TextDecoder();
+    let rest = "";
+    for await (const chunk of source) {
+      const lines = (rest + decoder.decode(chunk, { stream: true })).split("\n");
+      rest = lines.pop()!.slice(0, MAX_FOLLOW_LINE);
+      for (const line of lines) onLine(line, stream);
+    }
+    if (rest) onLine(rest, stream);
+  };
+  const done = Promise.all([child.exited, pump(child.stdout, "stdout"), pump(child.stderr, "stderr")]).then(() => undefined).finally(() => running.delete(child.pid));
+  return { stop: () => { signalGroup(child.pid, "SIGKILL"); }, done };
 };

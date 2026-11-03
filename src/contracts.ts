@@ -31,6 +31,11 @@ export interface ContainerInfo {
 export interface ExecOptions { cwd?: string; timeoutMs?: number; maxOutputBytes?: number; env?: Record<string,string> }
 export interface ExecResult { code: number; stdout: string; stderr: string }
 export type Executor = (argv: string[], options?: ExecOptions) => Promise<ExecResult>;
+export type LogStreamName = "stdout" | "stderr";
+export interface FollowHandle { stop: () => void; done: Promise<void> }
+/** Runs a long-lived read-only command and hands over its output line by line. */
+export type Follower = (argv: string[], onLine: (line: string, stream: LogStreamName) => void) => FollowHandle;
+export interface ContainerLogLine { time: string; stream: LogStreamName; message: string }
 export interface CatalogPort {
  listRoots(): Root[]; addRoot(path: string, label?: string): Root; removeRoot(id: string): void;
  assertAllowedPath(path: string, mustExist?: boolean): string;
@@ -49,6 +54,7 @@ export interface RuntimePort {
  stop(project: Project, component: Component): Promise<void>;
  logs(project: Project, component: Component, limit?: number): Promise<LogEntry[]>;
  inventory(projects: Project[]): Promise<ContainerInfo[]>;
+ followContainer(id: string, since: string | undefined, onLine: (line: ContainerLogLine) => void): Promise<FollowHandle>;
 }
 export interface OperationsPort {
  submit(projectId: string, action: Action, componentIds?: string[], idempotencyKey?: string): Operation;
@@ -57,6 +63,7 @@ export interface OperationsPort {
  logs(projectId: string, options?: LogOptions): Promise<LogEntry[]>;
  getOperation(id: string): Operation; listOperations(projectId?: string): Operation[];
  inventory(): Promise<ContainerInfo[]>;
+ followContainer(id: string, since: string | undefined, onLine: (line: ContainerLogLine) => void): Promise<FollowHandle>;
 }
 export interface Detection { path: string; name: string; git: "repository"|"worktree"|"none"; stacks: string[]; composeFiles: string[]; makeTargets: string[]; components: Component[]; warnings: string[] }
 export interface Preset { id: string; name: string; description: string }

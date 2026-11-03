@@ -2,10 +2,20 @@ import { expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { execCommand } from "./executor";
+import { execCommand, followLines } from "./executor";
 test("executor rejects excess output and enforces a finite deadline", async () => {
   await expect(execCommand([process.execPath, "--eval", "process.stdout.write('x'.repeat(65536))"], { maxOutputBytes: 64 })).rejects.toThrow("output exceeded");
   await expect(execCommand([process.execPath, "--eval", "setTimeout(()=>{},10000)"], { timeoutMs: 20 })).rejects.toThrow("timed out");
+});
+
+test("followLines hands over lines per stream until stop kills the child", async () => {
+  const lines: string[] = [];
+  const handle = followLines([process.execPath, "--eval", "console.log('one'); console.error('two'); process.stdout.write('partial'); setInterval(() => {}, 1000)"], (line, stream) => lines.push(`${stream}:${line}`));
+  while (lines.length < 2) await Bun.sleep(10);
+  await Bun.sleep(50);
+  handle.stop();
+  await handle.done;
+  expect(lines.sort()).toEqual(["stderr:two", "stdout:one", "stdout:partial"]);
 });
 
 test("executor rejects caller-controlled executable and loader environment", async () => {

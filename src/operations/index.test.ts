@@ -67,6 +67,7 @@ function runtime(calls: string[], failStart?: string): RuntimePort {
     async stop(_project, component) { calls.push(`stop:${component.id}`); },
     async logs(): Promise<LogEntry[]> { return []; },
     async inventory() { return []; },
+    async followContainer() { return { stop() {}, done: Promise.resolve() }; },
   };
 }
 
@@ -144,6 +145,7 @@ test("snapshot mismatch rejects and exposes only the fixed diagnostic", async ()
     async check() { return { componentId: "web", state: "running", ready: true }; },
     async start() { catalog.projects[0]!.components[0]!.argv = ["changed"]; },
     async stop() {}, async logs() { return []; }, async inventory() { return []; },
+    async followContainer() { return { stop() {}, done: Promise.resolve() }; },
   };
   const ops = new Operations({ catalog, runtime, logger });
   let caught: unknown;

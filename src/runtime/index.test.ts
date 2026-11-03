@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { chmodSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import type { Component, Executor, Project } from "../contracts";
+import { dirname, join } from "node:path";
+import type { Component, Executor, Follower, Project } from "../contracts";
+import { overrideContent, overrideFile } from "../security/override";
 import { Runtime } from "./index";
 
 const dirs: string[] = [];
@@ -127,14 +128,17 @@ describe("Runtime Compose adapter", () => {
 
 describe("Runtime Compose readiness", () => {
   // Real `docker compose ps --format json` rows: one JSON object per line, Health "" without a healthcheck.
-  const checkReplicas = (replicas: Array<{ State: string; Health: string }>) => {
+  const checkReplicas = (replicas: Array<{ State: string; Health: string; labels?: Record<string, string> }>) => {
     const f = fixture();
-    const rows = replicas.map((replica, index) => JSON.stringify({ ID: `0123456789abcde${index}`, ...replica, Labels: { "com.docker.compose.project": "sample", "com.docker.compose.service": "web", "com.docker.compose.project.working_dir": f.app, "com.docker.compose.project.config_files": join(f.app, "compose.yml") } }));
+    const rows = replicas.map((replica, index) => JSON.stringify({ ID: `0123456789abcde${index}`, ...replica, Labels: { ...replica.labels, "com.docker.compose.project": "sample", "com.docker.compose.service": "web", "com.docker.compose.project.working_dir": f.app, "com.docker.compose.project.config_files": join(f.app, "compose.yml") } }));
     const run: Executor = async (argv, options) => argv.includes("ps") ? { code: 0, stdout: rows.join("\n"), stderr: "" } : f.run(argv, options);
     return new Runtime({ run, stateDir: join(f.root, "state"), assertAllowedPath: (path) => path }).check(f.project, f.component);
   };
   test("a container still in its healthcheck start window is not ready yet", async () => {
     expect(await checkReplicas([{ State: "running", Health: "starting" }])).toMatchObject({ state: "starting", ready: false });
+  });
+  test("a leftover compose run container does not make the service unhealthy", async () => {
+    expect(await checkReplicas([{ State: "running", Health: "" }, { State: "exited", Health: "", labels: { "com.docker.compose.oneoff": "True" } }])).toMatchObject({ state: "running", ready: true });
   });
   test("a container failing its healthcheck reports unhealthy", async () => {
     expect(await checkReplicas([{ State: "running", Health: "unhealthy" }])).toMatchObject({ state: "unhealthy", ready: false });
@@ -217,4 +221,40 @@ test("start refuses shared DevHub volumes and the Docker socket, and passes env 
     expect(seen.some((argv) => argv.includes("up"))).toBe(false);
     expect(seen.find((argv) => argv.includes("config"))).toContain(`--env-file=${join(f.app, "app.env")}`);
   }
+});
+
+test("a restart keeps the override its containers were activated with", async () => {
+  const f = fixture(), stateDir = join(f.root, "state");
+  const scope = { stateDir, projectId: f.project.id, componentId: f.component.id, service: "web" }, image = `sha256:${"a".repeat(64)}`, override = overrideFile(scope, image);
+  mkdirSync(dirname(override)); writeFileSync(override, overrideContent("web", image));
+  const stale = overrideFile(scope, `sha256:${"b".repeat(64)}`); writeFileSync(stale, overrideContent("web", `sha256:${"b".repeat(64)}`));
+  const row = JSON.stringify({ ID: "0123456789abcdef", State: "running", Labels: { "com.docker.compose.project": "sample", "com.docker.compose.service": "web", "com.docker.compose.project.working_dir": f.component.cwd, "com.docker.compose.project.config_files": `${join(f.component.cwd, "compose.yml")},${override}` } });
+  const calls: string[][] = [];
+  const run: Executor = async (argv, options) => { calls.push(argv); return argv.includes("ps") ? { code: 0, stdout: row, stderr: "" } : f.run(argv, options); };
+  await new Runtime({ run, stateDir, assertAllowedPath: (path) => path }).start(f.project, f.component);
+  const up = calls.find((argv) => argv.includes("up"))!;
+  expect(up).toContain(`--file=${override}`);
+  expect(up.join(" ")).not.toContain(stale);
+});
+
+test("followContainer reads any local container by exact ID and parses timestamps", async () => {
+  const f = fixture(), calls: string[][] = [], lines: unknown[] = [], id = "a".repeat(64);
+  const follow: Follower = (argv, onLine) => {
+    calls.push(argv);
+    onLine("2026-11-03T22:00:00.123456789Z hello world", "stdout");
+    onLine("Error response from daemon: gone", "stderr");
+    return { stop() {}, done: Promise.resolve() };
+  };
+  const runtime = new Runtime({ run: f.run, follow, stateDir: join(f.root, "state"), assertAllowedPath: (path) => path });
+  await runtime.followContainer(id, undefined, (line) => lines.push(line));
+  await runtime.followContainer(id, "2026-11-03T22:00:00.123456789Z", () => {});
+  expect(calls).toEqual([
+    ["docker", "logs", "--follow", "--timestamps", "--tail", "300", id],
+    ["docker", "logs", "--follow", "--timestamps", "--since", "2026-11-03T22:00:00.123456789Z", id],
+  ]);
+  expect(lines[0]).toEqual({ time: "2026-11-03T22:00:00.123456789Z", stream: "stdout", message: "hello world" });
+  expect(lines[1]).toMatchObject({ stream: "stderr", message: "Error response from daemon: gone" });
+  await expect(runtime.followContainer("--help", undefined, () => {})).rejects.toThrow("Invalid container log request");
+  await expect(runtime.followContainer(id, "yesterday; rm", () => {})).rejects.toThrow("Invalid container log request");
+  expect(calls.length).toBe(2);
 });
