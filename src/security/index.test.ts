@@ -11,6 +11,7 @@ import { execCommand } from "../runtime/executor";
 import { gitRun } from "../git";
 
 import { Maintenance } from "./index";
+import { approvedOverride, overrideContent, overrideFile, retireOverrides } from "./override";
 
 const dirs: string[] = [];
 const catalogs: Catalog[] = [];
@@ -317,6 +318,16 @@ test("a failed activation keeps the running container owned and leaves no new ov
   await expect(f.maintenance.activate(next.id)).rejects.toThrow("Candidate activation failed");
   expect(readdirSync(dirname(f.override))).toEqual([basename(f.override)]);
   expect(await owned(f)).toBe(1);
+});
+
+test("retiring one service's overrides keeps the other services of the component approved", () => {
+  const stateDir = mkdtempSync(join(tmpdir(), "devhub-override-")); dirs.push(stateDir);
+  const app = { stateDir, projectId: "fixture", componentId: "app", service: "app" }, worker = { ...app, service: "worker" };
+  const keep = overrideFile(app, CANDIDATE), stale = overrideFile(app, BASE), other = overrideFile(worker, BASE);
+  mkdirSync(dirname(keep));
+  writeFileSync(keep, overrideContent("app", CANDIDATE)); writeFileSync(stale, overrideContent("app", BASE)); writeFileSync(other, overrideContent("worker", BASE));
+  retireOverrides(app, keep);
+  expect([approvedOverride(app, keep), approvedOverride(app, stale), approvedOverride(worker, other)]).toEqual([true, false, true]);
 });
 
 test("reactivating the running image reuses its override, even when activation fails", async () => {
