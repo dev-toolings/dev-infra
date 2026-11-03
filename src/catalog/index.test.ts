@@ -3,7 +3,8 @@ import { mkdirSync, mkdtempSync, rmSync, lstatSync, symlinkSync, writeFileSync }
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Catalog } from "./index";
-import type { ProjectInput } from "../contracts";
+import type { Component, ProjectInput } from "../contracts";
+import { publicProject } from "../public";
 
 let base = "";
 let catalog: Catalog;
@@ -27,6 +28,16 @@ describe("Catalog", () => {
     const outside = join(base,"outside"); mkdirSync(outside);
     const link = join(projectRoot,"escape"); symlinkSync(outside,link);
     expect(() => catalog.assertAllowedPath(join(link,"missing"),false)).toThrow();
+  });
+
+  test("Compose components may declare validation argv, never run argv, and keep it out of public DTOs", () => {
+    writeFileSync(join(projectRoot,"compose.yml"),"services:\n  web:\n    image: nginx\n");
+    const input = (extra: Partial<Component>): ProjectInput => ({ ...project(), components:[{ id:"web",name:"Web",kind:"compose",cwd:projectRoot,compose:{files:["compose.yml"],projectName:"fixture-app",profiles:[],services:["web"]},dependsOn:[],...extra }] });
+    expect(() => catalog.createProject(input({argv:["true"]}))).toThrow("Compose components cannot define arbitrary argv");
+    for (const argv of [[],["-x"],[""],["a\nb"]]) expect(() => catalog.createProject(input({validation:{argv}}))).toThrow("Invalid validation argv");
+    const created = catalog.createProject(input({validation:{argv:["SENTINEL_VALIDATE"]}}));
+    expect(catalog.getProject(created.id).components[0]?.validation).toEqual({argv:["SENTINEL_VALIDATE"]});
+    expect(JSON.stringify(publicProject(created))).not.toContain("SENTINEL_VALIDATE");
   });
 
   test("persists project and record metadata across reopen", () => {

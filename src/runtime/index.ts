@@ -4,6 +4,7 @@ import { homedir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { parseDocument } from "yaml";
 import { assertSharedDataUntouched, type ComposeModel } from "./mounts";
+import { approvedOverride } from "../security/override";
 import { DevHubError, type CatalogPort, type Component, type ContainerInfo, type Executor, type LogEntry, type Project, type RuntimePort, type ComponentStatus } from "../contracts";
 
 type Options = { run: Executor; stateDir: string; assertAllowedPath: CatalogPort["assertAllowedPath"]; fetch?: (input: string, init?: BunFetchRequestInit) => Promise<Response>; resolveExecutable?: (command: string) => string | null };
@@ -199,7 +200,8 @@ export class Runtime implements RuntimePort {
       const l = labels(rec);
       if (String(l["com.docker.compose.project"] ?? "") !== component.compose!.projectName) throw err("Compose found an unmatched container for this project identity", "runtime_ownership", 403);
       const wd = l["com.docker.compose.project.working_dir"], config = l["com.docker.compose.project.config_files"];
-      if (!wd || !config || canonical(wd) !== cwd || config.split(",").some((f) => !component.compose!.files.some((known) => canonical(resolve(cwd, known)) === canonical(f)))) throw err("Compose container ownership labels do not match", "runtime_ownership", 403);
+      const scope = { stateDir: this.stateDir, projectId: project.id, componentId: component.id, service: String(l["com.docker.compose.service"]) };
+      if (!wd || !config || canonical(wd) !== cwd || config.split(",").some((f) => !approvedOverride(scope, f) && !component.compose!.files.some((known) => canonical(resolve(cwd, known)) === canonical(f, false)))) throw err("Compose container ownership labels do not match", "runtime_ownership", 403);
     }
     return selected;
   }
@@ -377,7 +379,7 @@ export class Runtime implements RuntimePort {
       const l = config.Labels && typeof config.Labels === "object" ? config.Labels as Record<string, string> : labels(row);
       const projectName = l["com.docker.compose.project"], service = l["com.docker.compose.service"], wd = l["com.docker.compose.project.working_dir"], files = l["com.docker.compose.project.config_files"];
       // Association needs an exact label match on a registered component; everything else stays observed only.
-      const owner = projectName && service && wd && files ? components.find(({ c }) => c.compose!.projectName === projectName && c.compose!.services.includes(service) && sameFile(wd, c.cwd) && files.split(",").every((f) => c.compose!.files.some((known) => sameFile(resolve(c.cwd, known), f)))) : undefined;
+      const owner = projectName && service && wd && files ? components.find(({ p, c }) => c.compose!.projectName === projectName && c.compose!.services.includes(service) && sameFile(wd, c.cwd) && files.split(",").every((f) => approvedOverride({ stateDir: this.stateDir, projectId: p.id, componentId: c.id, service }, f) || c.compose!.files.some((known) => sameFile(resolve(c.cwd, known), f)))) : undefined;
       const health = state.Health && typeof state.Health === "object" ? String((state.Health as Record<string, unknown>).Status ?? "") : undefined;
       return { id, name: String(row.Names ?? row.Name ?? "").replace(/^\//, ""), imageId: String(inspect.Image ?? ""), image: String(row.Image ?? config.Image ?? ""), state: String(state.Status ?? row.State ?? "unknown"),
         ...(health ? { health } : {}), ...(owner ? { projectId: owner.p.id, componentId: owner.c.id } : {}), ...(projectName ? { composeProject: projectName } : {}),

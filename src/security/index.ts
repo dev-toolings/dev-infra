@@ -8,6 +8,7 @@ import { gitRun } from "../git";
 import { redactText } from "../operations/logger";
 import { ensureStateDir } from "../state";
 import { assertSharedDataUntouched, type ComposeModel } from "../runtime/mounts";
+import { approvedOverride, overrideContent, overrideFile, retireOverrides } from "./override";
 
 const READ = { timeoutMs: 20_000, maxOutputBytes: 8 * 1024 * 1024 } as const;
 const DOCKER = { timeoutMs: 900_000, maxOutputBytes: 8 * 1024 * 1024 } as const;
@@ -281,7 +282,7 @@ export class Maintenance implements MaintenancePort {
         proposed = replaceReference(source.content, currentRef, input.replacement, lines.indexOf(selected[0]!));
       }
       const change: Change = { id: randomUUID(), projectId: project.id, componentId: component.id, file: input.file, sourceHash: source.sourceHash, original: source.content, proposed, replacement: input.replacement, state: "preview", createdAt: new Date().toISOString() };
-      this.save(change); this.catalog.putRecord(RECORD_MAPPING, change.id, { service: selectedService, stage: selectedStage }); return change;
+      this.save(change); this.catalog.putRecord(RECORD_MAPPING, change.id, { ...(selectedService ? { service: selectedService } : {}), ...(selectedStage ? { stage: selectedStage } : {}) }); return change;
     } catch (caught) { error = caught; throw caught; } finally { lock.release(error); }
   }
   private async git(cwd: string, args: string[]) { return gitRun(this.run, ["-C", cwd, ...args], READ); }
@@ -472,7 +473,7 @@ export class Maintenance implements MaintenancePort {
       const candidateChange: Change = { ...change, imageId: candidateImageId, scanId: candidateScan.id };
       const findingsImproved = candidateScan.state === "succeeded" && sortedFindings(candidateScan.findings).join("\n") !== sortedFindings(baselineScan.findings).join("\n") && candidateScan.findings.length < baselineScan.findings.length;
       const evidence: ValidationEvidence = { baselineImageId, candidateImageId, baselineScanId: baselineScan.id, candidateScanId: candidateScan.id, sourceHash: sourceHashOf(change.proposed), runtimeHash, containerIds: snap.containers.map((x) => x.id).sort(), volumes: snap.volumes, checksPassed: check.code === 0 && candidateScan.state === "succeeded", findingsImproved, validatedAt: new Date().toISOString() };
-      this.catalog.putRecord(RECORD_SNAPSHOT, change.id, { evidence, selectedService: selected, imageTag, candidateRef, composeHash: hash(stable(model)), envInputsHash: this.envInputsHash(component, model), base });
+      this.catalog.putRecord(RECORD_SNAPSHOT, change.id, { evidence, selectedService: selected, ...(imageTag ? { imageTag } : {}), candidateRef, composeHash: hash(stable(model)), envInputsHash: this.envInputsHash(component, model), base });
       candidateChange.evidence = evidence; candidateChange.state = evidence.checksPassed ? "validated" : "failed";
       if (!evidence.checksPassed) candidateChange.error = check.code !== 0 ? "Configured application validation failed" : candidateScan.error ?? "Candidate scan failed";
       this.save(candidateChange); if (!evidence.checksPassed) throw fail(candidateChange.error!, "validation_failed", 409); return candidateChange;
@@ -506,16 +507,19 @@ export class Maintenance implements MaintenancePort {
       if (!snapshot.envInputsHash || this.envInputsHash(component, model) !== snapshot.envInputsHash) throw fail("Environment inputs changed since validation", "stale_evidence", 409);
       const before = await this.inspectContainers(project, component);
       if (stable(before.containers.map((x) => x.id).sort()) !== stable(evidence.containerIds) || stable(before.volumes) !== stable(evidence.volumes)) throw fail("Live container or named-volume identity changed since validation", "stale_evidence", 409);
-      const overridePath = resolve(this.stateDir, `compose-override-${change.id}.yml`);
       const serviceName = snapshot.selectedService;
-      // `!reset` drops the build section so Compose runs the exact validated image ID.
-      writeFileSync(overridePath, `services:\n  ${serviceName}:\n    image: ${evidence.candidateImageId}\n    build: !reset null\n`, { mode: 0o600, flag: "wx" });
+      const scope = { stateDir: this.stateDir, projectId: project.id, componentId: component.id, service: serviceName };
+      const overridePath = overrideFile(scope, evidence.candidateImageId);
+      // The same image can be activated twice: reuse its override, and never remove one that live containers name.
+      const created = !approvedOverride(scope, overridePath);
+      if (created) { mkdirSync(dirname(overridePath), { recursive: true, mode: 0o700 }); writeFileSync(overridePath, overrideContent(serviceName, evidence.candidateImageId), { mode: 0o600, flag: "wx" }); }
       try {
         const argv = [...base, "--file", overridePath, "up", "-d", "--no-build", "--no-deps", serviceName];
         assertSafeDockerArgv(argv, false);
         await this.dockerContext();
         const result = await this.run(argv, DOCKER); if (result.code !== 0) throw fail("Candidate activation failed", "activation_failed", 502);
-      } finally { try { unlinkSync(overridePath); } catch {} }
+      } catch (caught) { if (created) try { unlinkSync(overridePath); } catch {} throw caught; }
+      retireOverrides(scope, overridePath);
       const after = await this.inspectContainers(project, component);
       const selectedIds = await this.run([...base, "ps", "-q", snapshot.selectedService], READ);
       if (selectedIds.code !== 0) throw fail("Could not inspect activated project service", "activation_unverified", 502);
