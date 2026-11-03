@@ -147,7 +147,7 @@ export async function runCli(argv: string[], services: AppServices, options: Cli
     }
     if (command.command === "project") {
       if (command.action === "list") { write(services.catalog.listProjects().map(projectSummary), command.json); return 0; }
-      if (command.action === "add") { const result = await addProject(command, services); if (command.mode !== "wizard" || !command.group) write(result, command.json); else write(projectSummary(result as Project), command.json); return 0; }
+      if (command.action === "add") { write(await addProject(command, services), command.json); return 0; }
       if (command.action === "discover") {
         const detections = await services.discovery.scan(command.path, command.depth);
         write(detections.map(({ components, ...detection }) => ({ ...detection, components: components.map(({ argv: _argv, envFiles: _envFiles, validation: _validation, ...component }) => component) })), command.json);

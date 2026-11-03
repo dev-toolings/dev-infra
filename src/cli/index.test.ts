@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, it } from "bun:test";
+import { afterEach, describe, expect, it, spyOn } from "bun:test";
+import * as readline from "node:readline/promises";
 import type { AppServices, Component, Project, ProjectInput, SetupInput } from "../contracts";
 import { runCli } from "./index";
 
@@ -161,5 +162,29 @@ describe("runCli", () => {
     expect(await runCli(["presets", "--json"], services, options)).toBe(0);
     expect(output).toContain('"apiKey": "[redacted]"');
     expect(output).not.toContain("deep-secret");
+  });
+
+  it("prints the grouped project preview without --apply and the summary with it", async () => {
+    capture(); const { services } = fixture();
+    services.discovery.scan = async () => [{ name: "New", path: "/tmp/new", components: [component] }] as Awaited<ReturnType<AppServices["discovery"]["scan"]>>;
+    const prompt = spyOn(readline, "createInterface").mockReturnValue({ question: async () => "1", close: () => {} } as unknown as readline.Interface);
+    const tty = [process.stdin.isTTY, process.stdout.isTTY];
+    process.stdin.isTTY = true; process.stdout.isTTY = true;
+    try {
+      const args = ["project", "add", "--path", "/tmp/new", "--name", "New", "--id", "new", "--group", "--json"];
+      const code = await runCli(args, services, options);
+      expect(errors).toBe("");
+      expect(code).toBe(0);
+      expect(JSON.parse(output)).toMatchObject({ preview: true, project: { id: "new", components: [{ id: "web" }] } });
+      expect(output).not.toContain("ARGV_SENTINEL");
+      expect(services.catalog.listProjects().map((item) => item.id)).not.toContain("new");
+      output = "";
+      expect(await runCli([...args, "--apply"], services, options)).toBe(0);
+      expect(JSON.parse(output)).toMatchObject({ id: "new", createdAt: "2026-01-01T00:00:00.000Z", components: [{ id: "web" }] });
+      expect(output).not.toContain("ARGV_SENTINEL");
+    } finally {
+      prompt.mockRestore();
+      process.stdin.isTTY = tty[0]!; process.stdout.isTTY = tty[1]!;
+    }
   });
 });
