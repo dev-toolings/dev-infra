@@ -26,7 +26,7 @@ printf '%s\n' "$*" >> "$DOCKER_CALLS"
 case "$1" in
   compose)
     case "$*" in
-      "compose --env-file ${EXPECTED_ENV_FILE:-$DEVHUB_DIR/.env} -f $DEVHUB_DIR/compose.yml up -d"|"compose --env-file ${EXPECTED_ENV_FILE:-$DEVHUB_DIR/.env} -f $DEVHUB_DIR/compose.yml down"|"compose --env-file ${EXPECTED_ENV_FILE:-$DEVHUB_DIR/.env} -f $DEVHUB_DIR/compose.yml ps") exit 0 ;;
+      "compose --env-file ${EXPECTED_ENV_FILE:-$DEVHUB_DIR/.env} -f $DEVHUB_DIR/compose.yml up -d"|"compose --env-file ${EXPECTED_ENV_FILE:-$DEVHUB_DIR/.env} -f $DEVHUB_DIR/compose.yml down"|"compose --env-file ${EXPECTED_ENV_FILE:-$DEVHUB_DIR/.env} -f $DEVHUB_DIR/compose.yml ps"|"compose --env-file ${EXPECTED_ENV_FILE:-$DEVHUB_DIR/.env} -f $DEVHUB_DIR/compose.yml up -d postgres") exit 0 ;;
     esac
     [ "$*" = "compose --env-file ${EXPECTED_ENV_FILE:-$DEVHUB_DIR/.env} -f $DEVHUB_DIR/compose.yml config --format json" ] || exit 97
     [ "${COMPOSE_PROFILES:-}" = core,async ] || exit 98
@@ -52,6 +52,8 @@ case "$1" in
       esac
     fi
     ;;
+  ps) echo infra-postgres ;;
+  exec) echo 1 ;;
   *) exit 99 ;;
 esac
 SH
@@ -149,4 +151,27 @@ SH
     grep -Fx "compose --env-file $DEVHUB_DIR/.env -f $DEVHUB_DIR/compose.yml $suffix" "$DOCKER_CALLS"
     ! grep -Eq -- '--project-name|--remove-orphans|--volumes|down -v|prune' "$DOCKER_CALLS"
   done
+}
+
+@test "db create runs psql as the configured POSTGRES_USER" {
+  cp "$REPO_DIR/data/scripts/create-project-db.sh" "$DEVHUB_DIR/data/scripts/"
+  printf 'POSTGRES_USER=first\nPOSTGRES_USER=custom_admin\n' > "$DEVHUB_DIR/.env"
+  run "$REPO_DIR/bin/devhub" db create app
+  [ "$status" -eq 0 ]
+  [ "$(grep -o 'psql -U [^ ]*' "$DOCKER_CALLS" | sort -u)" = 'psql -U custom_admin' ]
+}
+
+@test "db create lets an exported POSTGRES_ADMIN_USER win over POSTGRES_USER" {
+  cp "$REPO_DIR/data/scripts/create-project-db.sh" "$DEVHUB_DIR/data/scripts/"
+  echo 'POSTGRES_USER=custom_admin' > "$DEVHUB_DIR/.env"
+  POSTGRES_ADMIN_USER=explicit_admin run "$REPO_DIR/bin/devhub" db create app
+  [ "$status" -eq 0 ]
+  [ "$(grep -o 'psql -U [^ ]*' "$DOCKER_CALLS" | sort -u)" = 'psql -U explicit_admin' ]
+}
+
+@test "db create defaults to test when nothing is configured" {
+  cp "$REPO_DIR/data/scripts/create-project-db.sh" "$DEVHUB_DIR/data/scripts/"
+  run "$REPO_DIR/bin/devhub" db create app
+  [ "$status" -eq 0 ]
+  [ "$(grep -o 'psql -U [^ ]*' "$DOCKER_CALLS" | sort -u)" = 'psql -U test' ]
 }
