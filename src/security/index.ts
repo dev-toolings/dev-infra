@@ -8,6 +8,7 @@ import { gitRun } from "../git";
 import { redactText } from "../operations/logger";
 import { ensureStateDir } from "../state";
 import { assertSharedDataUntouched, type ComposeModel } from "../runtime/mounts";
+import { approvedOverride, overrideContent, overrideFile, retireOverrides } from "./override";
 
 const READ = { timeoutMs: 20_000, maxOutputBytes: 8 * 1024 * 1024 } as const;
 const DOCKER = { timeoutMs: 900_000, maxOutputBytes: 8 * 1024 * 1024 } as const;
@@ -506,16 +507,19 @@ export class Maintenance implements MaintenancePort {
       if (!snapshot.envInputsHash || this.envInputsHash(component, model) !== snapshot.envInputsHash) throw fail("Environment inputs changed since validation", "stale_evidence", 409);
       const before = await this.inspectContainers(project, component);
       if (stable(before.containers.map((x) => x.id).sort()) !== stable(evidence.containerIds) || stable(before.volumes) !== stable(evidence.volumes)) throw fail("Live container or named-volume identity changed since validation", "stale_evidence", 409);
-      const overridePath = resolve(this.stateDir, `compose-override-${change.id}.yml`);
       const serviceName = snapshot.selectedService;
-      // `!reset` drops the build section so Compose runs the exact validated image ID.
-      writeFileSync(overridePath, `services:\n  ${serviceName}:\n    image: ${evidence.candidateImageId}\n    build: !reset null\n`, { mode: 0o600, flag: "wx" });
+      const scope = { stateDir: this.stateDir, projectId: project.id, componentId: component.id, service: serviceName };
+      const overridePath = overrideFile(scope, evidence.candidateImageId);
+      // The same image can be activated twice: reuse its override, and never remove one that live containers name.
+      const created = !approvedOverride(scope, overridePath);
+      if (created) { mkdirSync(dirname(overridePath), { recursive: true, mode: 0o700 }); writeFileSync(overridePath, overrideContent(serviceName, evidence.candidateImageId), { mode: 0o600, flag: "wx" }); }
       try {
         const argv = [...base, "--file", overridePath, "up", "-d", "--no-build", "--no-deps", serviceName];
         assertSafeDockerArgv(argv, false);
         await this.dockerContext();
         const result = await this.run(argv, DOCKER); if (result.code !== 0) throw fail("Candidate activation failed", "activation_failed", 502);
-      } finally { try { unlinkSync(overridePath); } catch {} }
+      } catch (caught) { if (created) try { unlinkSync(overridePath); } catch {} throw caught; }
+      retireOverrides(scope, overridePath);
       const after = await this.inspectContainers(project, component);
       const selectedIds = await this.run([...base, "ps", "-q", snapshot.selectedService], READ);
       if (selectedIds.code !== 0) throw fail("Could not inspect activated project service", "activation_unverified", 502);

@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
-import { chmodSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { parse } from "yaml";
 import { Catalog } from "../catalog";
 import type { CatalogPort, Component, ContainerInfo, ExecOptions, Executor, Operation, Project, RuntimePort } from "../contracts";
@@ -206,7 +206,7 @@ async function registered(compose = "services:\n  app:\n    image: local/app:v1\
   writeFileSync(join(root, "Dockerfile"), "FROM alpine:3.20\n"); writeFileSync(join(root, "compose.yaml"), compose);
   const catalog = new Catalog({ stateDir: state, infraDir: infra }); catalogs.push(catalog); catalog.addRoot(roots, "Fixtures");
   const project = catalog.createProject({ id: "fixture", name: "Fixture", root, components: [{ id: "app", name: "App", kind: "compose", cwd: root, compose: { files: ["compose.yaml"], projectName: "fixture-app", profiles: [], services: ["app"] }, dependsOn: [], sources, validation: { argv: ["/bin/true"] } }] });
-  const composeFile = join(root, "compose.yaml"), images = new Map([["local/app:v1", BASE], ["local/app:v2", CANDIDATE], ["local/app:v3", THIRD]]);
+  const composeFile = join(root, "compose.yaml"), images = new Map([["local/app:v1", BASE], ["local/app:v2", CANDIDATE], ["local/app:v2-rebuilt", CANDIDATE], ["local/app:v3", THIRD]]);
   const docker = { upFails: false, containers: [{ id: "d".repeat(64), image: BASE, service: "app", files: [composeFile] }] };
   const labels = (item: typeof docker.containers[number]) => ({ "com.docker.compose.project": "fixture-app", "com.docker.compose.service": item.service, "com.docker.compose.project.working_dir": root, "com.docker.compose.project.config_files": item.files.join(",") });
   const ok = (stdout: unknown) => ({ code: 0, stdout: typeof stdout === "string" ? stdout : JSON.stringify(stdout), stderr: "" });
@@ -239,7 +239,8 @@ async function registered(compose = "services:\n  app:\n    image: local/app:v1\
     const change = await maintenance.preview({ projectId: "fixture", componentId: "app", file: "compose.yaml", service: "app", replacement });
     await maintenance.apply(change.id); return maintenance.validate(change.id);
   };
-  return { root, state, catalog, project, component: project.components[0]!, runtime, maintenance, docker, composeFile, remediate };
+  const commit = async () => expect((await gitRun(execCommand, ["-C", root, "commit", "-am", "remediation"])).code).toBe(0);
+  return { root, state, catalog, project, component: project.components[0]!, runtime, maintenance, docker, composeFile, remediate, commit };
 }
 
 test("a real catalog stores a preview that maps no Dockerfile stage", async () => {
@@ -253,4 +254,77 @@ test("a real catalog stores validation evidence for an image-only service", asyn
   const f = await registered();
   await f.maintenance.scan(BASE);
   expect(await f.remediate("local/app:v2")).toMatchObject({ state: "validated", evidence: { candidateImageId: CANDIDATE } });
+});
+
+async function activated(replacement = "local/app:v2") {
+  const f = await registered();
+  await f.maintenance.scan(BASE);
+  const change = await f.remediate(replacement);
+  expect((await f.maintenance.activate(change.id)).state).toBe("activated");
+  return { ...f, change, override: f.docker.containers[0]!.files.at(-1)! };
+}
+const owned = async (f: Awaited<ReturnType<typeof registered>>) => (await f.runtime.inventory([f.project])).filter((item) => item.componentId === "app").length;
+
+test("an activated container stays owned by its component", async () => {
+  const f = await activated();
+  expect(f.docker.containers[0]).toMatchObject({ image: CANDIDATE, files: [f.composeFile, f.override] });
+  expect(await owned(f)).toBe(1);
+  expect(await f.runtime.check(f.project, f.component)).toMatchObject({ state: "running" });
+  await f.runtime.stop(f.project, f.component);
+});
+
+test("a foreign or altered override stays rejected after activation", async () => {
+  const f = await activated();
+  const original = readFileSync(f.override, "utf8");
+  const refused = async () => {
+    expect(await owned(f)).toBe(0);
+    await expect(f.runtime.stop(f.project, f.component)).rejects.toThrow("Compose container ownership labels do not match");
+  };
+
+  const foreign = join(f.root, "override.yml"); writeFileSync(foreign, original);
+  writeFileSync(f.override, original.replace("build: !reset null", "privileged: true")); await refused();
+  rmSync(f.override); symlinkSync(foreign, f.override); await refused();
+  rmSync(f.override); writeFileSync(f.override, original);
+
+  f.docker.containers[0]!.files = [f.composeFile, foreign]; await refused();
+  const sibling = join(dirname(f.override), `${"0".repeat(32)}-${CANDIDATE.slice(7)}.yml`); writeFileSync(sibling, original);
+  f.docker.containers[0]!.files = [f.composeFile, sibling]; await refused();
+
+  f.docker.containers[0]!.files = [f.composeFile, f.override];
+  f.docker.containers[0]!.service = "other";
+  f.project.components[0]!.compose!.services.push("other");
+  await refused();
+});
+
+test("a later activation retires the superseded override", async () => {
+  const f = await activated();
+  await f.commit(); await f.maintenance.scan(CANDIDATE);
+  const next = await f.remediate("local/app:v3");
+  expect((await f.maintenance.activate(next.id)).state).toBe("activated");
+  expect(existsSync(f.override)).toBe(false);
+  expect(await owned(f)).toBe(1);
+
+  f.docker.containers[0]!.files = [f.composeFile, f.override];
+  expect(await owned(f)).toBe(0);
+  await expect(f.runtime.stop(f.project, f.component)).rejects.toThrow("Compose container ownership labels do not match");
+});
+
+test("a failed activation keeps the running container owned and leaves no new override", async () => {
+  const f = await activated();
+  await f.commit(); await f.maintenance.scan(CANDIDATE);
+  const next = await f.remediate("local/app:v3");
+  f.docker.upFails = true;
+  await expect(f.maintenance.activate(next.id)).rejects.toThrow("Candidate activation failed");
+  expect(readdirSync(dirname(f.override))).toEqual([basename(f.override)]);
+  expect(await owned(f)).toBe(1);
+});
+
+test("reactivating the running image reuses its override, even when activation fails", async () => {
+  const f = await activated();
+  await f.commit(); await f.maintenance.scan(CANDIDATE);
+  const next = await f.remediate("local/app:v2-rebuilt");
+  expect(next.evidence?.candidateImageId).toBe(CANDIDATE);
+  f.docker.upFails = true;
+  await expect(f.maintenance.activate(next.id)).rejects.toThrow("Candidate activation failed");
+  expect(await owned(f)).toBe(1);
 });
