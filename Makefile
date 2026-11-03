@@ -1,4 +1,4 @@
-.PHONY: help install uninstall up up-async down restart ps logs doctor db-create db-list test version release
+.PHONY: help install uninstall up up-async down restart ps logs doctor dev db-create db-list test version release
 
 DEVHUB := ./bin/devhub
 BUMP ?= patch
@@ -43,6 +43,10 @@ logs: ## Follow service logs
 
 doctor: ## Check health, network and configured ports
 	@$(DEVHUB) doctor
+
+# --- Dev servers ---
+dev: ## Start the control panel (Vite on 5175) and its local API
+	@$(DEVHUB) serve --dev
 
 # --- Databases ---
 db-create: ## Create PostgreSQL database (DB=name)

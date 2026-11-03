@@ -119,10 +119,10 @@ Pin a specific version, or track the bleeding-edge `main` branch:
 
 ```bash
 # exact release
-DEVHUB_VERSION=v0.0.1 curl -fsSL https://raw.githubusercontent.com/dev-toolings/dev-infra/main/install-remote.sh | bash
+curl -fsSL https://raw.githubusercontent.com/dev-toolings/dev-infra/main/install-remote.sh | DEVHUB_VERSION=v0.0.1 bash
 
 # always-latest development branch (unpinned, not reproducible)
-DEVHUB_VERSION=main  curl -fsSL https://raw.githubusercontent.com/dev-toolings/dev-infra/main/install-remote.sh | bash
+curl -fsSL https://raw.githubusercontent.com/dev-toolings/dev-infra/main/install-remote.sh | DEVHUB_VERSION=main bash
 ```
 
 `DEVHUB_VERSION` defaults to `latest` (newest published GitHub Release). If no
@@ -131,7 +131,7 @@ release exists yet, the installer falls back to `main` with a warning.
 Custom install path:
 
 ```bash
-DEVHUB_DIR=~/tools/devhub curl -fsSL https://raw.githubusercontent.com/dev-toolings/dev-infra/main/install-remote.sh | bash
+curl -fsSL https://raw.githubusercontent.com/dev-toolings/dev-infra/main/install-remote.sh | DEVHUB_DIR=~/tools/devhub bash
 ```
 
 **Manual** (if you prefer git clone):
@@ -191,6 +191,7 @@ make up-async                    # same as `make up` (kept for compat)
 make down                        # stop all
 make ps                          # status
 make doctor                      # diagnostics
+make dev                         # control panel (Vite on 5175) and its local API
 ```
 
 ## Database Management
