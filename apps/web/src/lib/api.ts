@@ -255,15 +255,43 @@ export async function streamLogs(projectId: string, options: LogStreamOptions): 
   const response = await send("GET", `/projects/${id(projectId)}/logs${suffix}`, { signal: options.signal, headers }, "text/event-stream");
   if (!response.body) throw new ApiRequestError("The log stream returned no body.", "bad_response", response.status);
   options.onOpen?.();
+  await readEventStream(response.body, (event, data) => dispatchEvent(event, data, options));
+}
 
-  const reader = response.body.getReader();
+export interface ContainerLogEntry { seq: number; time: string; stream: "stdout" | "stderr"; message: string }
+
+export interface ContainerLogStreamOptions {
+  since?: string;
+  signal: AbortSignal;
+  onOpen?: () => void;
+  onEntry: (entry: ContainerLogEntry) => void;
+  /** The server skipped this many lines to protect the panel from a very chatty container. */
+  onDropped: (count: number) => void;
+}
+
+/** Follows one container until the server closes the stream; `since` resumes after a reconnect. */
+export async function streamContainerLogs(containerId: string, options: ContainerLogStreamOptions): Promise<void> {
+  const suffix = options.since ? `?${new URLSearchParams({ since: options.since })}` : "";
+  const response = await send("GET", `/containers/${id(containerId)}/logs${suffix}`, { signal: options.signal }, "text/event-stream");
+  if (!response.body) throw new ApiRequestError("The log stream returned no body.", "bad_response", response.status);
+  options.onOpen?.();
+  await readEventStream(response.body, (event, data) => {
+    const payload = parseJson(data) as Record<string, unknown> | undefined;
+    if (event === "log" && payload && typeof payload.time === "string" && typeof payload.message === "string") options.onEntry(payload as unknown as ContainerLogEntry);
+    else if (event === "dropped" && typeof payload?.count === "number") options.onDropped(payload.count);
+    else if (event === "error") throw new ApiRequestError(typeof payload?.message === "string" ? payload.message : "The log stream reported an error.", "stream_error", 0);
+  });
+}
+
+async function readEventStream(body: ReadableStream<Uint8Array>, onEvent: (event: string, data: string) => void): Promise<void> {
+  const reader = body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
   let event = "message";
   let data: string[] = [];
   const handleLine = (line: string) => {
     if (line === "") {
-      if (data.length > 0) dispatchEvent(event, data.join("\n"), options);
+      if (data.length > 0) onEvent(event, data.join("\n"));
       event = "message";
       data = [];
     } else if (!line.startsWith(":")) {

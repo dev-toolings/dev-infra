@@ -182,7 +182,7 @@ devhub serve --dev-origin http://127.0.0.1:5175
 
 **Dependencies:** Runtime inventory, Maintenance scanner adapter, API, and panel integration.
 
-**Current status:** **Implemented.** Runtime inventory keeps unlabeled containers observed-only; Maintenance runs Trivy only on explicit request and records scanner, scan time, findings, and database freshness when reported. Scanner absence, malformed output, and remote Docker contexts are recorded as failures. The panel shows filterable container and scan inventories with a per-image Scan action.
+**Current status:** **Implemented.** Runtime inventory keeps unlabeled containers observed-only; Maintenance runs Trivy only on explicit request and records scanner, scan time, findings, and database freshness when reported. Scanner absence, malformed output, and remote Docker contexts are recorded as failures. The panel shows filterable container and scan inventories with a per-image Scan action, and a container's detail panel follows its Docker logs live while it stays open (read-only, also for containers linked to no project).
 
 ### US-07: Review and validate a replacement image reference
 

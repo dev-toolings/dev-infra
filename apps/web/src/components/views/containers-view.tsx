@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "../ui/sheet";
 import { EmptyState, ErrorState } from "../ui/state";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../ui/table";
+import { ContainerLogs } from "./container-logs";
 import { DetailRow, SearchField, StatTile, StatusDot, matches, type Tone } from "./inventory";
 import { ContainersSkeleton } from "./skeletons";
 
@@ -199,7 +200,7 @@ export function ContainersView({ containers, loading = false, error, filter, onF
       )}
 
       <Sheet open={Boolean(open)} onOpenChange={(next) => { if (!next) setOpenId(undefined); }}>
-        <SheetContent className="w-full gap-0 overflow-y-auto sm:max-w-md">
+        <SheetContent className="w-full gap-0 overflow-y-auto sm:max-w-[80vw] lg:overflow-hidden">
           {open ? (
             <>
               <SheetHeader className="border-b">
@@ -209,7 +210,8 @@ export function ContainersView({ containers, loading = false, error, filter, onF
                 </SheetTitle>
                 <SheetDescription className="break-all">{open.image}</SheetDescription>
               </SheetHeader>
-              <div className="space-y-5 p-4">
+              <div className="flex min-h-0 flex-1 flex-col gap-4 p-4 lg:flex-row">
+              <div className="min-w-0 space-y-5 lg:w-96 lg:shrink-0 lg:overflow-y-auto">
                 <dl className="grid grid-cols-3 gap-2 text-xs">
                   <div className="rounded-lg border p-3"><dt className="text-muted-foreground">State</dt><dd className="mt-1.5"><Badge variant={badgeFor[toneOf(open)]}>{open.state || "unknown"}</Badge></dd><dd className="mt-1 truncate text-muted-foreground">{currentHealth(open) ?? (isRunning(open) ? "No health check" : "Not running")}</dd></div>
                   <div className="rounded-lg border p-3"><dt className="text-muted-foreground">CPU</dt><dd className="tabular mt-1.5 text-base font-semibold">{isRunning(open) ? formatCpu(open.cpuPercent) : "Idle"}</dd></div>
@@ -241,6 +243,8 @@ export function ContainersView({ containers, loading = false, error, filter, onF
                     Open linked project <ExternalLink aria-hidden="true" />
                   </Button>
                 ) : null}
+              </div>
+              <ContainerLogs key={open.id} containerId={open.id} live={isRunning(open)} />
               </div>
             </>
           ) : null}

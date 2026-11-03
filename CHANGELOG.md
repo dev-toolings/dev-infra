@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Live Docker logs in the container detail panel, now a wide side panel, with
+  `?state=` filters on `/containers`; `make dev` and `make pair`.
 - Foundation for the approved local DevHub manager: shared TypeScript contracts,
   Bun dependencies, React/Vite tooling and isolated worker implementation branches.
 - Local project manager: SQLite catalog of approved roots and in-place projects,
