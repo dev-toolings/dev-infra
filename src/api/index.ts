@@ -386,7 +386,8 @@ export function createApp(services: AppServices, options: ApiOptions): Hono<ApiE
           if (quietMs >= CONTAINER_LOG_HEARTBEAT_MS) { quietMs = 0; output = ": ping\n\n"; }
           send();
           ticks += 1;
-          if (ticks * CONTAINER_LOG_FLUSH_MS >= 1000) { ticks = 0; sentThisSecond = 0; redactMs = 0; }
+          // A costly line stays as debt, so one spike skips the next seconds instead of repeating.
+          if (ticks * CONTAINER_LOG_FLUSH_MS >= 1000) { ticks = 0; sentThisSecond = 0; redactMs = Math.max(0, redactMs - CONTAINER_LOG_REDACT_MS_PER_SECOND); }
         }, CONTAINER_LOG_FLUSH_MS);
         const finish = (close = true) => {
           if (closed) return;

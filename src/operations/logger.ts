@@ -34,7 +34,7 @@ const MAX_ENTRIES = 64;
 const MAX_STRING_LENGTH = 1024;
 const MAX_KEY_LENGTH = 80;
 const MAX_INPUT_STRING_LENGTH = 8192;
-const MAX_JSON_LOG_LINE = 65_536;
+const MAX_JSON_LOG_LINE = 32_768;
 const MAX_OUTPUT_LENGTH = 8192;
 const MAX_FIELD_VALUE_LENGTH = 1200;
 const TRUNCATED = "[truncated]";
@@ -246,6 +246,21 @@ export function redactOutput(value: unknown): unknown {
 }
 
 const SGR_SPLIT = /(\u001b\[[0-9;]*m)/;
+const SGR = /\u001b\[[0-9;]*m/g;
+
+/** Cuts on a space, because a cut inside a credential would hide it from the patterns that redact it. */
+function boundedLogText(text: string): string {
+  if (text.length <= MAX_INPUT_STRING_LENGTH) return text;
+  let end = text.lastIndexOf(" ", MAX_INPUT_STRING_LENGTH);
+  // A quote left open at the cut may hold the rest of a quoted secret.
+  for (const quote of ['"', "'"]) {
+    const head = text.slice(0, Math.max(end, 0));
+    if (head.split(quote).length % 2 === 0) end = head.lastIndexOf(quote);
+  }
+  return end > 0 ? `${text.slice(0, end)} ${TRUNCATED}` : TRUNCATED;
+}
+
+const LOG_LINE_LIMITS: RedactionLimits = { ...NO_LIMITS, text: (value) => redactSecrets(boundedLogText(value)) };
 
 /** Keeps color codes and spacing, drops every other terminal control. */
 function displayControls(line: string): string {
@@ -260,12 +275,13 @@ export function redactLogLine(line: string): string {
   if (line.length <= MAX_JSON_LOG_LINE && /^\s*[{[]/.test(line)) {
     try {
       const parsed: unknown = JSON.parse(line);
-      if (parsed && typeof parsed === "object") return JSON.stringify(redactOutput(parsed));
-    } catch { /* A line that only looks like JSON is plain text. */ }
+      if (parsed && typeof parsed === "object") return JSON.stringify(cloneSafe(parsed, { seen: new WeakSet(), entries: 0, limits: LOG_LINE_LIMITS }, 0));
+    } catch { /* A line that only looks like JSON, or nests too deep, is plain text. */ }
   }
-  const bounded = line.length > MAX_INPUT_STRING_LENGTH ? `${line.slice(0, MAX_INPUT_STRING_LENGTH)}${TRUNCATED}` : line;
-  const safe = redactSecrets(bounded);
-  return safe === cleanControls(bounded) ? displayControls(bounded) : safe;
+  // The decision is made on what would be shown: stripping controls can rejoin or reveal a credential.
+  const shown = displayControls(boundedLogText(line)), plain = shown.replace(SGR, "");
+  const safe = redactSecrets(plain);
+  return safe === cleanControls(plain) ? shown : safe;
 }
 
 function resolveMode(mode?: LoggerOptions["mode"]): "development" | "production" {

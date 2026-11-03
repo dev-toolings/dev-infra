@@ -39,8 +39,11 @@ function levelTone(level: string): string {
   return "text-log-muted";
 }
 
-function JsonTokens({ value }: { value: unknown }) {
-  const text = JSON.stringify(value, null, 2);
+function pretty(value: unknown, fallback: string): string {
+  try { return JSON.stringify(value, null, 2); } catch { return fallback; } // Absurdly deep JSON overflows the stack.
+}
+
+function JsonTokens({ text }: { text: string }) {
   const nodes: React.ReactNode[] = [];
   let last = 0;
   for (const match of text.matchAll(JSON_TOKEN)) {
@@ -75,7 +78,7 @@ const LogRow = React.memo(function LogRow({ entry }: { entry: ContainerLogEntry 
             {level ? <span className={`shrink-0 font-semibold uppercase ${levelTone(level)}`}>{level}</span> : null}
             <span className="truncate">{summary ?? entry.message}</span>
           </button>
-          {expanded ? <pre className="m-0 mt-1 mb-2 min-w-0 whitespace-pre-wrap break-words pl-5 text-log-foreground"><JsonTokens value={json} /></pre> : null}
+          {expanded ? <pre className="m-0 mt-1 mb-2 min-w-0 whitespace-pre-wrap break-words pl-5 text-log-foreground"><JsonTokens text={pretty(json, entry.message)} /></pre> : null}
         </div>
       ) : (
         <span className="min-w-0 flex-1 whitespace-pre-wrap break-words pl-5 text-log-foreground">

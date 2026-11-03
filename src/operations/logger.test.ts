@@ -188,3 +188,17 @@ test("container log lines keep JSON valid, colors and spacing, but never a secre
 
   expect(redactLogLine("{not json password=hunter2")).not.toContain("hunter2");
 });
+
+test("container log lines cannot reveal a secret through controls or truncation", () => {
+  expect(redactLogLine("\u001b]0;password=hunter2\u001b[0m\u0007 normal")).not.toContain("hunter2");
+  expect(redactLogLine(`${"x".repeat(8163)} https://admin:s3cretpassw0rd@db.internal/x`)).not.toContain("s3cretpassw0rd");
+  expect(redactLogLine(`${"x".repeat(8170)} password="my secret phrase here"`)).not.toContain("secret");
+  expect(redactLogLine("y".repeat(9000))).toBe("[truncated]");
+});
+
+test("a huge JSON string stays cheap to redact", () => {
+  const started = performance.now();
+  const line = JSON.parse(redactLogLine(JSON.stringify({ a: "a".repeat(30_000) })));
+  expect(performance.now() - started).toBeLessThan(1000);
+  expect(line.a).toBe("[truncated]");
+});
