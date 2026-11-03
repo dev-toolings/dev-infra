@@ -76,16 +76,22 @@ function envFileCheck(file: string, root: string): void {
   if (!within(path, root)) throw err("Environment file must stay inside the project root", "unsafe_path", 403);
   const st = lstatSync(file); if (!st.isFile() || st.isSymbolicLink()) throw err("Environment file must be a regular file");
 }
-function checkEnvControls(cwd: string): void {
-  const path = join(cwd, ".env");
+function checkEnvControls(cwd: string, file = ".env"): void {
+  const path = resolve(cwd, file);
   let info; try { info = lstatSync(path); } catch (e) { if ((e as NodeJS.ErrnoException).code === "ENOENT") return; throw e; }
-  if (!info.isFile() || info.isSymbolicLink() || info.size > 1024 * 1024 || realpathSync(path) !== path) throw err("Compose .env must be a canonical regular file no larger than 1 MiB");
+  if (!info.isFile() || info.isSymbolicLink() || info.size > 1024 * 1024 || realpathSync(path) !== path) throw err(`Compose ${file} must be a canonical regular file no larger than 1 MiB`);
   const text = readFileSync(path, "utf8");
   const execution = new Set(["DOCKER_HOST", "DOCKER_CONTEXT", "DOCKER_CONFIG", "DOCKER_TLS_VERIFY", "DOCKER_CERT_PATH", "DOCKER_DEFAULT_PLATFORM", "DOCKER_BUILDKIT"]);
-  for (const match of text.matchAll(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=/gm)) {
+  // Compose dotenv also accepts the YAML-style `KEY: value` form.
+  for (const match of text.matchAll(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*[=:]/gm)) {
     const key = match[1]!;
-    if ((key.startsWith("COMPOSE_") && key !== "COMPOSE_PROJECT_NAME" && key !== "COMPOSE_PROFILES") || execution.has(key)) throw err(`Compose .env setting ${key} is not allowed`, "unsafe_environment", 403);
+    if ((key.startsWith("COMPOSE_") && key !== "COMPOSE_PROJECT_NAME" && key !== "COMPOSE_PROFILES") || execution.has(key)) throw err(`Compose ${file} setting ${key} is not allowed`, "unsafe_environment", 403);
   }
+}
+/** Every file Compose may read its own controls from gets the same policy; envFiles are bounded to the root before being read. */
+function checkComposeEnv(component: Component, cwd: string, root: string): void {
+  checkEnvControls(cwd);
+  for (const file of component.envFiles ?? []) { envFileCheck(resolve(cwd, file), root); checkEnvControls(cwd, file); }
 }
 
 export class Runtime implements RuntimePort {
@@ -121,14 +127,13 @@ export class Runtime implements RuntimePort {
     slug(cfg.projectName, "Compose project name");
     const files = cfg.files.map((file) => { const path = this.assertAllowedPath(resolve(cwd, file), true); if (!within(canonical(path), canonical(project.root))) throw err("Compose file must stay inside project root", "unsafe_path", 403); const st = lstatSync(path); if (!st.isFile() || st.isSymbolicLink()) throw err("Compose file must be a regular file"); return canonical(path); });
     for (const profile of cfg.profiles) slug(profile, "Compose profile"); for (const service of cfg.services) slug(service, "Compose service");
-    checkEnvControls(cwd);
-    for (const file of component.envFiles ?? []) envFileCheck(resolve(cwd, file), canonical(project.root));
+    checkComposeEnv(component, cwd, canonical(project.root));
     const envFiles = (component.envFiles ?? []).map((file) => canonical(resolve(cwd, file)));
     return ["docker", "compose", "-p", cfg.projectName, `--project-directory=${cwd}`, ...files.map((f) => `--file=${f}`), ...envFiles.map((f) => `--env-file=${f}`), ...cfg.profiles.map((p) => `--profile=${p}`)];
   }
   private preflightCompose(project: Project, component: Component, cwd: string): void {
-    checkEnvControls(cwd);
     const root = canonical(project.root); let files = 0, bytes = 0; const visited = new Set<string>(), active = new Set<string>();
+    checkComposeEnv(component, cwd, root);
     const visit = (path: string, depth: number) => {
       if (depth > 8) throw err("Compose include depth exceeds 8", "unsafe_compose", 403);
       const resolved = canonical(path); if (!within(resolved, root)) throw err("Compose references must stay inside project root", "unsafe_path", 403);
