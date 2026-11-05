@@ -18,20 +18,23 @@ export const AGENT_FEATURE = {
     ...(sqlalchemy ? [`${pattern === "modules" ? "Rename the table in the copied `schema.py`" : "Add the table to `app/lib/schema.py` and copy `app/services/sqlalchemy_note_store.py`"}, then run \`uv run alembic revision --autogenerate -m "<name>"\` and \`uv run alembic upgrade head\`.`] : []),
     "Format with `uv run ruff format .`.",
   ],
-  symfony: [
-    "Route: create a class in `src/Controller` with `#[Route('/path', methods: ['GET'])]`.",
-    "Service outside `src/Controller`: first replace the `load()` call of `src/Kernel.php` with `$container->services()->load('App\\\\', __DIR__.'/')->exclude(__DIR__.'/Kernel.php')->autowire()->autoconfigure();`. Without it, the container fails.",
+  symfony: (modules: boolean, doctrine: boolean) => [
+    modules ? "Copy `src/Modules/Notes` to `src/Modules/<Name>`, and rename it." : "Copy `src/Controller/NoteController.php`, `src/Dto/NoteInput.php`, `src/Model/Note.php`, `src/Service/NoteService.php` and the files of `src/Repository`, and rename them.",
+    "In `config/services.php`, exclude its plain classes from `load()`, and set the alias of its port. In `config/services_test.php`, point the port at its memory store.",
+    "Add a test to `tests/AppTest.php`.",
+    ...(doctrine ? [`${modules ? "Rename the table in the copied `NoteRecord.php`" : "Copy `src/Entity/NoteRecord.php`, and rename its table"}, then run \`php bin/console doctrine:migrations:diff\` and \`php bin/console doctrine:migrations:migrate --no-interaction\`. The first needs the database.`] : []),
     "Package: run `composer require <package>:<exact version>`. A hand edit of `composer.json` leaves the lock stale, and `composer validate` fails.",
-    "Bundle: also add `yield new <Bundle>();` to `registerBundles()` in `src/Kernel.php`, and its configuration to `configureContainer()`.",
-    "There is no test tool or console. Prove the route: `php -r 'putenv(\"APP_SECRET=check\"); require \"vendor/autoload.php\"; echo (new App\\Kernel(\"dev\", true))->handle(Symfony\\Component\\HttpFoundation\\Request::create(\"/path\"))->getContent();'`",
+    "Bundle: also add it to `config/bundles.php`, and configure it in `config/packages`.",
+    "Format with `vendor/bin/php-cs-fixer fix`.",
   ],
-  laravel: [
-    "Route: add it to `routes/api.php`, without an `/api` prefix.",
-    "Controller: run `php artisan make:controller <Name>Controller`. It has no base class, and that is fine.",
-    "Validation: run `php artisan make:request Store<Name>`, then make `authorize()` return `true` and fill `rules()`.",
+  laravel: (modules: boolean, eloquent: boolean) => [
+    modules ? "Copy `app/Modules/Notes` to `app/Modules/<Name>`, and rename it." : "Copy `app/Http/Controllers/NoteController.php`, `app/Http/Requests/NoteRequest.php`, `app/Models/Note.php`, `app/Services/NoteService.php` and the files of `app/Repositories`, and rename them.",
+    "Add its routes to `routes/api.php`, without an `/api` prefix.",
+    "Bind its port in `app/Providers/AppServiceProvider.php`, and to its memory store in `setUp()` of `tests/AppTest.php`.",
+    "Add a test to `tests/AppTest.php`.",
+    ...(eloquent ? ["Run `php artisan make:migration create_<name>_table`, write it, then run `php artisan migrate`."] : []),
     "Configuration: create `config/<name>.php` and read it with `config('<name>.key')`.",
-    "Table: run `php artisan make:model <Name> -m`. Only PostgreSQL projects get a `config/database.php`.",
-    "There are no tests. Prove the route: `php artisan route:list --except-vendor`.",
+    "Format with `vendor/bin/pint`.",
   ],
 };
 
@@ -72,15 +75,20 @@ export const AGENT_RULES = {
     "Commit all of `migrations/`, and never edit a migration once applied: generate a new one.",
   ],
   symfony: [
-    "This is a minimal kernel: no `bin/console`, no Flex, no `symfony/dotenv`. `composer require` applies no recipe, so register each bundle in `Kernel::registerBundles()` and configure it in `configureContainer()`.",
-    "Only `src/Controller` is loaded as services: extend the `load()` call in `configureContainer()` before adding a service elsewhere.",
-    "Declare routes with `#[Route]` attributes in `src/Controller`.",
-    "`.env` files are not loaded: read variables from the process with `%env(NAME)%`.",
+    "There is no Flex: `composer require` applies no recipe, so add each bundle to `config/bundles.php` and configure it in `config/packages`.",
+    "Declare routes with `#[Route]` attributes on a controller, and read a body with `#[MapRequestPayload]`.",
+    "Throw `AppError` for an expected failure and let the rest reach `ErrorSubscriber`: no `try`/`catch` that hides it.",
+    "A running app gets its environment from DevHub: `.env` is read only by `bin/console`, in native mode.",
+    "Docker runs the app in FrankenPHP worker mode: a service outlives the request, so keep no request state on it, or implement `ResetInterface`.",
+    "FrankenPHP docs: https://frankenphp.dev/docs/symfony/",
   ],
   laravel: [
     "Routes have no `/api` prefix (`apiPrefix: ''`): do not add one.",
     "Call `env()` only in `config/*.php`; elsewhere use `config()`.",
-    "This is a minimal app: no `app/` yet, no `config/app.php`, no tests and no `APP_KEY`. Set `APP_KEY` before using encryption, sessions or cookies.",
+    "Throw `AppError` for an expected failure and let the rest reach `ErrorResponse`: no `try`/`catch` that hides it.",
+    "Validate each request with a `FormRequest`.",
+    "Docker runs the app under Octane: a singleton outlives the request, so never inject the request, the container or the config repository into one. Bind what needs them with `scoped()`.",
+    "Laravel docs for agents: https://laravel.com/docs/octane",
   ],
 };
 

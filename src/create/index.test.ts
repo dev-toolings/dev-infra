@@ -181,7 +181,7 @@ test("the chosen release lines reach the image and the dependencies, and only wh
   await creator.apply(plan, false);
   expect(readFileSync(join(root, "shop/Dockerfile"), "utf8")).toBe(plan.docker!.dockerfile);
   expect(JSON.parse(readFileSync(join(root, "shop/composer.json"), "utf8")).require["symfony/runtime"]).toStartWith("8.1.");
-  expect((await creator.plan(input({ name: "other", stack: "php", mode: "native", options: { framework: "laravel" } }))).input.options).toEqual({ framework: "laravel" });
+  expect((await creator.plan(input({ name: "other", stack: "php", mode: "native", options: { framework: "laravel" } }))).input.options).toEqual({ framework: "laravel", pattern: "standard", laravelOrm: "none" });
   await expect(creator.plan(input({ name: "other", stack: "php", options: { phpVersion: "5.6" } }))).rejects.toThrow("Invalid value");
 });
 
@@ -244,7 +244,7 @@ test("AGENTS.md carries the rules of the framework, the runtime, the mode and th
   expect(native).not.toContain("docker compose");
   expect(native).not.toContain("drizzle");
   expect(await agents({ stack: "python", name: "api" })).toContain("`uv add`");
-  expect(await agents({ stack: "php", name: "sf", options: { framework: "symfony" } })).toContain("no `bin/console`");
+  expect(await agents({ stack: "php", name: "sf", options: { framework: "symfony" } })).toContain("There is no Flex");
   expect(await agents({ stack: "php", name: "lv", options: { framework: "laravel" } })).toContain("no `/api` prefix");
 });
 
@@ -255,8 +255,8 @@ test("the add-feature skill follows the stack, the code structure and the mode",
   expect(await skill({ options: { pattern: "standard", runtime: "node", orm: "drizzle" }, services: ["postgres"] })).toContain("`npm run db:generate`");
   expect(await skill({ stack: "python", name: "api", options: { pattern: "standard" } })).toContain("`app/routes/notes.py`");
   expect(await skill({ stack: "python", name: "api", options: { orm: "sqlalchemy" } })).toContain("alembic revision --autogenerate");
-  expect(await skill({ stack: "php", name: "sf", options: { framework: "symfony" } })).toContain("load('App\\\\', __DIR__.'/')");
-  expect(await skill({ stack: "php", name: "lv", options: { framework: "laravel" } })).toContain("php artisan make:controller");
+  expect(await skill({ stack: "php", name: "sf", options: { framework: "symfony" } })).toContain("`src/Controller/NoteController.php`");
+  expect(await skill({ stack: "php", name: "lv", options: { framework: "laravel" } })).toContain("`app/Http/Controllers/NoteController.php`");
   expect(await skill({ mode: "docker" })).toContain("in the `app` container");
   expect(await skill({ mode: "native" })).not.toContain("in the `app` container");
 });

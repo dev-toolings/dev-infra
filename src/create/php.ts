@@ -1,92 +1,52 @@
 import versions from "../../data/versions.json";
+import { laravelFiles } from "./laravel";
+import { symfonyFiles } from "./symfony";
 
-export type PhpOptions = { name: string; framework: string; symfonyVersion?: string; services: string[] };
+export type PhpOptions = { name: string; framework: string; pattern?: string; symfonyVersion?: string; orm?: string; services: string[]; docker?: boolean };
 
 /** Exact versions, kept in one file that `devhub versions` checks. */
 const VERSIONS = versions.Packagist;
 const json = (value: unknown) => `${JSON.stringify(value, null, 4)}\n`;
-const lines = (...items: string[]) => [...items, ""].join("\n");
-const KEEP = "*\n!.gitignore\n";
+const CHECKS = { lint: "php-cs-fixer check", analyse: "phpstan analyse --memory-limit=1G", test: "phpunit" };
 
-function composer(name: string, require: Record<string, string>, extra: Record<string, unknown>, services: string[]) {
+function composer(name: string, source: string, require: Record<string, string>, dev: Record<string, string>, services: string[], extra: Record<string, unknown>, scripts: Record<string, string>) {
   return json({
     name: `app/${name}`, type: "project", license: "proprietary",
-    require: { ...require, ...(services.includes("postgres") ? { "ext-pdo_pgsql": "*" } : {}), ...(services.includes("redis") ? { "predis/predis": VERSIONS["predis/predis"] } : {}) },
-    autoload: { "psr-4": { "App\\": extra.source } },
-    ...(extra.config ? { config: extra.config } : {}),
+    require: { php: ">=8.4", ...require, ...(services.includes("postgres") ? { "ext-pdo_pgsql": "*" } : {}), ...(services.includes("redis") ? { "predis/predis": VERSIONS["predis/predis"] } : {}) },
+    "require-dev": { "phpstan/phpstan": VERSIONS["phpstan/phpstan"], "phpunit/phpunit": VERSIONS["phpunit/phpunit"], ...dev },
+    autoload: { "psr-4": { "App\\": source } },
+    "autoload-dev": { "psr-4": { "App\\Tests\\": "tests/" } },
+    scripts,
+    ...extra,
   });
 }
 
-function symfonyFiles(name: string, line: "7.4" | "8.1", services: string[]): Record<string, string> {
+export function phpFiles({ name, framework, pattern = "standard", symfonyVersion = "7.4", orm = "none", services, docker = false }: PhpOptions): Record<string, string> {
+  const modules = pattern === "modules", postgres = services.includes("postgres"), redis = services.includes("redis"), mail = services.includes("mailpit");
+  if (framework === "laravel") {
+    const eloquent = orm === "eloquent";
+    return {
+      ...laravelFiles({ name, modules, eloquent, postgres, redis, mail, docker }),
+      "composer.json": composer(name, "app/", {
+        "laravel/framework": VERSIONS["laravel/framework"],
+        ...(docker ? { "laravel/octane": VERSIONS["laravel/octane"] } : {}),
+        ...(eloquent ? {} : { "ext-pdo_sqlite": "*" }),
+      }, { "larastan/larastan": VERSIONS["larastan/larastan"], "laravel/pint": VERSIONS["laravel/pint"] }, services, {}, { ...CHECKS, lint: "pint --test" }),
+    };
+  }
+  const doctrine = orm === "doctrine";
+  const { "symfony/mailer": mailer, ...core } = versions.lines.symfony[symfonyVersion as "7.4" | "8.1"];
   return {
-    "composer.json": composer(name, { php: line === "7.4" ? ">=8.2" : ">=8.4", ...versions.lines.symfony[line] }, { source: "src/", config: { "allow-plugins": { "symfony/runtime": true } } }, services),
-    "public/index.php": lines(
-      "<?php", "", "use App\\Kernel;", "", "require_once dirname(__DIR__).'/vendor/autoload_runtime.php';", "",
-      "return static fn (array $context) => new Kernel($context['APP_ENV'] ?? 'dev', (bool) ($context['APP_DEBUG'] ?? true));",
-    ),
-    "src/Kernel.php": lines(
-      "<?php", "", "namespace App;", "",
-      "use Symfony\\Bundle\\FrameworkBundle\\FrameworkBundle;",
-      "use Symfony\\Bundle\\FrameworkBundle\\Kernel\\MicroKernelTrait;",
-      "use Symfony\\Component\\DependencyInjection\\Loader\\Configurator\\ContainerConfigurator;",
-      "use Symfony\\Component\\HttpKernel\\Kernel as BaseKernel;",
-      "use Symfony\\Component\\Routing\\Loader\\Configurator\\RoutingConfigurator;", "",
-      "final class Kernel extends BaseKernel", "{", "    use MicroKernelTrait;", "",
-      "    public function registerBundles(): iterable", "    {", "        yield new FrameworkBundle();", "    }", "",
-      "    protected function configureContainer(ContainerConfigurator $container): void", "    {",
-      "        $container->extension('framework', ['secret' => '%env(APP_SECRET)%']);",
-      "        $container->services()->load('App\\\\Controller\\\\', __DIR__.'/Controller/')->autowire()->autoconfigure();",
-      "    }", "",
-      "    protected function configureRoutes(RoutingConfigurator $routes): void", "    {",
-      "        $routes->import(__DIR__.'/Controller/', 'attribute');", "    }", "}",
-    ),
-    "src/Controller/HealthController.php": lines(
-      "<?php", "", "namespace App\\Controller;", "",
-      "use Symfony\\Component\\HttpFoundation\\JsonResponse;", "use Symfony\\Component\\Routing\\Attribute\\Route;", "",
-      "final class HealthController", "{", "    #[Route('/health')]", "    public function __invoke(): JsonResponse", "    {",
-      "        return new JsonResponse(['status' => 'ok']);", "    }", "}",
-    ),
-    ".gitignore": lines(".env", "/var/", "/vendor/", ".claude/settings.local.json"),
+    ...symfonyFiles({ name, modules, doctrine, postgres, redis, mail }),
+    "composer.json": composer(name, "src/", {
+      ...core,
+      "symfony/monolog-bundle": VERSIONS["symfony/monolog-bundle"],
+      ...(mail ? { "symfony/mailer": mailer } : {}),
+      ...(doctrine ? { "doctrine/orm": VERSIONS["doctrine/orm"], "doctrine/doctrine-bundle": VERSIONS["doctrine/doctrine-bundle"], "doctrine/doctrine-migrations-bundle": VERSIONS["doctrine/doctrine-migrations-bundle"] } : { "ext-pdo_sqlite": "*" }),
+    }, { "friendsofphp/php-cs-fixer": VERSIONS["friendsofphp/php-cs-fixer"] }, services, {
+      config: { "allow-plugins": { "symfony/runtime": true } },
+      // DevHub gives the environment: Docker has no `.env` file, and the runtime would stop on it.
+      extra: { runtime: { disable_dotenv: true } },
+    }, CHECKS),
   };
 }
-
-function laravelFiles(name: string, services: string[]): Record<string, string> {
-  return {
-    "composer.json": composer(name, { php: ">=8.3", "laravel/framework": VERSIONS["laravel/framework"] }, { source: "app/" }, services),
-    // Laravel merges these with its defaults: DevHub gives every stack the same variable names.
-    ...(services.includes("mailpit") ? { "config/mail.php": lines(
-      "<?php", "", "return [", "    'default' => 'smtp',", "    'mailers' => [", "        'smtp' => ['transport' => 'smtp', 'host' => env('SMTP_HOST'), 'port' => env('SMTP_PORT')],", "    ],", "];",
-    ) } : {}),
-    artisan: lines(
-      "#!/usr/bin/env php", "<?php", "", "use Symfony\\Component\\Console\\Input\\ArgvInput;", "",
-      "require __DIR__.'/vendor/autoload.php';", "",
-      "$app = require_once __DIR__.'/bootstrap/app.php';", "", "exit($app->handleCommand(new ArgvInput));",
-    ),
-    "bootstrap/app.php": lines(
-      "<?php", "", "use Illuminate\\Foundation\\Application;", "use Illuminate\\Foundation\\Configuration\\Exceptions;", "use Illuminate\\Foundation\\Configuration\\Middleware;", "",
-      "return Application::configure(basePath: dirname(__DIR__))",
-      "    ->withRouting(api: __DIR__.'/../routes/api.php', apiPrefix: '')",
-      "    ->withMiddleware(function (Middleware $middleware): void {})",
-      "    ->withExceptions(function (Exceptions $exceptions): void {})",
-      "    ->create();",
-    ),
-    "public/index.php": lines(
-      "<?php", "", "use Illuminate\\Http\\Request;", "", "define('LARAVEL_START', microtime(true));", "",
-      "require __DIR__.'/../vendor/autoload.php';", "", "(require_once __DIR__.'/../bootstrap/app.php')->handleRequest(Request::capture());",
-    ),
-    "routes/api.php": lines(
-      "<?php", "", "use Illuminate\\Support\\Facades\\Route;", "", "Route::get('/health', fn () => ['status' => 'ok']);",
-    ),
-    ...(services.includes("postgres") ? { "config/database.php": lines(
-      "<?php", "", "return [", "    'default' => 'pgsql',", "    'connections' => [", "        'pgsql' => ['driver' => 'pgsql', 'url' => env('DATABASE_URL')],", "    ],", "];",
-    ) } : {}),
-    "bootstrap/cache/.gitignore": KEEP,
-    "storage/logs/.gitignore": KEEP,
-    "storage/framework/cache/.gitignore": KEEP,
-    "storage/framework/sessions/.gitignore": KEEP,
-    "storage/framework/views/.gitignore": KEEP,
-    ".gitignore": lines(".env", "/vendor/", ".claude/settings.local.json"),
-  };
-}
-
-export const phpFiles = ({ name, framework, symfonyVersion = "7.4", services }: PhpOptions) => framework === "laravel" ? laravelFiles(name, services) : symfonyFiles(name, symfonyVersion as "7.4" | "8.1", services);

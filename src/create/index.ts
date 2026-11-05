@@ -59,13 +59,37 @@ export function recipe(stack: string, id: string, mode: CreateMode, port: number
     }, install: "uv sync", dev: `uv run uvicorn app.main:app --host ${host} --port ${listen} --reload --no-access-log`, env: { APP_ENV: "development" } };
   }
   if (stack === "php") {
-    const laravel = options.framework === "laravel", checks = ["composer validate --no-check-publish"];
+    const laravel = options.framework === "laravel", modules = options.pattern === "modules";
+    const orm = laravel ? options.laravelOrm : options.symfonyOrm;
+    const checks = ["composer validate --no-check-publish", "composer lint", "composer analyse", "composer test"];
+    const layout = modules ? [
+      `\`${laravel ? "app" : "src"}/Modules/<Name>\`: one folder per feature.`,
+      `\`${laravel ? "app" : "src"}/Modules/<Name>/Domain\`: the rules and the ports.`,
+      `\`${laravel ? "app" : "src"}/Modules/<Name>/Application\`: the use cases.`,
+      `\`${laravel ? "app" : "src"}/Modules/<Name>/Infrastructure\`: HTTP and storage.`,
+      "Dependencies point inward.",
+    ] : laravel ? [
+      "`app/Http/Controllers`: the controllers.",
+      "`app/Http/Requests`: the request shapes.",
+      "`app/Services`: the logic.",
+      "`app/Repositories`: the storage.",
+    ] : [
+      "`src/Controller`: the controllers.",
+      "`src/Dto`: the request shapes.",
+      "`src/Service`: the logic.",
+      "`src/Repository`: the storage.",
+      "`src/EventListener`: the access log and the error handler.",
+    ];
     return {
       toolchain: "composer", checks, image: lineImage(versions.lines.php, options.phpVersion), tools: ["php", "composer"], files: {
-        ...phpFiles({ name: id, framework: options.framework!, symfonyVersion: options.symfonyVersion, services }),
-        ...agents(laravel ? "Laravel" : "Symfony", checks, laravel ? ["`routes/api.php`: the routes.", "`bootstrap/app.php`: configures the app."] : ["`src/Controller`: the controllers.", "`src/Kernel.php`: configures the app."], laravel ? AGENT_RULES.laravel : AGENT_RULES.symfony, laravel ? AGENT_FEATURE.laravel : AGENT_FEATURE.symfony),
+        ...phpFiles({ name: id, framework: options.framework!, pattern: options.pattern!, symfonyVersion: options.symfonyVersion, orm: orm!, services, docker }),
+        ...agents(laravel ? "Laravel" : "Symfony", checks, [
+          ...layout,
+          ...(laravel ? ["`routes/api.php`: the routes.", "`app/Providers/AppServiceProvider.php`: wires the services."] : ["`config/services.php`: wires the services.", "`config/packages`: configures the bundles."]),
+          ...(orm === "doctrine" ? ["The table of `notes` needs `php bin/console doctrine:migrations:migrate --no-interaction`."] : orm === "eloquent" ? ["The table of `notes` needs `php artisan migrate`."] : []),
+        ], laravel ? AGENT_RULES.laravel : AGENT_RULES.symfony, laravel ? AGENT_FEATURE.laravel(modules, orm === "eloquent") : AGENT_FEATURE.symfony(modules, orm === "doctrine")),
       }, install: "composer install", dev: `php -S ${host}:${listen} -t public public/index.php`,
-      env: laravel ? { APP_ENV: "local", APP_DEBUG: "true", ...(services.includes("redis") ? { REDIS_CLIENT: "predis" } : {}) } : { APP_ENV: "dev", APP_DEBUG: "1", APP_SECRET: randomBytes(16).toString("hex") },
+      env: laravel ? { APP_ENV: "local", APP_DEBUG: "true", APP_KEY: `base64:${randomBytes(32).toString("base64")}`, ...(services.includes("redis") ? { REDIS_CLIENT: "predis" } : {}) } : { APP_ENV: "dev", APP_DEBUG: "1", APP_SECRET: randomBytes(16).toString("hex") },
     };
   }
   const bun = options.runtime === "bun", tool = bun ? "bun" : "npm";
@@ -173,7 +197,7 @@ export class Creator implements CreatePort {
     const dockerfile = input.mode === "docker" ? dockerfileFor(built, input.docker) : undefined;
     const contents = { ...files, ...input.instructions, ...(dockerfile ? { Dockerfile: dockerfile, ".dockerignore": DOCKER_IGNORE } : {}) };
     const scaffold = dockerfile ? this.options.imports.scaffold({ root: path, name, id, toolchain, image, url, install, dev, services, env }) : undefined;
-    const hidden = (key: string) => /SECRET|PASSWORD/.test(key);
+    const hidden = (key: string) => /SECRET|PASSWORD|_KEY$/.test(key);
     return {
       input: { ...input, name, options, services, versions },
       id, path, url,
