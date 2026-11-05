@@ -107,7 +107,7 @@ test("the two code structures generate their own layout, and .env stays out of G
 test("Docker mode gives a Python project to the import engine as a known toolchain", async () => {
   const { root, prepared, creator } = fixture();
   const plan = await creator.plan(input({ stack: "python", services: ["redis"] }));
-  expect(plan.dev).toBe("uv run uvicorn app.main:app --host 0.0.0.0 --port 3000 --reload");
+  expect(plan.dev).toBe("uv run uvicorn app.main:app --host 0.0.0.0 --port 3000 --reload --no-access-log");
   await creator.apply(plan, false);
   expect(prepared[0]).toMatchObject({ root: join(root, "shop"), toolchain: "uv", install: "uv sync", services: ["redis"] });
   expect(readFileSync(join(root, "shop/pyproject.toml"), "utf8")).toContain("redis==");
@@ -122,8 +122,8 @@ test("a native PHP project listens on its own port and gets its framework settin
 });
 
 test("each Python and PHP layout has its own entry point", () => {
-  expect(pythonFiles({ name: "shop", pattern: "modules", services: [] })).toHaveProperty(["app/modules/health/infrastructure/http/routes.py"]);
-  expect(pythonFiles({ name: "shop", pattern: "standard", services: [] })).toHaveProperty(["app/routes/health.py"]);
+  expect(pythonFiles({ name: "shop", pattern: "modules", orm: "none", services: [] })).toHaveProperty(["app/modules/health/infrastructure/http/routes.py"]);
+  expect(pythonFiles({ name: "shop", pattern: "standard", orm: "none", services: [] })).toHaveProperty(["app/routes/health.py"]);
   expect(phpFiles({ name: "shop", framework: "symfony", services: [] })).toHaveProperty(["src/Kernel.php"]);
   expect(phpFiles({ name: "shop", framework: "laravel", services: ["postgres"] })).toHaveProperty(["config/database.php"]);
 });
@@ -253,7 +253,8 @@ test("the add-feature skill follows the stack, the code structure and the mode",
   const skill = async (values: Partial<CreateInput>) => (await creator.plan(input(values))).contents[".claude/skills/add-feature/SKILL.md"]!;
   expect(await skill({ options: { pattern: "modules" } })).toContain("`src/modules/notes`");
   expect(await skill({ options: { pattern: "standard", runtime: "node", orm: "drizzle" }, services: ["postgres"] })).toContain("`npm run db:generate`");
-  expect(await skill({ stack: "python", name: "api", options: { pattern: "standard" } })).toContain("`app/routes/<name>.py`");
+  expect(await skill({ stack: "python", name: "api", options: { pattern: "standard" } })).toContain("`app/routes/notes.py`");
+  expect(await skill({ stack: "python", name: "api", options: { orm: "sqlalchemy" } })).toContain("alembic revision --autogenerate");
   expect(await skill({ stack: "php", name: "sf", options: { framework: "symfony" } })).toContain("load('App\\\\', __DIR__.'/')");
   expect(await skill({ stack: "php", name: "lv", options: { framework: "laravel" } })).toContain("php artisan make:controller");
   expect(await skill({ mode: "docker" })).toContain("in the `app` container");

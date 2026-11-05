@@ -41,8 +41,8 @@ async function check(stack: string, options: Record<string, string>, services: s
       mkdirSync(dirname(join(root, file)), { recursive: true });
       writeFileSync(join(root, file), content);
     }
-    // Generating a migration needs no database, and proves that drizzle-kit finds the schema.
-    const migrations = options.orm === "drizzle" ? ["bun run db:generate"] : [];
+    // Neither needs a database: drizzle-kit reads the schema, and alembic reads its migrations.
+    const migrations = options.orm === "drizzle" ? ["bun run db:generate"] : options.orm === "sqlalchemy" ? ["uv run alembic heads"] : [];
     for (const command of ["git init -q", install, ...migrations, ...checks].map(withoutNpm)) {
       const { code, output } = await run(command, root);
       if (code === 0) continue;
@@ -60,7 +60,7 @@ const only = process.argv[2];
 let failed = 0, total = 0;
 for (const stack of STACKS.filter((item) => !only || item.id === only)) {
   for (const options of combinations(stack)) {
-    const needed = options.orm === "drizzle" ? ["postgres"] : [];
+    const needed = stack.options.flatMap((option) => option.choices.find((choice) => choice.value === options[option.id])?.services ?? []);
     for (const services of [needed, ALL_SERVICES]) {
       total += 1;
       if (!(await check(stack.id, options, services))) failed += 1;

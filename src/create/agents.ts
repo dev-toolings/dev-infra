@@ -10,10 +10,13 @@ export const AGENT_FEATURE = {
     ...(drizzle ? [`${pattern === "modules" ? "Rename the table in the copied `schema.ts`" : "Add the table to `src/lib/schema.ts` and copy `src/services/drizzle-note-store.ts`"}, then run \`${tool} run db:generate\` and \`${tool} run db:migrate\`.`] : []),
     `Format with \`${tool === "bun" ? "bun run lint --write" : "npm run lint -- --write"}\`.`,
   ],
-  fastapi: (pattern: string) => [
-    `Create \`${pattern === "modules" ? "app/modules/<name>/infrastructure/http/routes.py" : "app/routes/<name>.py"}\` with an \`APIRouter\` named \`router\`, like \`health\`.`,
-    "In `app/main.py`, import it and add `app.include_router()`.",
-    "Add `tests/test_<name>.py` with `TestClient`.",
+  fastapi: (pattern: string, sqlalchemy: boolean) => [
+    pattern === "modules" ? "Copy `app/modules/notes` to `app/modules/<name>` and rename it, its imports included." : "Copy `app/routes/notes.py`, `app/schemas/notes.py` and `app/services/notes.py`, and rename them.",
+    `In \`app/app.py\`, add its ${pattern === "modules" ? "repository" : "store"} to \`create_app()\`, keep it on \`app.state\`, and add \`app.include_router()\`.`,
+    `Pass its ${pattern === "modules" ? "repository" : "store"} in \`app/main.py\` and in each \`create_app()\` of \`tests/test_app.py\`.`,
+    "Add a test to `tests/test_app.py`.",
+    ...(sqlalchemy ? [`${pattern === "modules" ? "Rename the table in the copied `schema.py`" : "Add the table to `app/lib/schema.py` and copy `app/services/sqlalchemy_note_store.py`"}, then run \`uv run alembic revision --autogenerate -m "<name>"\` and \`uv run alembic upgrade head\`.`] : []),
+    "Format with `uv run ruff format .`.",
   ],
   symfony: [
     "Route: create a class in `src/Controller` with `#[Route('/path', methods: ['GET'])]`.",
@@ -60,7 +63,13 @@ export const AGENT_RULES = {
     "Use `async def` only for routes that await: a route that blocks (driver, file) uses plain `def`.",
     "Declare dependencies with `Annotated[T, Depends(...)]`.",
     "Run startup and shutdown code in a `lifespan`, never `@app.on_event`, and test it with `with TestClient(app)`.",
+    "Raise `AppError` for an expected failure and let the rest reach `access_log`: no `try`/`except` that hides it.",
+    "Test with `TestClient` on `create_app()`: no running server.",
     "FastAPI guide for agents: https://github.com/fastapi/fastapi/blob/master/fastapi/.agents/skills/fastapi/SKILL.md",
+  ],
+  sqlalchemy: [
+    "Apply schema changes with `uv run alembic revision --autogenerate`, then `uv run alembic upgrade head`: never `create_all()`.",
+    "Commit all of `migrations/`, and never edit a migration once applied: generate a new one.",
   ],
   symfony: [
     "This is a minimal kernel: no `bin/console`, no Flex, no `symfony/dotenv`. `composer require` applies no recipe, so register each bundle in `Kernel::registerBundles()` and configure it in `configureContainer()`.",

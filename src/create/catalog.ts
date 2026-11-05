@@ -22,7 +22,7 @@ export const STACKS: StackDefinition[] = [{
 }, {
   id: "python",
   name: "Python",
-  description: "FastAPI API managed by uv, with Ruff and tests.",
+  description: "FastAPI API managed by uv, with typed settings, Ruff, mypy and tests.",
   modes: ["docker", "native"],
   services: SERVICE_OPTIONS,
   options: [
@@ -32,6 +32,7 @@ export const STACKS: StackDefinition[] = [{
       { value: "3.13", label: "3.13", check: { name: "ghcr.io/astral-sh/uv", version: "3.13" } },
     ] },
     { id: "pattern", label: "Code structure", default: "modules", choices: [{ value: "modules", label: "Modules by domain" }, { value: "standard", label: "Standard routes" }] },
+    { id: "orm", label: "Database layer", default: "none", choices: [{ value: "none", label: "SQL client only" }, { value: "sqlalchemy", label: "SQLAlchemy with Alembic", services: ["postgres"] }] },
   ],
 }, {
   id: "php",

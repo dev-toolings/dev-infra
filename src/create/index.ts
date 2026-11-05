@@ -34,11 +34,29 @@ export function recipe(stack: string, id: string, mode: CreateMode, port: number
   const agents = (label: string, checks: string[], layout: string[], rules: string[], feature: string[]) => agentFiles({ name: id, stack: label, checks, layout, rules, feature, services, docker });
   const host = docker ? "0.0.0.0" : "127.0.0.1", listen = docker ? DEFAULT_CONTAINER_PORT : port;
   if (stack === "python") {
-    const checks = ["uv run ruff check .", "uv run pytest"];
+    const checks = ["uv run ruff check .", "uv run ruff format --check .", "uv run mypy", "uv run pytest"];
+    const modules = options.pattern === "modules", sqlalchemy = options.orm === "sqlalchemy";
     return { toolchain: "uv", checks, image: lineImage(versions.lines.python, options.pythonVersion), tools: ["uv"], files: {
-      ...pythonFiles({ name: id, pattern: options.pattern!, services }),
-      ...agents("FastAPI", checks, [options.pattern === "modules" ? "`app/modules/<name>`: one folder per feature." : "`app/routes`: the routes.", "`app/main.py`: wires them together."], AGENT_RULES.fastapi, AGENT_FEATURE.fastapi(options.pattern!)),
-    }, install: "uv sync", dev: `uv run uvicorn app.main:app --host ${host} --port ${listen} --reload`, env: {} };
+      ...pythonFiles({ name: id, pattern: options.pattern!, orm: options.orm!, services }),
+      ...agents("FastAPI", checks, [
+        ...(modules ? [
+          "`app/modules/<name>`: one folder per feature, which shows only its `__init__.py`.",
+          "`app/modules/<name>/domain`: the rules and the ports.",
+          "`app/modules/<name>/application`: the use cases.",
+          "`app/modules/<name>/infrastructure`: HTTP and storage.",
+          "Dependencies point inward.",
+        ] : [
+          "`app/routes`: the routes.",
+          "`app/schemas`: the request shapes.",
+          "`app/services`: the logic.",
+          "`app/middleware`: the access log and the error handlers.",
+          "`app/lib`: the shared code.",
+        ]),
+        "`app/app.py`: `create_app()` mounts the routes.",
+        "`app/main.py`: wires the real dependencies.",
+        ...(sqlalchemy ? ["The table of `notes` needs `uv run alembic upgrade head`."] : []),
+      ], [...AGENT_RULES.fastapi, ...(sqlalchemy ? AGENT_RULES.sqlalchemy : [])], AGENT_FEATURE.fastapi(options.pattern!, sqlalchemy)),
+    }, install: "uv sync", dev: `uv run uvicorn app.main:app --host ${host} --port ${listen} --reload --no-access-log`, env: { APP_ENV: "development" } };
   }
   if (stack === "php") {
     const laravel = options.framework === "laravel", checks = ["composer validate --no-check-publish"];
