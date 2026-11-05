@@ -14,7 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   database layer adds SQLAlchemy with Alembic, Doctrine or Eloquent. PHP keeps `notes` in a
   SQLite file without one, and `standard` is its default structure.
 - PHP projects run on FrankenPHP in Docker, Symfony in worker mode and Laravel under Octane,
-  and reload on a code change. A custom base image has to be a `dunglas/frankenphp` tag.
+  and reload on a code change. A custom base image has to be a Debian `dunglas/frankenphp` tag.
 - New Hono projects start with a complete architecture in both code structures: chained
   REST routes with a `notes` example to copy, Zod request validation, one JSON error shape,
   request ids, secure headers, Pino request logs and an exported `AppType` for typed clients.

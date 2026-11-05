@@ -68,7 +68,7 @@ for (const stack of STACKS.filter((item) => !only || item.id === only)) {
     // Octane is a dependency of Docker projects only.
     if (options.framework === "laravel") {
       total += 1;
-      if (!(await check(stack.id, options, [], "docker"))) failed += 1;
+      if (!(await check(stack.id, options, needed, "docker"))) failed += 1;
     }
   }
 }

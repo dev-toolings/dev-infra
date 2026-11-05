@@ -23,7 +23,7 @@ function mysqlName(id: string): string {
   const name = databaseName(id);
   return name.length <= MYSQL_USER_LIMIT ? name : `${name.slice(0, MYSQL_USER_LIMIT - 9)}_${createHash("sha256").update(id).digest("hex").slice(0, 8)}`;
 }
-type Recipe = { files: Record<string, string>; install: string; /** What a new project must pass. */ checks: string[]; dev: string; env: Record<string, string>; toolchain: Toolchain; image: string; /** Needed on this machine in native mode. */ tools?: string[]; /** PHP extensions the code needs in its image. */ extensions?: string[] };
+type Recipe = { files: Record<string, string>; install: string; /** What a new project must pass. */ checks: string[]; dev: string; env: Record<string, string>; toolchain: Toolchain; image: string; /** Needed on this machine in native mode. */ tools?: string[]; /** PHP extensions the code needs in its image. */ extensions?: string[]; /** PHP extensions needed on this machine in native mode. */ hostExtensions?: string[] };
 const lineImage = (line: Record<string, string>, version: string | undefined) => line[version ?? ""] ?? Object.values(line)[0]!;
 const DOCKER_IGNORE = [".git", ".env*", "!.env.example", "*.key", "*.pem", ".venv", "__pycache__", "dist", "node_modules", "storage", "vendor", "var", ""].join("\n");
 const IMAGE = /^[a-z0-9][a-z0-9._/:@-]{0,200}$/, PACKAGE = /^[a-z0-9][a-z0-9+.-]{0,63}$/, EXTENSION = /^[a-z0-9_]{1,40}$/;
@@ -81,7 +81,8 @@ export function recipe(stack: string, id: string, mode: CreateMode, port: number
       "`src/EventListener`: the access log and the error handler.",
     ];
     return {
-      toolchain: "composer", checks, image: lineImage(versions.lines.php, options.phpVersion), tools: ["php", "composer"], ...(laravel ? { extensions: ["pcntl"] } : {}), files: {
+      toolchain: "composer", checks, image: lineImage(versions.lines.php, options.phpVersion), tools: ["php", "composer"], ...(laravel ? { extensions: ["pcntl"] } : {}),
+      hostExtensions: [...(orm === "none" ? ["pdo_sqlite"] : []), ...(services.includes("postgres") ? ["pdo_pgsql"] : [])], files: {
         ...phpFiles({ name: id, framework: options.framework!, pattern: options.pattern!, symfonyVersion: options.symfonyVersion, orm: orm!, services, docker }),
         ...agents(laravel ? "Laravel" : "Symfony", checks, [
           ...layout,
@@ -133,8 +134,8 @@ function dockerfileFor({ toolchain, image, extensions: needed = [] }: Recipe, cu
     return custom.dockerfile;
   }
   if (custom.image !== undefined && !IMAGE.test(custom.image)) fail(`Invalid image: ${custom.image}`);
-  // The project starts with `frankenphp`: another image would fail at start, not here.
-  if (toolchain === "composer" && custom.image !== undefined && !custom.image.startsWith("dunglas/frankenphp:")) fail("PHP projects run on FrankenPHP: choose a dunglas/frankenphp image, or write a whole Dockerfile");
+  // The project starts with `frankenphp` and the Dockerfile uses apt: another image would fail at start, not here.
+  if (toolchain === "composer" && custom.image !== undefined && (!custom.image.startsWith("dunglas/frankenphp:") || custom.image.includes("alpine"))) fail("PHP projects run on FrankenPHP: choose a Debian dunglas/frankenphp image, or write a whole Dockerfile");
   const packages = custom.packages ?? [], extensions = custom.extensions ?? [];
   const wrong = packages.find((item) => !PACKAGE.test(item));
   if (wrong !== undefined) fail(`Invalid system package: ${wrong}`);
@@ -189,11 +190,15 @@ export class Creator implements CreatePort {
     let port = await discovery.freePort(FIRST_PORT);
     while (this.pending.has(port)) port = await discovery.freePort(port + 1);
     const built = recipe(stack.id, id, input.mode, port, options, services);
-    const { files, install, dev, tools = [], toolchain, image, env } = built;
+    const { files, install, dev, tools = [], hostExtensions = [], toolchain, image, env } = built;
     if (input.mode === "native") {
       for (const tool of tools) {
         const found = await this.options.run(["which", tool], { timeoutMs: 5_000, maxOutputBytes: 4_000 });
         if (found.code !== 0) fail(`${tool} is not installed on this machine; install it or choose Docker`, "missing_tool", 409);
+      }
+      for (const extension of hostExtensions) {
+        const found = await this.options.run(["php", "-r", `exit(extension_loaded('${extension}') ? 0 : 1);`], { timeoutMs: 5_000, maxOutputBytes: 4_000 });
+        if (found.code !== 0) fail(`The PHP extension ${extension} is missing on this machine; install it or choose Docker`, "missing_tool", 409);
       }
     }
     const url = `http://127.0.0.1:${port}`;

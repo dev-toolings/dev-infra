@@ -73,7 +73,7 @@ database in `infra-postgres`, then drop that database and its role.
 - `src/create/php-shared.ts` has to pass both PHP-CS-Fixer and Pint: where they disagree,
   `styleOf()` writes each form.
 - FrankenPHP needs `setcap -r` under `cap_drop: ALL`, and `/config` and `/data` owned by the
-  user: `check:scaffolds` proves neither. After moving its image, start a real project.
+  user: `check:scaffolds` proves neither. After moving its image, ask the user to allow a real project, and report the path as unverified without it.
 - A Symfony 7.4 project stays on 7.4 only through `LINE_COMPONENTS` in `src/create/php.ts`:
   after a new dependency, look for `v8` in its `composer.lock`.
 - A health check of Symfony needs its tag: `instanceof()` only reaches services defined after it.

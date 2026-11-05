@@ -84,7 +84,7 @@ exit($application->run(new ArgvInput()));
         `    $services->alias(${shortName(layout.repository)}::class, SqliteNoteRepository::class);`,
       ]),
       ...(postgres && !doctrine ? ["    $services->set(DatabaseCheck::class)->arg('$url', '%env(DATABASE_URL)%');"] : []),
-      ...(redis ? ["    $services->set(Client::class)->args(['%env(REDIS_URL)%', ['prefix' => '%env(REDIS_PREFIX)%', 'timeout' => 2]]);"] : []),
+      ...(redis ? ["    $services->set(Client::class)->args(['%env(REDIS_URL)%?timeout=2&read_write_timeout=2', ['prefix' => '%env(REDIS_PREFIX)%']]);"] : []),
     ].join("\n")),
     "config/services_test.php": configFile([layout.memory, layout.repository], `    $container->services()->set(${shortName(layout.repository)}::class, MemoryNoteRepository::class);`),
     ...phpClass("src", controllers.input, ["Symfony\\Component\\Validator\\Constraints as Assert"], raw`/** The shape of a request. Business rules stay out of it. */
@@ -397,11 +397,12 @@ final class LogTest extends TestCase
     files["config/packages/doctrine.php"] = configFile([], [
       "    $container->extension('doctrine', [",
       "        // The lowest PostgreSQL that DevHub offers: Doctrine picks its SQL from this, and stops without it.",
-      "        'dbal' => ['url' => '%env(DATABASE_URL)%', 'server_version' => '15'],",
+      "        'dbal' => ['url' => '%env(DATABASE_URL)%', 'server_version' => '15', 'options' => [PDO::ATTR_TIMEOUT => 2]],",
       "        'orm' => ['mappings' => ['App' => [",
       "            'type' => 'attribute',",
-      `            'dir' => '%kernel.project_dir%/${pathOf("src", record).replace(/\/[^/]+$/, "")}',`,
-      `            'prefix' => '${namespaceOf(record).replaceAll("\\", "\\\\")}',`,
+      // In modules, one mapping covers every feature, so a copied module needs no configuration.
+      `            'dir' => '%kernel.project_dir%/${modules ? "src/Modules" : "src/Entity"}',`,
+      `            'prefix' => '${modules ? "App\\\\Modules" : "App\\\\Entity"}',`,
       "        ]]],",
       "    ]);",
       "    $container->extension('doctrine_migrations', ['migrations_paths' => ['DoctrineMigrations' => '%kernel.project_dir%/migrations']]);",

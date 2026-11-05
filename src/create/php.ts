@@ -33,7 +33,11 @@ export function phpFiles({ name, framework, pattern = "standard", symfonyVersion
         "laravel/framework": VERSIONS["laravel/framework"],
         ...(docker ? { "laravel/octane": VERSIONS["laravel/octane"] } : {}),
         ...(eloquent ? {} : { "ext-pdo_sqlite": "*" }),
-      }, { "larastan/larastan": VERSIONS["larastan/larastan"], "laravel/pint": VERSIONS["laravel/pint"] }, services, {}, { ...CHECKS, lint: "pint --test" }),
+      }, { "larastan/larastan": VERSIONS["larastan/larastan"], "laravel/pint": VERSIONS["laravel/pint"] }, services, {}, {
+        // Laravel builds its list of packages once: without this, a package added later is never loaded.
+        "post-autoload-dump": "@php artisan package:discover --ansi",
+        ...CHECKS, lint: "pint --test",
+      }),
     };
   }
   const doctrine = orm === "doctrine";

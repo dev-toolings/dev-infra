@@ -232,7 +232,7 @@ final class SqliteNoteRepository implements ${Port}
 `),
     ...phpClass(root, redactor, ["Monolog\\LogRecord", "Monolog\\Processor\\ProcessorInterface"], raw`final class RedactLogProcessor implements ProcessorInterface
 {
-    private const SECRET_KEYS = ['authorization', 'cookie', 'password', 'token', 'secret', 'apikey'];
+    private const SECRET_KEYS = ['authorization', 'cookie', 'password', 'token', 'secret', 'apikey', 'api_key'];
 
     public function __invoke(LogRecord $record): LogRecord
     {

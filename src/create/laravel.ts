@@ -86,8 +86,11 @@ export function laravelFiles({ name, modules, eloquent, postgres, redis, mail, d
     ...(mail ? { "config/mail.php": lines(
       "<?php", "", "return [", "    'default' => 'smtp',", "    'mailers' => [", "        'smtp' => ['transport' => 'smtp', 'host' => env('SMTP_HOST'), 'port' => env('SMTP_PORT')],", "    ],", "];",
     ) } : {}),
-    ...(postgres ? { "config/database.php": lines(
-      "<?php", "", "return [", "    'default' => 'pgsql',", "    'connections' => [", "        'pgsql' => ['driver' => 'pgsql', 'url' => env('DATABASE_URL')],", "    ],", "];",
+    ...(postgres || redis ? { "config/database.php": lines(
+      "<?php", "", "return [",
+      ...(postgres ? ["    'default' => 'pgsql',", "    'connections' => [", "        'pgsql' => ['driver' => 'pgsql', 'url' => env('DATABASE_URL'), 'options' => [PDO::ATTR_TIMEOUT => 2]],", "    ],"] : []),
+      ...(redis ? ["    'redis' => [", "        'client' => env('REDIS_CLIENT', 'predis'),", "        'options' => ['prefix' => env('REDIS_PREFIX', '')],", "        'default' => ['url' => env('REDIS_URL'), 'timeout' => 2, 'read_write_timeout' => 2],", "    ],"] : []),
+      "];",
     ) } : {}),
     ...(docker ? { "config/octane.php": lines(
       "<?php", "", "return [", "    'server' => 'frankenphp',",

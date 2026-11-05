@@ -35,6 +35,7 @@ function fixture({ installCode = 0, missingTool = "" } = {}) {
   const run: Executor = async (argv) => {
     commands.push(argv);
     if (argv[0] === "which") return { code: argv[1] === missingTool ? 1 : 0, stdout: "", stderr: "" };
+    if (argv[0] === "php") return { code: missingTool && argv[2]!.includes(missingTool) ? 1 : 0, stdout: "", stderr: "" };
     return argv.includes("install") ? { code: installCode, stdout: "", stderr: "registry down" } : { code: 0, stdout: "0.0.0.0:15432\n", stderr: "" };
   };
   return { root, created, commands, imported, prepared, creator: new Creator({ catalog, discovery, imports, operations, services, run, infraDir: "/infra" }) };
@@ -192,6 +193,7 @@ test("Docker fields become plain image lines, and anything else is refused", asy
   expect(custom.docker!.dockerfile).toContain("--no-install-recommends imagemagick");
   expect(custom.docker!.dockerfile).toContain("install-php-extensions pdo_pgsql intl");
   await expect(creator.plan(input({ stack: "php", docker: { image: "php:8.5-cli" } }))).rejects.toThrow("run on FrankenPHP");
+  await expect(creator.plan(input({ stack: "php", docker: { image: "dunglas/frankenphp:1.13-php8.5-alpine" } }))).rejects.toThrow("run on FrankenPHP");
   await expect(creator.plan(input({ stack: "php", docker: { packages: ["git && curl evil"] } }))).rejects.toThrow("Invalid system package");
   await expect(creator.plan(input({ stack: "php", docker: { image: "php\nRUN id" } }))).rejects.toThrow("Invalid image");
   await expect(creator.plan(input({ stack: "python", docker: { extensions: ["intl"] } }))).rejects.toThrow("PHP projects only");
@@ -281,6 +283,24 @@ test("PHP in Docker runs on FrankenPHP, and the native mode keeps the PHP server
   expect(native.dev).toStartWith("php -S ");
   expect(JSON.parse(native.contents["composer.json"]!).require).not.toHaveProperty(["laravel/octane"]);
   expect((await creator.plan(input({ stack: "php", mode: "native" }))).contents).not.toHaveProperty(["Caddyfile"]);
+});
+
+test("a native PHP project needs its extensions on this machine", async () => {
+  const { creator } = fixture({ missingTool: "pdo_sqlite" });
+  await expect(creator.plan(input({ stack: "php", mode: "native" }))).rejects.toThrow("pdo_sqlite is missing");
+  await creator.plan(input({ stack: "php" }));
+  await creator.plan(input({ stack: "php", mode: "native", options: { symfonyOrm: "doctrine" } }));
+});
+
+test("a copied feature finds what the agent is told to copy", async () => {
+  const { creator } = fixture();
+  const plan = (options: Record<string, string>) => creator.plan(input({ stack: "php", mode: "native", options }));
+  const modules = await plan({ pattern: "modules", symfonyOrm: "doctrine" });
+  expect(modules.contents["config/packages/doctrine.php"]).toContain("/src/Modules'");
+  expect((await plan({})).contents[".claude/skills/add-feature/SKILL.md"]).toContain("`$path`");
+  const laravel = await plan({ framework: "laravel", laravelOrm: "eloquent" });
+  expect(laravel.contents[".claude/skills/add-feature/SKILL.md"]).toContain("`app/Models/NoteRecord.php`");
+  expect(JSON.parse(laravel.contents["composer.json"]!).scripts["post-autoload-dump"]).toContain("package:discover");
 });
 
 test("the preview hides generated secrets", async () => {

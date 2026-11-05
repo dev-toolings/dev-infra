@@ -43,7 +43,11 @@ var lifecycleProducts = map[string]map[string]string{
 		"postgres": "postgresql", "mysql": "mysql", "redis": "redis", "rabbitmq": "rabbitmq", "node": "nodejs", "php": "php",
 		"oven/bun": "bun", "ghcr.io/astral-sh/uv": "python", "dunglas/frankenphp": "php", "getmeili/meilisearch": "meilisearch",
 	},
-	"package": {"symfony/framework-bundle": "symfony", "symfony/runtime": "symfony", "symfony/string": "symfony", "laravel/framework": "laravel"},
+	"package": {
+		"symfony/framework-bundle": "symfony", "symfony/runtime": "symfony", "symfony/string": "symfony", "symfony/console": "symfony",
+		"symfony/dotenv": "symfony", "symfony/validator": "symfony", "symfony/serializer": "symfony", "symfony/property-access": "symfony",
+		"symfony/property-info": "symfony", "symfony/mailer": "symfony", "laravel/framework": "laravel",
+	},
 }
 
 var (

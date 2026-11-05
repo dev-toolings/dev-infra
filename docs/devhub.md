@@ -109,10 +109,11 @@ from an API of their own, not the full framework skeleton.
 
 PHP projects run on FrankenPHP in Docker: Symfony in worker mode, Laravel under Octane. Both
 restart their workers on a code change. A custom base image has to be a `dunglas/frankenphp`
-tag; a whole Dockerfile stays free. In native mode, PHP projects use the PHP built-in server.
+Debian tag; a whole Dockerfile stays free. In native mode, PHP projects use the PHP built-in server.
 
 Native mode needs the stack's tools on this machine: `uv` for Python, `php` and `composer`
-for PHP. Docker mode needs neither. Choosing a service provisions it and sets its
+for PHP, with `pdo_sqlite` without an ORM and `pdo_pgsql` with Postgres. Docker mode needs
+none of them. Choosing a service provisions it and sets its
 environment variables. Node, Python and PHP add their Postgres, Redis and mail clients,
 and report Postgres and Redis in `/health`. The clients of other services are yours to write.
 

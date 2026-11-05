@@ -17,7 +17,9 @@ import sys
 import time
 from typing import Any
 
-SECRET_KEYS = frozenset({"authorization", "cookie", "password", "token", "secret", "api_key"})
+SECRET_KEYS = frozenset(
+    {"authorization", "cookie", "password", "token", "secret", "api_key", "apikey"}
+)
 CENSOR = "[redacted]"
 
 # Attributes of every record: what is left came from \`extra\`.
@@ -48,12 +50,25 @@ LEVEL_COLORS = {
 }
 
 
-def fields_of(record: logging.LogRecord) -> dict[str, Any]:
+def redact(fields: dict[str, Any]) -> dict[str, Any]:
     return {
-        key: CENSOR if key.lower() in SECRET_KEYS else value
-        for key, value in record.__dict__.items()
-        if key not in RECORD_ATTRS and value is not None
+        key: CENSOR
+        if str(key).lower() in SECRET_KEYS
+        else redact(value)
+        if isinstance(value, dict)
+        else value
+        for key, value in fields.items()
     }
+
+
+def fields_of(record: logging.LogRecord) -> dict[str, Any]:
+    return redact(
+        {
+            key: value
+            for key, value in record.__dict__.items()
+            if key not in RECORD_ATTRS and value is not None
+        }
+    )
 
 
 class JsonFormatter(logging.Formatter):
@@ -456,7 +471,7 @@ def test_an_http_line_is_readable_and_keeps_its_fields() -> None:
 
 
 def test_secrets_are_redacted_in_both_formats() -> None:
-    item = record("login", password="hunter2", authorization="Bearer abc")
+    item = record("login", password="hunter2", user={"authorization": "Bearer abc"})
     for formatter in (PrettyFormatter(color=False), JsonFormatter()):
         line = formatter.format(item)
         assert "hunter2" not in line

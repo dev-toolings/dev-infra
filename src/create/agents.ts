@@ -20,7 +20,7 @@ export const AGENT_FEATURE = {
   ],
   symfony: (modules: boolean, doctrine: boolean) => [
     modules ? "Copy `src/Modules/Notes` to `src/Modules/<Name>`, and rename it." : "Copy `src/Controller/NoteController.php`, `src/Dto/NoteInput.php`, `src/Model/Note.php`, `src/Service/NoteService.php` and the files of `src/Repository`, and rename them.",
-    "In `config/services.php`, exclude its plain classes from `load()`, and set the alias of its port. In `config/services_test.php`, point the port at its memory store.",
+    `In \`config/services.php\`, exclude its plain classes from \`load()\`, set the alias of its port${doctrine ? "" : ", and give its SQLite store a `$path` of its own, as `SqliteNoteRepository` has"}. In \`config/services_test.php\`, point the port at its memory store. Tests do not build the real store: start the app to prove it.`,
     "Add a test to `tests/AppTest.php`.",
     ...(doctrine ? [`${modules ? "Rename the table in the copied `NoteRecord.php`" : "Copy `src/Entity/NoteRecord.php`, and rename its table"}, then run \`php bin/console doctrine:migrations:diff\` and \`php bin/console doctrine:migrations:migrate --no-interaction\`. The first needs the database.`] : []),
     "Package: run `composer require <package>:<exact version>`. A hand edit of `composer.json` leaves the lock stale, and `composer validate` fails.",
@@ -32,7 +32,8 @@ export const AGENT_FEATURE = {
     "Add its routes to `routes/api.php`, without an `/api` prefix.",
     "Bind its port in `app/Providers/AppServiceProvider.php`, and to its memory store in `setUp()` of `tests/AppTest.php`.",
     "Add a test to `tests/AppTest.php`.",
-    ...(eloquent ? ["Run `php artisan make:migration create_<name>_table`, write it, then run `php artisan migrate`."] : []),
+    ...(eloquent ? [`${modules ? "Rename the table in the copied `NoteRecord.php`" : "Copy `app/Models/NoteRecord.php`, rename it and its table, and use it in the copied repository"}. Run \`php artisan make:migration create_<name>_table\`, write it, then run \`php artisan migrate\`.`] : []),
+    "Package: run `composer require <package>:<exact version>`. A hand edit of `composer.json` leaves the lock stale, and `composer validate` fails.",
     "Configuration: create `config/<name>.php` and read it with `config('<name>.key')`.",
     "Format with `vendor/bin/pint`.",
   ],
