@@ -43,8 +43,8 @@ export const STACKS: StackDefinition[] = [{
   options: [
     { id: "framework", label: "Framework", default: "symfony", choices: [{ value: "symfony", label: "Symfony" }, { value: "laravel", label: "Laravel" }] },
     { id: "phpVersion", label: "PHP", kind: "version", docker: true, default: "8.5", choices: [
-      { value: "8.5", label: "8.5", tag: "latest", check: { name: "php", version: "8.5" } },
-      { value: "8.4", label: "8.4", check: { name: "php", version: "8.4" } },
+      { value: "8.5", label: "8.5", tag: "latest", check: { name: "dunglas/frankenphp", version: "8.5" } },
+      { value: "8.4", label: "8.4", check: { name: "dunglas/frankenphp", version: "8.4" } },
     ] },
     { id: "symfonyVersion", label: "Symfony", kind: "version", when: { option: "framework", value: "symfony" }, default: "7.4", choices: [
       { value: "7.4", label: "7.4", tag: "lts", check: { name: "symfony/framework-bundle", version: versions.lines.symfony["7.4"]["symfony/framework-bundle"] } },

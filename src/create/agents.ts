@@ -79,7 +79,10 @@ export const AGENT_RULES = {
     "Declare routes with `#[Route]` attributes on a controller, and read a body with `#[MapRequestPayload]`.",
     "Throw `AppError` for an expected failure and let the rest reach `ErrorSubscriber`: no `try`/`catch` that hides it.",
     "A running app gets its environment from DevHub: `.env` is read only by `bin/console`, in native mode.",
-    "Docker runs the app in FrankenPHP worker mode: a service outlives the request, so keep no request state on it, or implement `ResetInterface`.",
+  ],
+  frankenphp: [
+    "The app runs in FrankenPHP worker mode: a service outlives the request, so keep no request state on it, or implement `ResetInterface`.",
+    "`Caddyfile` lists what restarts the workers: add a folder there if its code does not reload. Never watch what the app writes, such as `var/`.",
     "FrankenPHP docs: https://frankenphp.dev/docs/symfony/",
   ],
   laravel: [
@@ -87,8 +90,11 @@ export const AGENT_RULES = {
     "Call `env()` only in `config/*.php`; elsewhere use `config()`.",
     "Throw `AppError` for an expected failure and let the rest reach `ErrorResponse`: no `try`/`catch` that hides it.",
     "Validate each request with a `FormRequest`.",
-    "Docker runs the app under Octane: a singleton outlives the request, so never inject the request, the container or the config repository into one. Bind what needs them with `scoped()`.",
-    "Laravel docs for agents: https://laravel.com/docs/octane",
+  ],
+  octane: [
+    "The app runs under Octane on FrankenPHP: a singleton outlives the request, so never inject the request, the container or the config repository into one. Bind what needs them with `scoped()`.",
+    "`watch` of `config/octane.php` lists what restarts the workers. Never watch what the app writes, such as `storage/`.",
+    "Octane docs: https://laravel.com/docs/octane",
   ],
 };
 

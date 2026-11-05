@@ -20,6 +20,7 @@ func TestSplitImage(t *testing.T) {
 		"ghcr.io/astral-sh/uv:python3.14-bookworm-slim": {"ghcr.io/astral-sh/uv", "3.14"},
 		"adminer:6.1.2@sha256:251295c1":                 {"adminer", "6.1.2"},
 		"getmeili/meilisearch:v1.48":                    {"getmeili/meilisearch", "1.48"},
+		"dunglas/frankenphp:1.13-php8.5-trixie":         {"dunglas/frankenphp", "8.5"},
 		"node:lts":                                      {"node", ""},
 		"nginx:alpine3.19":                              {"nginx", ""},
 	}

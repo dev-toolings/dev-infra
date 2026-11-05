@@ -2,12 +2,12 @@ import { layoutFor, namespaceOf, noteCalls, pathOf, phpClass, sharedFiles, short
 
 const raw = String.raw;
 
-export type SymfonyOptions = { name: string; modules: boolean; doctrine: boolean; postgres: boolean; redis: boolean; mail: boolean };
+export type SymfonyOptions = { name: string; modules: boolean; doctrine: boolean; postgres: boolean; redis: boolean; mail: boolean; docker: boolean };
 
 /** Same lines in every Symfony file of `config/`. */
 const configFile = (uses: string[], body: string) => ["<?php", "", ...[...uses.filter((item) => !item.startsWith("function ")), "Symfony\\Component\\DependencyInjection\\Loader\\Configurator\\ContainerConfigurator"].sort().map((item) => `use ${item};`), "", ...uses.filter((item) => item.startsWith("function ")).flatMap((item) => [`use ${item};`, ""]), "return static function (ContainerConfigurator $container): void {", body, "};", ""].join("\n");
 
-export function symfonyFiles({ name, modules, doctrine, postgres, redis, mail }: SymfonyOptions): Record<string, string> {
+export function symfonyFiles({ name, modules, doctrine, postgres, redis, mail, docker }: SymfonyOptions): Record<string, string> {
   const layout = layoutFor("src", modules, { error: "App\\Exception\\AppError", model: "App\\Model\\Note", repositories: "App\\Repository", service: "App\\Service\\NoteService", logging: "App\\Logging", health: "App\\Health" });
   const http = modules ? "App\\Shared\\Infrastructure\\Http" : "App\\EventListener";
   const health = modules ? "App\\Modules\\Health\\Infrastructure" : "App\\Health";
@@ -61,8 +61,9 @@ exit($application->run(new ArgvInput()));
     ].join("\n")),
     "config/packages/monolog.php": configFile([layout.formatter], raw`    $handler = match ($container->env()) {
         'test' => ['type' => 'null'],
-        'dev' => ['type' => 'stream', 'path' => 'php://stderr', 'level' => 'debug', 'formatter' => ${shortName(layout.formatter)}::class],
-        default => ['type' => 'stream', 'path' => 'php://stderr', 'level' => 'info', 'formatter' => 'monolog.formatter.json'],
+        // Without these channels: event logs each listener, request repeats the access log, doctrine logs each query.
+        'dev' => ['type' => 'stream', 'path' => 'php://stderr', 'level' => 'debug', 'channels' => ['!event', '!request', '!doctrine'], 'formatter' => ${shortName(layout.formatter)}::class],
+        default => ['type' => 'stream', 'path' => 'php://stderr', 'level' => 'info', 'channels' => ['!event', '!request', '!doctrine'], 'formatter' => 'monolog.formatter.json'],
     };
     $container->extension('monolog', ['handlers' => ['main' => $handler]]);`),
     "config/services.php": configFile([
@@ -73,8 +74,9 @@ exit($application->run(new ArgvInput()));
       "function Symfony\\Component\\DependencyInjection\\Loader\\Configurator\\tagged_iterator",
     ], [
       "    $services = $container->services()->defaults()->autowire()->autoconfigure();",
-      `    $services->load('App\\\\', '../src/')->exclude([${excluded.map((item) => `'${item}'`).join(", ")}]);`,
+      "    // Before load(): instanceof only applies to the services defined after it.",
       "    $services->instanceof(HealthCheck::class)->tag('app.health_check');",
+      `    $services->load('App\\\\', '../src/')->exclude([${excluded.map((item) => `'${item}'`).join(", ")}]);`,
       "    $services->set(GetHealth::class)->arg('$checks', tagged_iterator('app.health_check'));",
       `    $services->set(${shortName(layout.redactor)}::class)->tag('monolog.processor');`,
       ...(doctrine ? [`    $services->alias(${shortName(layout.repository)}::class, DoctrineNoteRepository::class);`] : [
@@ -113,7 +115,8 @@ final readonly class NoteInput
     {
         $report = ($this->getHealth)();
 
-        return new JsonResponse($report, 'ok' === $report['status'] ? 200 : 503);
+        // An object even without checks, as in the other stacks.
+        return new JsonResponse([...$report, 'checks' => (object) $report['checks']], 'ok' === $report['status'] ? 200 : 503);
     }
 }
 `),
@@ -382,6 +385,14 @@ final class LogTest extends TestCase
     ].join("\n"),
   };
 
+  if (docker) {
+    files.Caddyfile = [
+      "# Paths are explicit: the default of `watch` also covers `var/cache`, which the app rewrites at boot.",
+      "{", "\tskip_install_trust", "}", "",
+      "http://:{$PORT} {", "\troot public/", "\tphp_server {", "\t\tworker {", "\t\t\tfile ./public/index.php", "\t\t\tnum 2",
+      "\t\t\twatch ./src/**/*.php", "\t\t\twatch ./config/**/*.php", "\t\t}", "\t}", "}", "",
+    ].join("\n");
+  }
   if (doctrine) {
     files["config/packages/doctrine.php"] = configFile([], [
       "    $container->extension('doctrine', [",

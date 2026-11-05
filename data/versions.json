@@ -46,8 +46,7 @@
   },
   "images": {
     "bun": "oven/bun:1.4.4-slim",
-    "composer": "composer:2.9.5",
-    "phpExtensions": "mlocati/php-extension-installer:2"
+    "composer": "composer:2.9.5"
   },
   "lines": {
     "node": {
@@ -59,8 +58,8 @@
       "3.13": "ghcr.io/astral-sh/uv:python3.13-bookworm-slim"
     },
     "php": {
-      "8.5": "php:8.5-cli-bookworm",
-      "8.4": "php:8.4-cli-bookworm"
+      "8.5": "dunglas/frankenphp:1.13-php8.5-trixie",
+      "8.4": "dunglas/frankenphp:1.13-php8.4-trixie"
     },
     "symfony": {
       "7.4": {

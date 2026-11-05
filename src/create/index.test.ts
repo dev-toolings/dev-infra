@@ -177,7 +177,7 @@ test("two long project names keep separate MySQL databases within the name limit
 test("the chosen release lines reach the image and the dependencies, and only where they apply", async () => {
   const { root, creator } = fixture();
   const plan = await creator.plan(input({ stack: "php", options: { phpVersion: "8.4", symfonyVersion: "8.1" } }));
-  expect(plan.docker!.dockerfile).toContain("FROM php:8.4-cli-bookworm");
+  expect(plan.docker!.dockerfile).toContain("FROM dunglas/frankenphp:1.13-php8.4-trixie");
   await creator.apply(plan, false);
   expect(readFileSync(join(root, "shop/Dockerfile"), "utf8")).toBe(plan.docker!.dockerfile);
   expect(JSON.parse(readFileSync(join(root, "shop/composer.json"), "utf8")).require["symfony/runtime"]).toStartWith("8.1.");
@@ -187,10 +187,11 @@ test("the chosen release lines reach the image and the dependencies, and only wh
 
 test("Docker fields become plain image lines, and anything else is refused", async () => {
   const { creator } = fixture();
-  const custom = await creator.plan(input({ stack: "php", docker: { image: "php:8.5-cli", packages: ["imagemagick"], extensions: ["intl"] } }));
-  expect(custom.docker!.dockerfile).toContain("FROM php:8.5-cli");
+  const custom = await creator.plan(input({ stack: "php", docker: { image: "dunglas/frankenphp:1.13-php8.5-bookworm", packages: ["imagemagick"], extensions: ["intl"] } }));
+  expect(custom.docker!.dockerfile).toContain("FROM dunglas/frankenphp:1.13-php8.5-bookworm");
   expect(custom.docker!.dockerfile).toContain("--no-install-recommends imagemagick");
   expect(custom.docker!.dockerfile).toContain("install-php-extensions pdo_pgsql intl");
+  await expect(creator.plan(input({ stack: "php", docker: { image: "php:8.5-cli" } }))).rejects.toThrow("run on FrankenPHP");
   await expect(creator.plan(input({ stack: "php", docker: { packages: ["git && curl evil"] } }))).rejects.toThrow("Invalid system package");
   await expect(creator.plan(input({ stack: "php", docker: { image: "php\nRUN id" } }))).rejects.toThrow("Invalid image");
   await expect(creator.plan(input({ stack: "python", docker: { extensions: ["intl"] } }))).rejects.toThrow("PHP projects only");
@@ -261,10 +262,32 @@ test("the add-feature skill follows the stack, the code structure and the mode",
   expect(await skill({ mode: "native" })).not.toContain("in the `app` container");
 });
 
+test("PHP in Docker runs on FrankenPHP, and the native mode keeps the PHP server", async () => {
+  const { creator } = fixture();
+  const symfony = await creator.plan(input({ stack: "php" }));
+  expect(symfony.dev).toBe("frankenphp run --config Caddyfile");
+  expect(symfony.contents.Caddyfile).toContain("http://:{$PORT}");
+  expect(symfony.contents["config/packages/monolog.php"]).toContain("'channels' => ['!event', '!request', '!doctrine']");
+  const services = symfony.contents["config/services.php"]!;
+  expect(services.indexOf("instanceof(HealthCheck::class)")).toBeLessThan(services.indexOf("$services->load("));
+  expect(JSON.parse(symfony.contents["composer.json"]!).conflict["symfony/http-kernel"]).toBe(">=8");
+  expect(symfony.docker!.dockerfile).toContain("setcap -r /usr/local/bin/frankenphp");
+  expect(symfony.docker!.dockerfile).toContain("/app /home/devhub /config /data");
+  const laravel = await creator.plan(input({ stack: "php", options: { framework: "laravel" } }));
+  expect(laravel.dev).toBe("php artisan octane:frankenphp --host=0.0.0.0 --port=3000 --watch --log-level=WARN");
+  expect(laravel.docker!.dockerfile).toContain("install-php-extensions pdo_pgsql pcntl");
+  expect(JSON.parse(laravel.contents["composer.json"]!).require).toHaveProperty(["laravel/octane"]);
+  const native = await creator.plan(input({ stack: "php", mode: "native", options: { framework: "laravel" } }));
+  expect(native.dev).toStartWith("php -S ");
+  expect(JSON.parse(native.contents["composer.json"]!).require).not.toHaveProperty(["laravel/octane"]);
+  expect((await creator.plan(input({ stack: "php", mode: "native" }))).contents).not.toHaveProperty(["Caddyfile"]);
+});
+
 test("the preview hides generated secrets", async () => {
   const { creator } = fixture();
   const plan = await creator.plan(input({ stack: "php", services: ["postgres"] }));
   expect(plan.docker!.env.APP_SECRET).toBe("<generated>");
+  expect((await creator.plan(input({ stack: "php", options: { framework: "laravel" } }))).docker!.env.APP_KEY).toBe("<generated>");
   expect(plan.docker!.env.DATABASE_URL).toBe("<generated>");
 });
 

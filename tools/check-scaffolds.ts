@@ -32,11 +32,11 @@ async function run(command: string, cwd: string): Promise<{ code: number; output
   return { code, output: `${stdout}${stderr}` };
 }
 
-async function check(stack: string, options: Record<string, string>, services: string[]): Promise<boolean> {
-  const label = [stack, ...Object.values(options), ...services].join(" ");
+async function check(stack: string, options: Record<string, string>, services: string[], mode: "native" | "docker" = "native"): Promise<boolean> {
+  const label = [stack, mode === "docker" ? "docker" : "", ...Object.values(options), ...services].filter(Boolean).join(" ");
   const root = mkdtempSync(join(tmpdir(), "devhub-scaffold-"));
   try {
-    const { files, install, checks } = recipe(stack, "scaffold", "native", 4100, options, services);
+    const { files, install, checks } = recipe(stack, "scaffold", mode, 4100, options, services);
     for (const [file, content] of Object.entries(files)) {
       mkdirSync(dirname(join(root, file)), { recursive: true });
       writeFileSync(join(root, file), content);
@@ -64,6 +64,11 @@ for (const stack of STACKS.filter((item) => !only || item.id === only)) {
     for (const services of [needed, ALL_SERVICES]) {
       total += 1;
       if (!(await check(stack.id, options, services))) failed += 1;
+    }
+    // Octane is a dependency of Docker projects only.
+    if (options.framework === "laravel") {
+      total += 1;
+      if (!(await check(stack.id, options, [], "docker"))) failed += 1;
     }
   }
 }

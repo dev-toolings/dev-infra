@@ -19,23 +19,26 @@ export const databaseName = (id: string) => `dh_${id.replace(/-/g, "_")}`;
 const ENTRY_FILES = ["src/index.ts", "src/index.tsx", "src/index.js", "src/server.ts", "src/server.js", "src/app.ts", "index.ts", "index.js", "server.ts", "server.js"];
 /** Commands come only from this table: nothing read from the project reaches the generated shell script. */
 const fetchProbe = (binary: string) => (port: number) => [binary, "-e", `fetch('http://127.0.0.1:${port}/').then(()=>process.exit(0),()=>process.exit(1))`];
-const NODE_LAYOUT = { setup: [], manifest: "package.json", deps: "node_modules" };
+const NODE_LAYOUT = { setup: [], manifest: "package.json", deps: "node_modules", writable: [] };
 const TOOLCHAINS = {
   bun: { ...NODE_LAYOUT, image: versions.images.bun, probe: fetchProbe("bun"), run: "bun run", locked: "bun install --frozen-lockfile", unlocked: "bun install --no-save", fresh: "bun install" },
   npm: { ...NODE_LAYOUT, image: versions.lines.node["24"], probe: fetchProbe("node"), run: "npm run", locked: "npm ci", unlocked: "npm install --no-package-lock", fresh: "npm install" },
   uv: {
-    manifest: "pyproject.toml", deps: ".venv",
+    manifest: "pyproject.toml", deps: ".venv", writable: [],
     // The cache and the environment sit on different filesystems, where uv cannot hardlink.
     setup: ["ENV UV_LINK_MODE=copy"],
     lock: "uv.lock",
     probe: (port: number) => ["python", "-c", `import urllib.error as e, urllib.request as r\ntry: r.urlopen('http://127.0.0.1:${port}/', timeout=2)\nexcept e.HTTPError: pass`],
   },
   composer: {
-    manifest: "composer.json", deps: "vendor",
+    // Caddy keeps its state in these two folders of the FrankenPHP image.
+    manifest: "composer.json", deps: "vendor", writable: ["/config", "/data"],
     setup: [
       `COPY --from=${versions.images.composer} /usr/bin/composer /usr/local/bin/composer`,
-      `COPY --from=${versions.images.phpExtensions} /usr/bin/install-php-extensions /usr/local/bin/`,
       "RUN apt-get update && apt-get install -y --no-install-recommends git unzip && rm -rf /var/lib/apt/lists/*",
+      // The image gives the binary a capability to bind port 80. Under `cap_drop: ALL` the kernel then refuses to run it.
+      "RUN setcap -r /usr/local/bin/frankenphp",
+      'RUN cp "$PHP_INI_DIR/php.ini-development" "$PHP_INI_DIR/php.ini"',
     ],
     lock: "composer.lock",
     probe: (port: number) => ["php", "-r", `exit(@file_get_contents('http://127.0.0.1:${port}/', false, stream_context_create(['http' => ['ignore_errors' => true]])) === false ? 1 : 0);`],
@@ -52,7 +55,7 @@ export function renderDockerfile(tool: Toolchain, image: string, packages: strin
     "ARG DEVHUB_UID=1000",
     "ARG DEVHUB_GID=1000",
     // A named volume starts with the ownership of its image directory, which keeps the app non-root without any capability.
-    `RUN mkdir -p /app/${chain.deps} /home/devhub && chown -R $DEVHUB_UID:$DEVHUB_GID /app /home/devhub`,
+    `RUN mkdir -p /app/${chain.deps} /home/devhub && chown -R $DEVHUB_UID:$DEVHUB_GID ${["/app", "/home/devhub", ...chain.writable].join(" ")}`,
     "WORKDIR /app",
     "",
   ].join("\n");

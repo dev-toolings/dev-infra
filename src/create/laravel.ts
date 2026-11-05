@@ -135,7 +135,8 @@ final class NoteRequest extends FormRequest
     {
         $report = $getHealth();
 
-        return new JsonResponse($report, $report['status'] === 'ok' ? 200 : 503);
+        // An object even without checks, as in the other stacks.
+        return new JsonResponse([...$report, 'checks' => (object) $report['checks']], $report['status'] === 'ok' ? 200 : 503);
     }
 }
 `),

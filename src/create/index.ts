@@ -23,7 +23,7 @@ function mysqlName(id: string): string {
   const name = databaseName(id);
   return name.length <= MYSQL_USER_LIMIT ? name : `${name.slice(0, MYSQL_USER_LIMIT - 9)}_${createHash("sha256").update(id).digest("hex").slice(0, 8)}`;
 }
-type Recipe = { files: Record<string, string>; install: string; /** What a new project must pass. */ checks: string[]; dev: string; env: Record<string, string>; toolchain: Toolchain; image: string; /** Needed on this machine in native mode. */ tools?: string[] };
+type Recipe = { files: Record<string, string>; install: string; /** What a new project must pass. */ checks: string[]; dev: string; env: Record<string, string>; toolchain: Toolchain; image: string; /** Needed on this machine in native mode. */ tools?: string[]; /** PHP extensions the code needs in its image. */ extensions?: string[] };
 const lineImage = (line: Record<string, string>, version: string | undefined) => line[version ?? ""] ?? Object.values(line)[0]!;
 const DOCKER_IGNORE = [".git", ".env*", "!.env.example", "*.key", "*.pem", ".venv", "__pycache__", "dist", "node_modules", "storage", "vendor", "var", ""].join("\n");
 const IMAGE = /^[a-z0-9][a-z0-9._/:@-]{0,200}$/, PACKAGE = /^[a-z0-9][a-z0-9+.-]{0,63}$/, EXTENSION = /^[a-z0-9_]{1,40}$/;
@@ -81,14 +81,15 @@ export function recipe(stack: string, id: string, mode: CreateMode, port: number
       "`src/EventListener`: the access log and the error handler.",
     ];
     return {
-      toolchain: "composer", checks, image: lineImage(versions.lines.php, options.phpVersion), tools: ["php", "composer"], files: {
+      toolchain: "composer", checks, image: lineImage(versions.lines.php, options.phpVersion), tools: ["php", "composer"], ...(laravel ? { extensions: ["pcntl"] } : {}), files: {
         ...phpFiles({ name: id, framework: options.framework!, pattern: options.pattern!, symfonyVersion: options.symfonyVersion, orm: orm!, services, docker }),
         ...agents(laravel ? "Laravel" : "Symfony", checks, [
           ...layout,
           ...(laravel ? ["`routes/api.php`: the routes.", "`app/Providers/AppServiceProvider.php`: wires the services."] : ["`config/services.php`: wires the services.", "`config/packages`: configures the bundles."]),
           ...(orm === "doctrine" ? ["The table of `notes` needs `php bin/console doctrine:migrations:migrate --no-interaction`."] : orm === "eloquent" ? ["The table of `notes` needs `php artisan migrate`."] : []),
-        ], laravel ? AGENT_RULES.laravel : AGENT_RULES.symfony, laravel ? AGENT_FEATURE.laravel(modules, orm === "eloquent") : AGENT_FEATURE.symfony(modules, orm === "doctrine")),
-      }, install: "composer install", dev: `php -S ${host}:${listen} -t public public/index.php`,
+        ], [...(laravel ? AGENT_RULES.laravel : AGENT_RULES.symfony), ...(docker ? (laravel ? AGENT_RULES.octane : AGENT_RULES.frankenphp) : [])], laravel ? AGENT_FEATURE.laravel(modules, orm === "eloquent") : AGENT_FEATURE.symfony(modules, orm === "doctrine")),
+      }, install: "composer install",
+      dev: !docker ? `php -S ${host}:${listen} -t public public/index.php` : laravel ? `php artisan octane:frankenphp --host=${host} --port=${listen} --watch --log-level=WARN` : "frankenphp run --config Caddyfile",
       env: laravel ? { APP_ENV: "local", APP_DEBUG: "true", APP_KEY: `base64:${randomBytes(32).toString("base64")}`, ...(services.includes("redis") ? { REDIS_CLIENT: "predis" } : {}) } : { APP_ENV: "dev", APP_DEBUG: "1", APP_SECRET: randomBytes(16).toString("hex") },
     };
   }
@@ -126,19 +127,21 @@ export function recipe(stack: string, id: string, mode: CreateMode, port: number
 const fail = (message: string, code = "invalid", status = 400): never => { throw new DevHubError(message, code, status); };
 
 /** Fields end up in a Dockerfile, so each one has to be a plain name. A whole file is the user's own text. */
-function dockerfileFor({ toolchain, image }: Recipe, custom: DockerCustom = {}): string {
+function dockerfileFor({ toolchain, image, extensions: needed = [] }: Recipe, custom: DockerCustom = {}): string {
   if (custom.dockerfile !== undefined) {
     if (custom.dockerfile.length > 48_000 || !/^\s*FROM\s/im.test(custom.dockerfile)) fail("The Dockerfile needs a FROM line and at most 48 KB");
     return custom.dockerfile;
   }
   if (custom.image !== undefined && !IMAGE.test(custom.image)) fail(`Invalid image: ${custom.image}`);
+  // The project starts with `frankenphp`: another image would fail at start, not here.
+  if (toolchain === "composer" && custom.image !== undefined && !custom.image.startsWith("dunglas/frankenphp:")) fail("PHP projects run on FrankenPHP: choose a dunglas/frankenphp image, or write a whole Dockerfile");
   const packages = custom.packages ?? [], extensions = custom.extensions ?? [];
   const wrong = packages.find((item) => !PACKAGE.test(item));
   if (wrong !== undefined) fail(`Invalid system package: ${wrong}`);
   if (extensions.length > 0 && toolchain !== "composer") fail("Extensions apply to PHP projects only");
   const extension = extensions.find((item) => !EXTENSION.test(item));
   if (extension !== undefined) fail(`Invalid extension: ${extension}`);
-  return renderDockerfile(toolchain, custom.image ?? image, packages, extensions);
+  return renderDockerfile(toolchain, custom.image ?? image, packages, [...needed, ...extensions]);
 }
 
 export class Creator implements CreatePort {

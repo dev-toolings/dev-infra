@@ -41,7 +41,7 @@ type Vuln struct {
 var lifecycleProducts = map[string]map[string]string{
 	"image": {
 		"postgres": "postgresql", "mysql": "mysql", "redis": "redis", "rabbitmq": "rabbitmq", "node": "nodejs", "php": "php",
-		"oven/bun": "bun", "ghcr.io/astral-sh/uv": "python", "getmeili/meilisearch": "meilisearch",
+		"oven/bun": "bun", "ghcr.io/astral-sh/uv": "python", "dunglas/frankenphp": "php", "getmeili/meilisearch": "meilisearch",
 	},
 	"package": {"symfony/framework-bundle": "symfony", "symfony/runtime": "symfony", "symfony/string": "symfony", "laravel/framework": "laravel"},
 }
@@ -50,7 +50,8 @@ var (
 	imageLine = regexp.MustCompile(`(?m)^\s*image:\s*["']?([^\s"']+)`)
 	envImage  = regexp.MustCompile(`^\$\{[A-Z0-9_]+:-(.+)\}$`)
 	// The version opens the tag: in `3.20-alpine3.19` the second number belongs to the base image.
-	tagVersion = regexp.MustCompile(`^(?:v|python)?(\d+(?:\.\d+)*)`)
+	// In `1.13-php8.5-trixie` it follows the server version: what ages is PHP.
+	tagVersion = regexp.MustCompile(`^(?:v|python|\d+(?:\.\d+)*-php)?(\d+(?:\.\d+)*)`)
 )
 
 // splitImage turns `name:tag@sha256:...` into its name and the version its tag carries.
