@@ -1,90 +1,50 @@
 # AGENTS.md
 
-Repository instructions for AI coding agents working on DevHub.
+DevHub: shared Docker Compose services, a Bun/TypeScript manager (`src/`: CLI and
+loopback API) and a React control panel (`apps/web/`). `bin/devhub` is the Bash entry point.
 
-## Project Overview
-
-DevHub combines shared Docker Compose infrastructure with an approved Bun/TypeScript
-local project manager and a React/Vite/shadcn control panel.
-It provides PostgreSQL, MySQL, Redis, Meilisearch, Mailpit, Adminer, Dozzle,
-and RabbitMQ. Applications connect through the shared external network.
-
-Primary entry points:
-- `bin/devhub`: Bash CLI used by humans and automation.
-- `compose.yml`: shared service definitions and profiles (preserve live identity).
-- `src/`: shared manager engine, CLI and authenticated loopback API.
-- `apps/web/`: React/Vite/shadcn interface; no frontend tests or builds unless requested.
-- `data/scripts/`: helper scripts for install, database creation, networking,
-  health checks, and uninstall.
-
-## Search Tools
-
-- Prefer `ig` over `rg` or `grep` for code search.
-- Use `ig "pattern" [path]`, `ig smart [path]`, and `ig read <file> -s` when
-  you need compact project context.
-- `ig` indexes live under the user cache, not in the repository. Do not create
-  or commit `.ig/`, and do not add new ignore rules for it.
-- Fall back to `rg` only if `ig --version` fails.
-
-## Working Principles
-
-These guidelines follow the style of the Karpathy coding-agent example:
-
-1. Think before coding.
-   State assumptions when behavior is ambiguous. If multiple interpretations
-   are plausible and the choice affects user data, ports, credentials, or
-   Docker volumes, ask before changing behavior.
-
-2. Keep changes simple.
-   Do not add abstraction, configurability, or new tooling unless it directly
-   supports the requested change. Keep module boundaries and dependencies focused.
-   Bun dependencies for the approved manager are allowed; infrastructure remains small.
-
-3. Make surgical edits.
-   Touch only files needed for the task. Preserve existing CLI behavior,
-   command names, container names, Compose profiles, and default ports unless
-   the request is explicitly about changing them.
-
-4. Verify the result.
-   For shell changes, at minimum run syntax checks. For Compose changes, render
-   the config. For CLI changes, exercise the affected command path when Docker
-   state allows it.
-
-## Validation Commands
-
-Use the smallest useful verification set:
+## Checks (same as CI)
 
 ```bash
-for script in bin/devhub data/scripts/*.sh; do bash -n "$script"; done
-COMPOSE_PROFILES=core,async docker compose --env-file .env.example -f compose.yml config
-./bin/devhub help
+for s in bin/devhub install-remote.sh data/scripts/*.sh; do bash -n "$s"; done
+shellcheck -x --severity=warning bin/devhub install-remote.sh data/scripts/*.sh
+bun run typecheck
+python3 tests/backend-isolated.py
+python3 tests/infra-contract.py
+bats tests
+for p in core async core,async; do
+  COMPOSE_PROFILES="$p" docker compose --env-file .env.example -f compose.yml config > /dev/null
+done
 ```
 
-When Docker is running and the user asked for runtime behavior, also consider:
+Run the ones matching what you touched. No frontend tests or builds in `apps/web/` unless asked.
 
-```bash
-./bin/devhub doctor
-./bin/devhub ps
-```
+## Never without an explicit request
 
-Do not run destructive volume operations such as `docker compose down -v` unless
-the user explicitly asks for data removal.
+- Delete named volumes (`docker compose down -v`): they hold developer data.
+- Change container names, profiles, default ports or `dev-shared-net`:
+  `tests/infra-contract.py` compares them to a baseline.
+- Tag or push a release.
 
-## Docker And Infrastructure Constraints
+## Keep in sync
 
-- `.env` is local and ignored. Keep examples in `.env.example` free of real
-  secrets.
-- Shared network name defaults to `dev-shared-net`; project containers must
-  join that external network to reach DevHub services.
-- Named volumes hold local developer data. Treat them as persistent user data.
-- Dozzle mounts `/var/run/docker.sock`; changes around that service should be
-  reviewed with extra care.
+When command behavior changes, update README, `bin/devhub` help, Makefile,
+`.env.example` and `compose.yml`.
 
-## Style Notes
+## Conventions
 
-- Shell scripts use Bash with `set -euo pipefail`; keep that convention.
-- Prefer explicit error messages and predictable exits for CLI commands.
-- Keep README, CLI help, Makefile targets, and Compose profiles aligned when
-  command behavior changes.
-- If you find unrelated problems, mention them in the final response instead of
-  fixing them opportunistically.
+- Bash: `set -euo pipefail`, explicit error messages, predictable exits.
+- `.env` is local; `.env.example` never holds real secrets.
+- Dozzle mounts `/var/run/docker.sock`: flag any change around it.
+- Scaffold updates: follow `.claude/skills/update-scaffolds/SKILL.md`.
+
+## Releasing
+
+`VERSION` is the source of truth. While 0.0.x, every release is a patch;
+1.0.0 only on explicit request.
+
+1. Move `Unreleased` items in `CHANGELOG.md` under the new version.
+2. Preview: `./data/scripts/release.sh <bump> --dry-run`
+3. After user confirmation, from a clean `main`: `make release BUMP=<bump>`
+
+Details: README "Releasing".
