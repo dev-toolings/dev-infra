@@ -37,7 +37,7 @@ export const STACKS: StackDefinition[] = [{
 }, {
   id: "php",
   name: "PHP",
-  description: "API with logs, one error shape, static analysis and tests, managed by Composer.",
+  description: "API with a health route, logs, one error shape, static analysis and tests, managed by Composer.",
   modes: ["docker", "native"],
   services: SERVICE_OPTIONS,
   options: [
@@ -51,7 +51,7 @@ export const STACKS: StackDefinition[] = [{
       { value: "8.1", label: "8.1", tag: "latest", check: { name: "symfony/framework-bundle", version: versions.lines.symfony["8.1"]["symfony/framework-bundle"] } },
     ] },
     { id: "pattern", label: "Code structure", default: "standard", choices: [{ value: "standard", label: "Framework layout" }, { value: "modules", label: "Modules by domain" }] },
-    { id: "symfonyOrm", label: "Database layer", when: { option: "framework", value: "symfony" }, default: "none", choices: [{ value: "none", label: "SQLite file" }, { value: "doctrine", label: "Doctrine ORM", services: ["postgres"] }] },
-    { id: "laravelOrm", label: "Database layer", when: { option: "framework", value: "laravel" }, default: "none", choices: [{ value: "none", label: "SQLite file" }, { value: "eloquent", label: "Eloquent", services: ["postgres"] }] },
+    { id: "symfonyOrm", label: "Database layer", when: { option: "framework", value: "symfony" }, default: "none", choices: [{ value: "none", label: "None" }, { value: "doctrine", label: "Doctrine ORM", services: ["postgres"] }] },
+    { id: "laravelOrm", label: "Database layer", when: { option: "framework", value: "laravel" }, default: "none", choices: [{ value: "none", label: "None" }, { value: "eloquent", label: "Eloquent", services: ["postgres"] }] },
   ],
 }];

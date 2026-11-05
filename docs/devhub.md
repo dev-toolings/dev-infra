@@ -97,9 +97,9 @@ file DevHub manages: non-root user, no capabilities, ports on this machine only.
 | `php` | `framework` | `symfony`, `laravel` |
 | `php` | `phpVersion` | `8.5`, `8.4` (Docker) |
 | `php` | `symfonyVersion` | `7.4` (LTS), `8.1` |
-| `php` | `pattern` | `standard` (the framework layout), `modules`. Same `notes` example, JSON errors and request logs as Node |
-| `php` | `symfonyOrm` | `none` (SQLite file), `doctrine` (selects Postgres; `notes` needs `doctrine:migrations:migrate`) |
-| `php` | `laravelOrm` | `none` (SQLite file), `eloquent` (selects Postgres; `notes` needs `php artisan migrate`) |
+| `php` | `pattern` | `standard` (the framework layout), `modules`. Same JSON errors and request logs as Node, with no example resource |
+| `php` | `symfonyOrm` | `none`, `doctrine` (selects Postgres) |
+| `php` | `laravelOrm` | `none`, `eloquent` (selects Postgres) |
 
 Services are `postgres`, `redis` and `mailpit`. Every project has a `/health` route and
 exact dependency versions. Node projects use strict TypeScript, Zod for configuration and
@@ -117,8 +117,7 @@ restart their workers on a code change. A custom base image has to be a `dunglas
 Debian tag; a whole Dockerfile stays free. In native mode, PHP projects use the PHP built-in server.
 
 Native mode needs the stack's tools on this machine: `uv` for Python, `php` and `composer`
-for PHP, with `pdo_sqlite` without an ORM and `pdo_pgsql` with Postgres. Docker mode needs
-none of them. Choosing a service provisions it and sets its
+for PHP, with `pdo_pgsql` when it uses Postgres. Docker mode needs none of them. Choosing a service provisions it and sets its
 environment variables. Node, Python and PHP add their Postgres, Redis and mail clients,
 and report Postgres and Redis in `/health`. The clients of other services are yours to write.
 

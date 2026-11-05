@@ -1,4 +1,4 @@
-import { layoutFor, namespaceOf, noteCalls, phpClass, sharedFiles, shortName } from "./php-shared";
+import { layoutFor, phpClass, sharedFiles } from "./php-shared";
 
 const raw = String.raw;
 
@@ -8,19 +8,12 @@ const KEEP = "*\n!.gitignore\n";
 const lines = (...items: string[]) => [...items, ""].join("\n");
 
 export function laravelFiles({ name, modules, eloquent, postgres, redis, mail, docker }: LaravelOptions): Record<string, string> {
-  const layout = layoutFor("app", modules, { error: "App\\Exceptions\\AppError", model: "App\\Models\\Note", repositories: "App\\Repositories", service: "App\\Services\\NoteService", logging: "App\\Logging", health: "App\\Health" });
+  const layout = layoutFor("app", modules, { error: "App\\Exceptions\\AppError", logging: "App\\Logging", health: "App\\Health" });
   const http = modules ? "App\\Shared\\Infrastructure\\Http" : "App\\Http\\Middleware";
   const errorResponse = modules ? `${http}\\ErrorResponse` : "App\\Exceptions\\ErrorResponse";
   const health = modules ? "App\\Modules\\Health\\Infrastructure" : "App\\Health";
-  const persistence = namespaceOf(layout.memory);
-  const record = modules ? `${persistence}\\NoteRecord` : "App\\Models\\NoteRecord";
-  const eloquentStore = `${persistence}\\EloquentNoteRepository`;
-  const controllers = modules
-    ? { health: `${health}\\Http\\HealthController`, notes: "App\\Modules\\Notes\\Infrastructure\\Http\\NoteController", input: "App\\Modules\\Notes\\Infrastructure\\Http\\NoteRequest" }
-    : { health: "App\\Http\\Controllers\\HealthController", notes: "App\\Http\\Controllers\\NoteController", input: "App\\Http\\Requests\\NoteRequest" };
+  const healthController = modules ? `${health}\\Http\\HealthController` : "App\\Http\\Controllers\\HealthController";
   const databaseCheck = `${health}\\DatabaseCheck`, redisCheck = `${health}\\RedisCheck`;
-  const calls = noteCalls(layout);
-  const Note = shortName(layout.note);
   const checks = [...(postgres ? ["new DatabaseCheck"] : []), ...(redis ? ["new RedisCheck"] : [])];
 
   const files: Record<string, string> = {
@@ -52,14 +45,9 @@ export function laravelFiles({ name, modules, eloquent, postgres, redis, mail, d
     ),
     "routes/api.php": lines(
       "<?php", "",
-      ...[controllers.health, controllers.notes, "Illuminate\\Support\\Facades\\Route"].sort().map((item) => `use ${item};`), "",
+      ...[healthController, "Illuminate\\Support\\Facades\\Route"].sort().map((item) => `use ${item};`), "",
       "Route::get('/', [HealthController::class, 'index']);",
       "Route::get('/health', [HealthController::class, 'health']);",
-      "Route::get('/notes', [NoteController::class, 'index']);",
-      "Route::post('/notes', [NoteController::class, 'store']);",
-      "Route::get('/notes/{id}', [NoteController::class, 'show']);",
-      "Route::patch('/notes/{id}', [NoteController::class, 'update']);",
-      "Route::delete('/notes/{id}', [NoteController::class, 'destroy']);",
     ),
     // Laravel merges these with its defaults.
     "config/app.php": lines("<?php", "", "return [", `    'name' => '${name}',`, "];"),
@@ -95,36 +83,17 @@ export function laravelFiles({ name, modules, eloquent, postgres, redis, mail, d
       "    'watch' => ['app/**/*.php', 'bootstrap/app.php', 'bootstrap/providers.php', 'config/**/*.php', 'routes/**/*.php'],", "];",
     ) } : {}),
     ...phpClass("app", "App\\Providers\\AppServiceProvider", [
-      layout.getHealth, layout.repository, "Illuminate\\Support\\ServiceProvider",
-      ...(eloquent ? [eloquentStore] : [layout.sqlite]),
+      layout.getHealth, "Illuminate\\Support\\ServiceProvider",
       ...(postgres ? [databaseCheck] : []), ...(redis ? [redisCheck] : []),
     ], raw`final class AppServiceProvider extends ServiceProvider
 {
     public function register(): void
     {
-        ${eloquent
-    ? `$this->app->singleton(${shortName(layout.repository)}::class, EloquentNoteRepository::class);`
-    : `$this->app->singleton(${shortName(layout.repository)}::class, fn () => new SqliteNoteRepository(storage_path('app/notes.sqlite')));`}
         $this->app->when(GetHealth::class)->needs('$checks')->give(fn () => [${checks.join(", ")}]);
     }
 }
 `),
-    ...phpClass("app", controllers.input, ["Illuminate\\Foundation\\Http\\FormRequest"], raw`/** The shape of a request. Business rules stay out of it. */
-final class NoteRequest extends FormRequest
-{
-    public function authorize(): bool
-    {
-        return true;
-    }
-
-    /** @return array<string, list<string>> */
-    public function rules(): array
-    {
-        return ['body' => ['required', 'string', 'max:10000']];
-    }
-}
-`),
-    ...phpClass("app", controllers.health, [layout.getHealth, "Illuminate\\Http\\JsonResponse"], raw`final class HealthController
+    ...phpClass("app", healthController, [layout.getHealth, "Illuminate\\Http\\JsonResponse"], raw`final class HealthController
 {
     public function index(): JsonResponse
     {
@@ -137,38 +106,6 @@ final class NoteRequest extends FormRequest
 
         // An object even without checks, as in the other stacks.
         return new JsonResponse([...$report, 'checks' => (object) $report['checks']], $report['status'] === 'ok' ? 200 : 503);
-    }
-}
-`),
-    ...phpClass("app", controllers.notes, [...calls.uses, controllers.input, "Illuminate\\Http\\JsonResponse", "Illuminate\\Http\\Response"], raw`final class NoteController
-{
-    public function __construct(${calls.args.length > 1 ? `\n        ${calls.args.join(",\n        ")},\n    ` : calls.args[0]!}) {}
-
-    public function index(): JsonResponse
-    {
-        return new JsonResponse(${calls.list});
-    }
-
-    public function store(NoteRequest $request): JsonResponse
-    {
-        return new JsonResponse(${calls.create("$request->string('body')->value()")}, 201);
-    }
-
-    public function show(string $id): JsonResponse
-    {
-        return new JsonResponse(${calls.get});
-    }
-
-    public function update(string $id, NoteRequest $request): JsonResponse
-    {
-        return new JsonResponse(${calls.update("$request->string('body')->value()")});
-    }
-
-    public function destroy(string $id): Response
-    {
-        ${calls.delete};
-
-        return response()->noContent();
     }
 }
 `),
@@ -227,17 +164,11 @@ final class ErrorResponse
 
 namespace App\Tests;
 
-${[layout.getHealth, layout.healthCheck, layout.memory, layout.repository].sort().map((item) => `use ${item};`).join("\n")}
+${[layout.getHealth, layout.healthCheck].sort().map((item) => `use ${item};`).join("\n")}
 use RuntimeException;
 
 final class AppTest extends TestCase
 {
-    protected function setUp(): void
-    {
-        parent::setUp();
-        $this->app->instance(${shortName(layout.repository)}::class, new MemoryNoteRepository);
-    }
-
     public function test_health_is_degraded_when_a_dependency_fails(): void
     {
         $check = new class implements HealthCheck
@@ -256,24 +187,16 @@ final class AppTest extends TestCase
         self::assertSame(['status' => 'degraded', 'checks' => ['database' => false]], (new GetHealth([$check]))());
     }
 
-    public function test_a_note_can_be_created_read_and_deleted(): void
+    public function test_the_app_answers(): void
     {
-        $created = $this->postJson('/notes', ['body' => ' hello ']);
-        $created->assertCreated()->assertJsonPath('body', 'hello');
-        $id = $created->json('id');
-        $this->getJson("/notes/$id")->assertOk();
-        $this->patchJson("/notes/$id", ['body' => 'bye'])->assertJsonPath('body', 'bye');
-        $this->deleteJson("/notes/$id")->assertNoContent();
-        $this->getJson("/notes/$id")->assertNotFound();
+        $this->getJson('/')->assertOk();
     }
 
     public function test_every_failure_answers_the_same_json_with_a_request_id(): void
     {
         $cases = [
-            [$this->postJson('/notes', ['body' => '   ']), 400, 'invalid'],
-            [$this->postJson('/notes', ['body' => 1]), 400, 'invalid'],
-            [$this->getJson('/notes/unknown'), 404, 'not_found'],
             [$this->getJson('/unknown'), 404, 'not_found'],
+            [$this->postJson('/health'), 405, 'http_error'],
         ];
         foreach ($cases as [$response, $status, $code]) {
             $response->assertStatus($status)->assertJsonPath('error.code', $code)->assertHeader('X-Request-Id');
@@ -291,10 +214,10 @@ final class LogTest extends TestCase
 {
     public function test_an_http_line_is_readable_and_keeps_its_fields(): void
     {
-        $fields = ['requestId' => 'r', 'method' => 'GET', 'path' => '/notes/1', 'route' => 'notes/{id}', 'status' => 200, 'durationMs' => 5];
+        $fields = ['requestId' => 'r', 'method' => 'GET', 'path' => '/users/1', 'route' => 'users/{id}', 'status' => 200, 'durationMs' => 5];
         $line = (new PrettyLogFormatter(false))->format(new LogRecord(new DateTimeImmutable, 'app', Level::Info, 'http request', $fields));
 
-        self::assertStringEndsWith("INFO: GET /notes/1 200 5ms  requestId=r route=notes/{id}\n", $line);
+        self::assertStringEndsWith("INFO: GET /users/1 200 5ms  requestId=r route=users/{id}\n", $line);
     }
 
     public function test_secrets_are_redacted(): void
@@ -350,63 +273,12 @@ final class LogTest extends TestCase
       "```sh", "composer validate --no-check-publish", "composer lint", "composer analyse", "composer test", "```", "",
       "In Docker, run these inside the `app` container: dependencies live there.", "",
       modules
-        ? "Each feature lives in `app/Modules/<Name>`: `Domain` holds the rules and the ports, `Application` the use cases, `Infrastructure` HTTP and storage. Dependencies point inward, and `app/Providers/AppServiceProvider.php` wires them. `Notes` is an example to copy or delete."
-        : "`routes/api.php` holds the routes, `app/Http/Controllers` the controllers, `app/Http/Requests` the request shapes, `app/Services` the logic, `app/Repositories` the storage, and `app/Providers/AppServiceProvider.php` wires them. `Notes` is an example to copy or delete.",
-      "",
-      eloquent ? "`/notes` answers 500 until its table exists: run `php artisan migrate`." : "`/notes` keeps its data in `storage/app/notes.sqlite`.",
+        ? "Each feature lives in `app/Modules/<Name>`: `Domain` holds the rules and the ports, `Application` the use cases, `Infrastructure` HTTP and storage. Dependencies point inward, and `app/Providers/AppServiceProvider.php` wires them. `Health` shows the layout."
+        : "`routes/api.php` holds the routes, `app/Http/Controllers` the controllers, and `app/Providers/AppServiceProvider.php` wires them.",
     ),
   };
 
-  if (eloquent) {
-    Object.assign(files, phpClass("app", record, ["Illuminate\\Database\\Eloquent\\Model"], raw`final class NoteRecord extends Model
-{
-    public $incrementing = false;
-
-    public $timestamps = false;
-
-    protected $table = 'notes';
-
-    protected $keyType = 'string';
-
-    protected $fillable = ['id', 'body', 'created_at'];
-}
-`), phpClass("app", eloquentStore, [layout.note, layout.repository, record], raw`final class EloquentNoteRepository implements ${shortName(layout.repository)}
-{
-    public function all(): array
-    {
-        return NoteRecord::query()->orderBy('created_at')->get()->map(self::toNote(...))->values()->all();
-    }
-
-    public function find(string $id): ?${Note}
-    {
-        $record = NoteRecord::query()->find($id);
-
-        return $record === null ? null : self::toNote($record);
-    }
-
-    public function save(${Note} $note): void
-    {
-        NoteRecord::query()->updateOrCreate(['id' => $note->id], ['body' => $note->body, 'created_at' => $note->createdAt]);
-    }
-
-    public function delete(string $id): bool
-    {
-        return NoteRecord::query()->whereKey($id)->delete() > 0;
-    }
-
-    private static function toNote(NoteRecord $record): ${Note}
-    {
-        return new ${Note}($record->getAttribute('id'), $record->getAttribute('body'), $record->getAttribute('created_at'));
-    }
-}
-`));
-    files["database/migrations/2026_01_01_000000_create_notes_table.php"] = lines(
-      "<?php", "", "use Illuminate\\Database\\Migrations\\Migration;", "use Illuminate\\Database\\Schema\\Blueprint;", "use Illuminate\\Support\\Facades\\Schema;", "",
-      "return new class extends Migration", "{", "    public function up(): void", "    {", "        Schema::create('notes', function (Blueprint $table): void {",
-      "            $table->string('id')->primary();", "            $table->text('body');", "            $table->string('created_at');", "        });", "    }", "",
-      "    public function down(): void", "    {", "        Schema::dropIfExists('notes');", "    }", "};",
-    );
-  }
+  if (eloquent) files["database/migrations/.gitignore"] = "";
   if (postgres) {
     Object.assign(files, phpClass("app", databaseCheck, [layout.healthCheck, "Illuminate\\Support\\Facades\\DB"], raw`final class DatabaseCheck implements HealthCheck
 {

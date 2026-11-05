@@ -8,11 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- New FastAPI, Symfony and Laravel projects start with the same base as Hono projects: a
-  `notes` example to copy, one JSON error shape, request ids, readable request logs, `/health`
-  with its dependencies, tests, type checks and lint, in both code structures. An optional
-  database layer adds SQLAlchemy with Alembic, Doctrine or Eloquent. PHP keeps `notes` in a
-  SQLite file without one, and `standard` is its default structure.
+- New FastAPI projects start with the same base as Hono projects: a `notes` example to copy,
+  one JSON error shape, request ids, readable request logs, `/health` with its dependencies,
+  tests, type checks and lint, in both code structures, with optional SQLAlchemy and Alembic.
+- New Symfony and Laravel projects get that base without an example resource, in both code
+  structures, with optional Doctrine or Eloquent. `standard` is their default structure.
 - Symfony and Laravel projects keep their official environment files and variable names: a
   committed `.env` and a local `.env.local` for Symfony, `.env.example` and `.env` for Laravel.
 - PHP projects run on FrankenPHP in Docker, Symfony in worker mode and Laravel under Octane,

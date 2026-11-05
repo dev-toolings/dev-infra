@@ -64,32 +64,28 @@ export function recipe(stack: string, id: string, mode: CreateMode, port: number
     const orm = laravel ? options.laravelOrm : options.symfonyOrm;
     const checks = ["composer validate --no-check-publish", "composer lint", "composer analyse", "composer test"];
     const layout = modules ? [
-      `\`${laravel ? "app" : "src"}/Modules/<Name>\`: one folder per feature.`,
+      `\`${laravel ? "app" : "src"}/Modules/<Name>\`: one folder per feature, like \`Health\`.`,
       `\`${laravel ? "app" : "src"}/Modules/<Name>/Domain\`: the rules and the ports.`,
       `\`${laravel ? "app" : "src"}/Modules/<Name>/Application\`: the use cases.`,
       `\`${laravel ? "app" : "src"}/Modules/<Name>/Infrastructure\`: HTTP and storage.`,
       "Dependencies point inward.",
     ] : laravel ? [
       "`app/Http/Controllers`: the controllers.",
-      "`app/Http/Requests`: the request shapes.",
-      "`app/Services`: the logic.",
-      "`app/Repositories`: the storage.",
+      "`app/Http/Middleware`: the access log.",
+      "`app/Exceptions`: the error shape.",
     ] : [
       "`src/Controller`: the controllers.",
-      "`src/Dto`: the request shapes.",
-      "`src/Service`: the logic.",
-      "`src/Repository`: the storage.",
       "`src/EventListener`: the access log and the error handler.",
+      ...(orm === "doctrine" ? ["`src/Entity`: the Doctrine entities."] : []),
     ];
     return {
       toolchain: "composer", checks, image: lineImage(versions.lines.php, options.phpVersion), tools: ["php", "composer"], ...(laravel ? { extensions: ["pcntl"] } : {}),
-      hostExtensions: [...(orm === "none" ? ["pdo_sqlite"] : []), ...(services.includes("postgres") ? ["pdo_pgsql"] : [])],
+      hostExtensions: services.includes("postgres") ? ["pdo_pgsql"] : [],
       ...(laravel ? {} : { envFile: ".env.local" }), translateEnv: (env) => frameworkEnv(options.framework!, env), files: {
         ...phpFiles({ name: id, framework: options.framework!, pattern: options.pattern!, symfonyVersion: options.symfonyVersion, orm: orm!, services, docker }),
         ...agents(laravel ? "Laravel" : "Symfony", checks, [
           ...layout,
           ...(laravel ? ["`routes/api.php`: the routes.", "`app/Providers/AppServiceProvider.php`: wires the services."] : ["`config/services.php`: wires the services.", "`config/packages`: configures the bundles."]),
-          ...(orm === "doctrine" ? ["The table of `notes` needs `php bin/console doctrine:migrations:migrate --no-interaction`."] : orm === "eloquent" ? ["The table of `notes` needs `php artisan migrate`."] : []),
         ], [...(laravel ? AGENT_RULES.laravel : AGENT_RULES.symfony), ...(docker ? (laravel ? AGENT_RULES.octane : AGENT_RULES.frankenphp) : [])], laravel ? AGENT_FEATURE.laravel(modules, orm === "eloquent") : AGENT_FEATURE.symfony(modules, orm === "doctrine")),
       }, install: "composer install",
       dev: !docker ? `php -S ${host}:${listen} -t public public/index.php` : laravel ? `php artisan octane:frankenphp --host=${host} --port=${listen} --watch --log-level=WARN` : "frankenphp run --config Caddyfile",

@@ -1,4 +1,4 @@
-import { layoutFor, namespaceOf, noteCalls, pathOf, phpClass, sharedFiles, shortName } from "./php-shared";
+import { layoutFor, pathOf, phpClass, sharedFiles, shortName } from "./php-shared";
 
 const raw = String.raw;
 
@@ -8,22 +8,12 @@ export type SymfonyOptions = { name: string; modules: boolean; doctrine: boolean
 const configFile = (uses: string[], body: string) => ["<?php", "", ...[...uses.filter((item) => !item.startsWith("function ")), "Symfony\\Component\\DependencyInjection\\Loader\\Configurator\\ContainerConfigurator"].sort().map((item) => `use ${item};`), "", ...uses.filter((item) => item.startsWith("function ")).flatMap((item) => [`use ${item};`, ""]), "return static function (ContainerConfigurator $container): void {", body, "};", ""].join("\n");
 
 export function symfonyFiles({ name, modules, doctrine, postgres, redis, mail, docker }: SymfonyOptions): Record<string, string> {
-  const layout = layoutFor("src", modules, { error: "App\\Exception\\AppError", model: "App\\Model\\Note", repositories: "App\\Repository", service: "App\\Service\\NoteService", logging: "App\\Logging", health: "App\\Health" });
+  const layout = layoutFor("src", modules, { error: "App\\Exception\\AppError", logging: "App\\Logging", health: "App\\Health" });
   const http = modules ? "App\\Shared\\Infrastructure\\Http" : "App\\EventListener";
   const health = modules ? "App\\Modules\\Health\\Infrastructure" : "App\\Health";
-  const persistence = namespaceOf(layout.memory);
-  const record = modules ? `${persistence}\\NoteRecord` : "App\\Entity\\NoteRecord";
-  const doctrineStore = `${persistence}\\DoctrineNoteRepository`;
-  const controllers = modules ? { health: `${health}\\Http\\HealthController`, notes: "App\\Modules\\Notes\\Infrastructure\\Http\\NoteController", input: "App\\Modules\\Notes\\Infrastructure\\Http\\NoteInput" } : { health: "App\\Controller\\HealthController", notes: "App\\Controller\\NoteController", input: "App\\Dto\\NoteInput" };
+  const healthController = modules ? `${health}\\Http\\HealthController` : "App\\Controller\\HealthController";
   const databaseCheck = `${health}\\DatabaseCheck`, redisCheck = `${health}\\RedisCheck`;
-  const calls = noteCalls(layout);
-  const Note = shortName(layout.note);
-  const args = calls.args.map((arg) => arg.replace("private readonly ", "private "));
-  const controllerConstructor = args.length > 1 ? `    public function __construct(\n        ${args.join(",\n        ")},\n    ) {\n    }` : `    public function __construct(${args[0]})\n    {\n    }`;
-  const excluded = [
-    "../src/Kernel.php", pathOf("../src", layout.error), pathOf("../src", layout.note), pathOf("../src", controllers.input),
-    ...(doctrine ? [pathOf("../src", record)] : []),
-  ];
+  const excluded = ["../src/Kernel.php", pathOf("../src", layout.error), ...(doctrine && !modules ? ["../src/Entity/"] : [])];
 
   const files: Record<string, string> = {
     ...sharedFiles(layout),
@@ -70,8 +60,7 @@ return function (array $context) {
     };
     $container->extension('monolog', ['handlers' => ['main' => $handler]]);`),
     "config/services.php": configFile([
-      layout.redactor, layout.healthCheck, layout.getHealth, layout.repository,
-      ...(doctrine ? [doctrineStore] : [layout.sqlite]),
+      layout.redactor, layout.healthCheck, layout.getHealth,
       ...(postgres && !doctrine ? [databaseCheck] : []),
       ...(redis ? ["Predis\\Client"] : []),
       "function Symfony\\Component\\DependencyInjection\\Loader\\Configurator\\tagged_iterator",
@@ -82,26 +71,10 @@ return function (array $context) {
       `    $services->load('App\\\\', '../src/')->exclude([${excluded.map((item) => `'${item}'`).join(", ")}]);`,
       "    $services->set(GetHealth::class)->arg('$checks', tagged_iterator('app.health_check'));",
       `    $services->set(${shortName(layout.redactor)}::class)->tag('monolog.processor');`,
-      ...(doctrine ? [`    $services->alias(${shortName(layout.repository)}::class, DoctrineNoteRepository::class);`] : [
-        "    $services->set(SqliteNoteRepository::class)->arg('$path', '%kernel.project_dir%/var/notes.sqlite');",
-        `    $services->alias(${shortName(layout.repository)}::class, SqliteNoteRepository::class);`,
-      ]),
       ...(postgres && !doctrine ? ["    $services->set(DatabaseCheck::class)->arg('$url', '%env(DATABASE_URL)%');"] : []),
       ...(redis ? ["    $services->set(Client::class)->args(['%env(REDIS_URL)%?timeout=2&read_write_timeout=2', ['prefix' => '%env(REDIS_PREFIX)%']]);"] : []),
     ].join("\n")),
-    "config/services_test.php": configFile([layout.memory, layout.repository], `    $container->services()->set(${shortName(layout.repository)}::class, MemoryNoteRepository::class);`),
-    ...phpClass("src", controllers.input, ["Symfony\\Component\\Validator\\Constraints as Assert"], raw`/** The shape of a request. Business rules stay out of it. */
-final readonly class NoteInput
-{
-    public function __construct(
-        #[Assert\NotNull]
-        #[Assert\Length(max: 10_000)]
-        public string $body,
-    ) {
-    }
-}
-`),
-    ...phpClass("src", controllers.health, [layout.getHealth, "Symfony\\Component\\HttpFoundation\\JsonResponse", "Symfony\\Component\\Routing\\Attribute\\Route"], raw`final readonly class HealthController
+    ...phpClass("src", healthController, [layout.getHealth, "Symfony\\Component\\HttpFoundation\\JsonResponse", "Symfony\\Component\\Routing\\Attribute\\Route"], raw`final readonly class HealthController
 {
     public function __construct(private GetHealth $getHealth)
     {
@@ -120,43 +93,6 @@ final readonly class NoteInput
 
         // An object even without checks, as in the other stacks.
         return new JsonResponse([...$report, 'checks' => (object) $report['checks']], 'ok' === $report['status'] ? 200 : 503);
-    }
-}
-`),
-    ...phpClass("src", controllers.notes, [...calls.uses, controllers.input, "Symfony\\Component\\HttpFoundation\\JsonResponse", "Symfony\\Component\\HttpFoundation\\Response", "Symfony\\Component\\HttpKernel\\Attribute\\MapRequestPayload", "Symfony\\Component\\Routing\\Attribute\\Route"], raw`final readonly class NoteController
-{
-${controllerConstructor}
-
-    #[Route('/notes', methods: ['GET'])]
-    public function list(): JsonResponse
-    {
-        return new JsonResponse(${calls.list});
-    }
-
-    #[Route('/notes', methods: ['POST'])]
-    public function create(#[MapRequestPayload] NoteInput $input): JsonResponse
-    {
-        return new JsonResponse(${calls.create("$input->body")}, Response::HTTP_CREATED);
-    }
-
-    #[Route('/notes/{id}', methods: ['GET'])]
-    public function show(string $id): JsonResponse
-    {
-        return new JsonResponse(${calls.get});
-    }
-
-    #[Route('/notes/{id}', methods: ['PATCH'])]
-    public function update(string $id, #[MapRequestPayload] NoteInput $input): JsonResponse
-    {
-        return new JsonResponse(${calls.update("$input->body")});
-    }
-
-    #[Route('/notes/{id}', methods: ['DELETE'])]
-    public function delete(string $id): Response
-    {
-        ${calls.delete};
-
-        return new Response(status: Response::HTTP_NO_CONTENT);
     }
 }
 `),
@@ -290,26 +226,16 @@ final class AppTest extends TestCase
         self::assertSame(['status' => 'degraded', 'checks' => ['database' => false]], (new GetHealth([$check]))());
     }
 
-    public function testANoteCanBeCreatedReadAndDeleted(): void
+    public function testTheAppAnswers(): void
     {
-        $created = $this->send('POST', '/notes', '{"body":" hello "}');
-        self::assertSame(201, $created->getStatusCode());
-        $note = $this->json($created);
-        self::assertSame('hello', $note['body']);
-        self::assertSame(200, $this->send('GET', "/notes/{$note['id']}")->getStatusCode());
-        self::assertSame('bye', $this->json($this->send('PATCH', "/notes/{$note['id']}", '{"body":"bye"}'))['body']);
-        self::assertSame(204, $this->send('DELETE', "/notes/{$note['id']}")->getStatusCode());
-        self::assertSame(404, $this->send('GET', "/notes/{$note['id']}")->getStatusCode());
+        self::assertSame(200, $this->send('GET', '/')->getStatusCode());
     }
 
     public function testEveryFailureAnswersTheSameJsonWithARequestId(): void
     {
         $cases = [
-            [$this->send('POST', '/notes', '{"body":"   "}'), 400, 'invalid'],
-            [$this->send('POST', '/notes', '{"body":1}'), 400, 'invalid'],
-            [$this->send('POST', '/notes', '{'), 400, 'http_error'],
-            [$this->send('GET', '/notes/unknown'), 404, 'not_found'],
             [$this->send('GET', '/unknown'), 404, 'not_found'],
+            [$this->send('POST', '/health'), 405, 'http_error'],
         ];
         foreach ($cases as [$response, $status, $code]) {
             self::assertSame($status, $response->getStatusCode());
@@ -340,10 +266,10 @@ final class LogTest extends TestCase
 {
     public function testAnHttpLineIsReadableAndKeepsItsFields(): void
     {
-        $fields = ['requestId' => 'r', 'method' => 'GET', 'path' => '/notes/1', 'route' => 'notes', 'status' => 200, 'durationMs' => 5];
+        $fields = ['requestId' => 'r', 'method' => 'GET', 'path' => '/users/1', 'route' => 'users', 'status' => 200, 'durationMs' => 5];
         $line = (new PrettyLogFormatter(false))->format(new LogRecord(new \DateTimeImmutable(), 'app', Level::Info, 'http request', $fields));
 
-        self::assertStringEndsWith("INFO: GET /notes/1 200 5ms  requestId=r route=notes\n", $line);
+        self::assertStringEndsWith("INFO: GET /users/1 200 5ms  requestId=r route=users\n", $line);
     }
 
     public function testSecretsAreRedacted(): void
@@ -400,10 +326,8 @@ final class LogTest extends TestCase
       "```sh", "composer validate --no-check-publish", "composer lint", "composer analyse", "composer test", "```", "",
       "In Docker, run these inside the `app` container: dependencies live there.", "",
       modules
-        ? "Each feature lives in `src/Modules/<Name>`: `Domain` holds the rules and the ports, `Application` the use cases, `Infrastructure` HTTP and storage. Dependencies point inward, and `config/services.php` wires them. `Notes` is an example to copy or delete."
-        : "`src/Controller` holds the HTTP routes, `src/Dto` the request shapes, `src/Service` the logic, `src/Repository` the storage, `src/EventListener` the access log and error handling, and `config/services.php` wires them. `Notes` is an example to copy or delete.",
-      "",
-      doctrine ? "`/notes` answers 500 until its table exists: run `php bin/console doctrine:migrations:migrate --no-interaction`." : "`/notes` keeps its data in `var/notes.sqlite`.",
+        ? "Each feature lives in `src/Modules/<Name>`: `Domain` holds the rules and the ports, `Application` the use cases, `Infrastructure` HTTP and storage. Dependencies point inward, and `config/services.php` wires them. `Health` shows the layout."
+        : "`src/Controller` holds the HTTP routes, `src/EventListener` the access log and error handling, and `config/services.php` wires them.",
       "",
     ].join("\n"),
   };
@@ -430,90 +354,8 @@ final class LogTest extends TestCase
       "    ]);",
       "    $container->extension('doctrine_migrations', ['migrations_paths' => ['DoctrineMigrations' => '%kernel.project_dir%/migrations']]);",
     ].join("\n"));
-    Object.assign(files, phpClass("src", record, ["Doctrine\\ORM\\Mapping as ORM"], raw`#[ORM\Entity]
-#[ORM\Table(name: 'notes')]
-class NoteRecord
-{
-    public function __construct(
-        #[ORM\Id]
-        #[ORM\Column]
-        public string $id,
-        #[ORM\Column(type: 'text')]
-        public string $body,
-        #[ORM\Column(name: 'created_at')]
-        public string $createdAt,
-    ) {
-    }
-}
-`), phpClass("src", doctrineStore, [layout.note, layout.repository, record, "Doctrine\\ORM\\EntityManagerInterface"], raw`final readonly class DoctrineNoteRepository implements ${shortName(layout.repository)}
-{
-    public function __construct(private EntityManagerInterface $entities)
-    {
-    }
-
-    public function all(): array
-    {
-        $records = $this->entities->getRepository(NoteRecord::class)->findBy([], ['createdAt' => 'ASC']);
-
-        return array_map(self::toNote(...), $records);
-    }
-
-    public function find(string $id): ?${Note}
-    {
-        $record = $this->entities->find(NoteRecord::class, $id);
-
-        return null === $record ? null : self::toNote($record);
-    }
-
-    public function save(${Note} $note): void
-    {
-        $record = $this->entities->find(NoteRecord::class, $note->id);
-        if (null === $record) {
-            $this->entities->persist(new NoteRecord($note->id, $note->body, $note->createdAt));
-        } else {
-            $record->body = $note->body;
-        }
-        $this->entities->flush();
-    }
-
-    public function delete(string $id): bool
-    {
-        $record = $this->entities->find(NoteRecord::class, $id);
-        if (null === $record) {
-            return false;
-        }
-        $this->entities->remove($record);
-        $this->entities->flush();
-
-        return true;
-    }
-
-    private static function toNote(NoteRecord $record): ${Note}
-    {
-        return new ${Note}($record->id, $record->body, $record->createdAt);
-    }
-}
-`));
-    files["migrations/Version20260101000000.php"] = raw`<?php
-
-namespace DoctrineMigrations;
-
-use Doctrine\DBAL\Schema\Schema;
-use Doctrine\Migrations\AbstractMigration;
-
-final class Version20260101000000 extends AbstractMigration
-{
-    public function up(Schema $schema): void
-    {
-        $this->addSql('CREATE TABLE notes (id VARCHAR(255) NOT NULL, body TEXT NOT NULL, created_at VARCHAR(255) NOT NULL, PRIMARY KEY (id))');
-    }
-
-    public function down(Schema $schema): void
-    {
-        $this->addSql('DROP TABLE notes');
-    }
-}
-`;
+    files["migrations/.gitignore"] = "";
+    if (!modules) files["src/Entity/.gitignore"] = "";
   }
   if (postgres) {
     Object.assign(files, phpClass("src", databaseCheck, [layout.healthCheck, ...(doctrine ? ["Doctrine\\DBAL\\Connection"] : [])], doctrine ? raw`final readonly class DatabaseCheck implements HealthCheck

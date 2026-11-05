@@ -258,8 +258,8 @@ test("the add-feature skill follows the stack, the code structure and the mode",
   expect(await skill({ options: { pattern: "standard", runtime: "node", orm: "drizzle" }, services: ["postgres"] })).toContain("`npm run db:generate`");
   expect(await skill({ stack: "python", name: "api", options: { pattern: "standard" } })).toContain("`app/routes/notes.py`");
   expect(await skill({ stack: "python", name: "api", options: { orm: "sqlalchemy" } })).toContain("alembic revision --autogenerate");
-  expect(await skill({ stack: "php", name: "sf", options: { framework: "symfony" } })).toContain("`src/Controller/NoteController.php`");
-  expect(await skill({ stack: "php", name: "lv", options: { framework: "laravel" } })).toContain("`app/Http/Controllers/NoteController.php`");
+  expect(await skill({ stack: "php", name: "sf", options: { framework: "symfony" } })).toContain("`src/Controller`");
+  expect(await skill({ stack: "php", name: "lv", options: { framework: "laravel" } })).toContain("php artisan make:controller");
   expect(await skill({ mode: "docker" })).toContain("in the `app` container");
   expect(await skill({ mode: "native" })).not.toContain("in the `app` container");
 });
@@ -286,20 +286,23 @@ test("PHP in Docker runs on FrankenPHP, and the native mode keeps the PHP server
 });
 
 test("a native PHP project needs its extensions on this machine", async () => {
-  const { creator } = fixture({ missingTool: "pdo_sqlite" });
-  await expect(creator.plan(input({ stack: "php", mode: "native" }))).rejects.toThrow("pdo_sqlite is missing");
-  await creator.plan(input({ stack: "php" }));
-  await creator.plan(input({ stack: "php", mode: "native", options: { symfonyOrm: "doctrine" } }));
+  const { creator } = fixture({ missingTool: "pdo_pgsql" });
+  await expect(creator.plan(input({ stack: "php", mode: "native", services: ["postgres"] }))).rejects.toThrow("pdo_pgsql is missing");
+  await creator.plan(input({ stack: "php", mode: "native" }));
+  await creator.plan(input({ stack: "php", services: ["postgres"] }));
 });
 
-test("a copied feature finds what the agent is told to copy", async () => {
+test("Symfony and Laravel start without an example resource", async () => {
   const { creator } = fixture();
   const plan = (options: Record<string, string>) => creator.plan(input({ stack: "php", mode: "native", options }));
-  const modules = await plan({ pattern: "modules", symfonyOrm: "doctrine" });
-  expect(modules.contents["config/packages/doctrine.php"]).toContain("/src/Modules'");
-  expect((await plan({})).contents[".claude/skills/add-feature/SKILL.md"]).toContain("`$path`");
-  const laravel = await plan({ framework: "laravel", laravelOrm: "eloquent" });
-  expect(laravel.contents[".claude/skills/add-feature/SKILL.md"]).toContain("`app/Models/NoteRecord.php`");
+  const cases: Record<string, string>[] = [{}, { framework: "laravel" }, { pattern: "modules", symfonyOrm: "doctrine" }, { framework: "laravel", pattern: "modules", laravelOrm: "eloquent" }];
+  for (const options of cases) {
+    const { contents } = await plan(options);
+    expect(Object.entries(contents).filter(([file, text]) => /note/i.test(file) || /\bnotes?\b/i.test(text)).map(([file]) => file)).toEqual([]);
+  }
+  expect((await plan({ pattern: "modules", symfonyOrm: "doctrine" })).contents["config/packages/doctrine.php"]).toContain("/src/Modules'");
+  expect((await plan({ symfonyOrm: "doctrine" })).contents).toHaveProperty(["src/Entity/.gitignore"]);
+  const laravel = await plan({ framework: "laravel" });
   expect(JSON.parse(laravel.contents["composer.json"]!).scripts["post-autoload-dump"]).toContain("package:discover");
 });
 

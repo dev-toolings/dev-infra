@@ -32,7 +32,6 @@ export function phpFiles({ name, framework, pattern = "standard", symfonyVersion
       "composer.json": composer(name, "app/", {
         "laravel/framework": VERSIONS["laravel/framework"],
         ...(docker ? { "laravel/octane": VERSIONS["laravel/octane"] } : {}),
-        ...(eloquent ? {} : { "ext-pdo_sqlite": "*" }),
       }, { "larastan/larastan": VERSIONS["larastan/larastan"], "laravel/pint": VERSIONS["laravel/pint"] }, services, {}, {
         // Laravel builds its list of packages once: without this, a package added later is never loaded.
         "post-autoload-dump": "@php artisan package:discover --ansi",
@@ -48,7 +47,7 @@ export function phpFiles({ name, framework, pattern = "standard", symfonyVersion
       ...core,
       "symfony/monolog-bundle": VERSIONS["symfony/monolog-bundle"],
       ...(mail ? { "symfony/mailer": mailer } : {}),
-      ...(doctrine ? { "doctrine/orm": VERSIONS["doctrine/orm"], "doctrine/doctrine-bundle": VERSIONS["doctrine/doctrine-bundle"], "doctrine/doctrine-migrations-bundle": VERSIONS["doctrine/doctrine-migrations-bundle"] } : { "ext-pdo_sqlite": "*" }),
+      ...(doctrine ? { "doctrine/orm": VERSIONS["doctrine/orm"], "doctrine/doctrine-bundle": VERSIONS["doctrine/doctrine-bundle"], "doctrine/doctrine-migrations-bundle": VERSIONS["doctrine/doctrine-migrations-bundle"] } : {}),
     }, { "friendsofphp/php-cs-fixer": VERSIONS["friendsofphp/php-cs-fixer"] }, services, {
       ...(symfonyVersion === "7.4" ? { conflict: Object.fromEntries(LINE_COMPONENTS.map((item) => [`symfony/${item}`, ">=8"])) } : {}),
       config: { "allow-plugins": { "symfony/runtime": true } },
