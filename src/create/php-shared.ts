@@ -48,21 +48,25 @@ export function sharedFiles(layout: PhpLayout): Record<string, string> {
     ...phpClass(root, error, [], raw`/** An expected failure. It knows nothing of HTTP: the error handler picks the status. */
 final class AppError extends \RuntimeException
 {
+    /** @param string $errorCode The code of the JSON error, which also picks its status. */
     public function __construct(public readonly string $errorCode, string $message)
     {
         parent::__construct($message);
     }
 }
 `),
-    ...phpClass(root, healthCheck, [], raw`interface HealthCheck
+    ...phpClass(root, healthCheck, [], raw`/** A dependency that /health reports on. */
+interface HealthCheck
 {
+    /** The key of this dependency in the report. */
     public function name(): string;
 
     /** Throws when the dependency does not answer. */
     public function run(): void;
 }
 `),
-    ...phpClass(root, getHealth, [healthCheck], raw`final readonly class GetHealth
+    ...phpClass(root, getHealth, [healthCheck], raw`/** Runs every health check and sums up the result. */
+final readonly class GetHealth
 {
     /** @param iterable<HealthCheck> $checks */
     public function __construct(private iterable $checks)${emptyBody}
@@ -84,7 +88,8 @@ final class AppError extends \RuntimeException
     }
 }
 `),
-    ...phpClass(root, redactor, ["Monolog\\LogRecord", "Monolog\\Processor\\ProcessorInterface"], raw`final class RedactLogProcessor implements ProcessorInterface
+    ...phpClass(root, redactor, ["Monolog\\LogRecord", "Monolog\\Processor\\ProcessorInterface"], raw`/** Hides the secrets of a log context, at any depth. */
+final class RedactLogProcessor implements ProcessorInterface
 {
     private const SECRET_KEYS = ['authorization', 'cookie', 'password', 'token', 'secret', 'apikey', 'api_key'];
 
@@ -120,6 +125,7 @@ final class PrettyLogFormatter implements FormatterInterface
 
     private readonly bool $color;
 
+    /** Colors stay on unless NO_COLOR is set. */
     public function __construct(?bool $color = null)
     {
         // Forced: DevHub reads logs through a pipe, where a TTY check turns colors off.

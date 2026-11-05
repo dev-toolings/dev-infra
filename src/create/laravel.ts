@@ -85,21 +85,26 @@ export function laravelFiles({ name, modules, eloquent, postgres, redis, mail, d
     ...phpClass("app", "App\\Providers\\AppServiceProvider", [
       layout.getHealth, "Illuminate\\Support\\ServiceProvider",
       ...(postgres ? [databaseCheck] : []), ...(redis ? [redisCheck] : []),
-    ], raw`final class AppServiceProvider extends ServiceProvider
+    ], raw`/** Wires the services of the app. */
+final class AppServiceProvider extends ServiceProvider
 {
+    /** Binds the services that the container cannot resolve alone. */
     public function register(): void
     {
         $this->app->when(GetHealth::class)->needs('$checks')->give(fn () => [${checks.join(", ")}]);
     }
 }
 `),
-    ...phpClass("app", healthController, [layout.getHealth, "Illuminate\\Http\\JsonResponse"], raw`final class HealthController
+    ...phpClass("app", healthController, [layout.getHealth, "Illuminate\\Http\\JsonResponse"], raw`/** The routes that tell the app is up. */
+final class HealthController
 {
+    /** Names the app and points to its health route. */
     public function index(): JsonResponse
     {
         return new JsonResponse(['name' => config('app.name'), 'health' => '/health']);
     }
 
+    /** Answers 200 when every dependency is up, 503 otherwise. */
     public function health(GetHealth $getHealth): JsonResponse
     {
         $report = $getHealth();
@@ -112,6 +117,7 @@ export function laravelFiles({ name, modules, eloquent, postgres, redis, mail, d
     ...phpClass("app", `${http}\\AccessLog`, ["Closure", "Illuminate\\Http\\Request", "Illuminate\\Support\\Facades\\Log", "Illuminate\\Support\\Str", "Symfony\\Component\\HttpFoundation\\Response"], raw`/** One line per request. What it remembers stays on the request: under Octane, this object can outlive it. */
 final class AccessLog
 {
+    /** Gives the request an id, then logs it with its response. */
     public function handle(Request $request, Closure $next): Response
     {
         $started = hrtime(true);
@@ -143,6 +149,7 @@ final class ErrorResponse
 {
     private const STATUS = ['invalid' => 400, 'not_found' => 404];
 
+    /** Turns any failure into the JSON error of the app. */
     public static function for(Throwable $error, Request $request): JsonResponse
     {
         $requestId = $request->attributes->getString('requestId');
@@ -159,75 +166,65 @@ final class ErrorResponse
     }
 }
 `),
-    "tests/TestCase.php": lines("<?php", "", "namespace App\\Tests;", "", "use Illuminate\\Foundation\\Testing\\TestCase as BaseTestCase;", "", "abstract class TestCase extends BaseTestCase {}"),
+    "tests/TestCase.php": lines("<?php", "", "namespace App\\Tests;", "", "use Illuminate\\Foundation\\Testing\\TestCase as BaseTestCase;", "", "/** The base of every test: it boots the app. */", "abstract class TestCase extends BaseTestCase {}"),
+    // Tests read it in place of `.env`, which a fresh clone does not have.
+    ".env.testing": lines("# The test values are in phpunit.xml."),
+    "tests/Pest.php": lines("<?php", "", "use App\\Tests\\TestCase;", "", "pest()->extend(TestCase::class)->in('.');"),
     "tests/AppTest.php": raw`<?php
 
-namespace App\Tests;
-
 ${[layout.getHealth, layout.healthCheck].sort().map((item) => `use ${item};`).join("\n")}
-use RuntimeException;
 
-final class AppTest extends TestCase
-{
-    public function test_health_is_degraded_when_a_dependency_fails(): void
+use function Pest\Laravel\getJson;
+use function Pest\Laravel\postJson;
+
+test('health is degraded when a dependency fails', function () {
+    $check = new class implements HealthCheck
     {
-        $check = new class implements HealthCheck
+        public function name(): string
         {
-            public function name(): string
-            {
-                return 'database';
-            }
-
-            public function run(): void
-            {
-                throw new RuntimeException('down');
-            }
-        };
-
-        self::assertSame(['status' => 'degraded', 'checks' => ['database' => false]], (new GetHealth([$check]))());
-    }
-
-    public function test_the_app_answers(): void
-    {
-        $this->getJson('/')->assertOk();
-    }
-
-    public function test_every_failure_answers_the_same_json_with_a_request_id(): void
-    {
-        $cases = [
-            [$this->getJson('/unknown'), 404, 'not_found'],
-            [$this->postJson('/health'), 405, 'http_error'],
-        ];
-        foreach ($cases as [$response, $status, $code]) {
-            $response->assertStatus($status)->assertJsonPath('error.code', $code)->assertHeader('X-Request-Id');
+            return 'database';
         }
+
+        public function run(): void
+        {
+            throw new RuntimeException('down');
+        }
+    };
+
+    expect((new GetHealth([$check]))())->toBe(['status' => 'degraded', 'checks' => ['database' => false]]);
+});
+
+test('the app answers', function () {
+    getJson('/')->assertOk();
+});
+
+test('every failure answers the same JSON with a request id', function () {
+    $cases = [
+        [getJson('/unknown'), 404, 'not_found'],
+        [postJson('/health'), 405, 'http_error'],
+    ];
+    foreach ($cases as [$response, $status, $code]) {
+        $response->assertStatus($status)->assertJsonPath('error.code', $code)->assertHeader('X-Request-Id');
     }
-}
+});
 `,
     "tests/LogTest.php": raw`<?php
 
-namespace App\Tests;
+${[layout.formatter, layout.redactor, "Monolog\\Level", "Monolog\\LogRecord"].sort().map((item) => `use ${item};`).join("\n")}
 
-${[layout.formatter, layout.redactor, "DateTimeImmutable", "Monolog\\Level", "Monolog\\LogRecord", "PHPUnit\\Framework\\TestCase"].sort().map((item) => `use ${item};`).join("\n")}
+test('an HTTP line is readable and keeps its fields', function () {
+    $fields = ['requestId' => 'r', 'method' => 'GET', 'path' => '/users/1', 'route' => 'users/{id}', 'status' => 200, 'durationMs' => 5];
+    $line = (new PrettyLogFormatter(false))->format(new LogRecord(new DateTimeImmutable, 'app', Level::Info, 'http request', $fields));
 
-final class LogTest extends TestCase
-{
-    public function test_an_http_line_is_readable_and_keeps_its_fields(): void
-    {
-        $fields = ['requestId' => 'r', 'method' => 'GET', 'path' => '/users/1', 'route' => 'users/{id}', 'status' => 200, 'durationMs' => 5];
-        $line = (new PrettyLogFormatter(false))->format(new LogRecord(new DateTimeImmutable, 'app', Level::Info, 'http request', $fields));
+    expect($line)->toEndWith("INFO: GET /users/1 200 5ms  requestId=r route=users/{id}\n");
+});
 
-        self::assertStringEndsWith("INFO: GET /users/1 200 5ms  requestId=r route=users/{id}\n", $line);
-    }
+test('secrets are redacted', function () {
+    $record = new LogRecord(new DateTimeImmutable, 'app', Level::Info, 'login', ['password' => 'hunter2', 'nested' => ['token' => 'abc']]);
 
-    public function test_secrets_are_redacted(): void
-    {
-        $record = new LogRecord(new DateTimeImmutable, 'app', Level::Info, 'login', ['password' => 'hunter2', 'nested' => ['token' => 'abc']]);
-
-        self::assertSame(['password' => '[redacted]', 'nested' => ['token' => '[redacted]']], (new RedactLogProcessor)($record)->context);
-    }
-}
-`.replace("use PHPUnit\\Framework\\TestCase;\n", ""),
+    expect((new RedactLogProcessor)($record)->context)->toBe(['password' => '[redacted]', 'nested' => ['token' => '[redacted]']]);
+});
+`,
     "phpstan.neon": lines("includes:", "    - vendor/larastan/larastan/extension.neon", "", "parameters:", "    level: 6", "    paths:", "        - app", "        - tests"),
     "phpunit.xml": lines(
       '<?xml version="1.0" encoding="UTF-8"?>',
@@ -280,7 +277,8 @@ final class LogTest extends TestCase
 
   if (eloquent) files["database/migrations/.gitignore"] = "";
   if (postgres) {
-    Object.assign(files, phpClass("app", databaseCheck, [layout.healthCheck, "Illuminate\\Support\\Facades\\DB"], raw`final class DatabaseCheck implements HealthCheck
+    Object.assign(files, phpClass("app", databaseCheck, [layout.healthCheck, "Illuminate\\Support\\Facades\\DB"], raw`/** Checks that the database answers. */
+final class DatabaseCheck implements HealthCheck
 {
     public function name(): string
     {
@@ -295,7 +293,8 @@ final class LogTest extends TestCase
 `));
   }
   if (redis) {
-    Object.assign(files, phpClass("app", redisCheck, [layout.healthCheck, "Illuminate\\Support\\Facades\\Redis"], raw`final class RedisCheck implements HealthCheck
+    Object.assign(files, phpClass("app", redisCheck, [layout.healthCheck, "Illuminate\\Support\\Facades\\Redis"], raw`/** Checks that Redis answers. */
+final class RedisCheck implements HealthCheck
 {
     public function name(): string
     {

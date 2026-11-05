@@ -99,13 +99,14 @@ file DevHub manages: non-root user, no capabilities, ports on this machine only.
 | `php` | `symfonyVersion` | `7.4` (LTS), `8.1` |
 | `php` | `pattern` | `standard` (the framework layout), `modules`. Same JSON errors and request logs as Node, with no example resource |
 | `php` | `symfonyOrm` | `none`, `doctrine` (selects Postgres) |
+| `php` | `symfonyApi` | `none`, `api-platform` (the API under `/api`, its docs at `/api/docs`, CORS) |
 | `php` | `laravelOrm` | `none`, `eloquent` (selects Postgres) |
 
 Services are `postgres`, `redis` and `mailpit`. Every project has a `/health` route and
 exact dependency versions. Node projects use strict TypeScript, Zod for configuration and
 Biome. Python projects use uv, typed settings, Ruff, mypy and pytest. PHP projects use
-Composer, PHPStan and PHPUnit, with PHP-CS-Fixer on Symfony and Pint on Laravel. They start
-from an API of their own, not the full framework skeleton.
+Composer, PHPStan and Pest, with PHP-CS-Fixer and `phpstan-symfony` on Symfony, Pint and
+Larastan on Laravel. They start from an API of their own, not the full framework skeleton.
 
 Symfony and Laravel keep their official environment files and variable names. Symfony
 commits `.env` with defaults and keeps the values of the machine in `.env.local`. Laravel

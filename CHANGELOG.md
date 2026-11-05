@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   tests, type checks and lint, in both code structures, with optional SQLAlchemy and Alembic.
 - New Symfony and Laravel projects get that base without an example resource, in both code
   structures, with optional Doctrine or Eloquent. `standard` is their default structure.
+- Symfony projects can start with API Platform: resources under `/api`, docs at `/api/docs`,
+  CORS, with Doctrine or with providers and processors of their own. The errors of a
+  resource stay in its own format.
 - Symfony and Laravel projects keep their official environment files and variable names: a
   committed `.env` and a local `.env.local` for Symfony, `.env.example` and `.env` for Laravel.
 - PHP projects run on FrankenPHP in Docker, Symfony in worker mode and Laravel under Octane,
@@ -82,6 +85,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`devhub serve`, `devhub pair`) and a connected React control panel.
 
 ### Changed
+- New Symfony and Laravel projects test with Pest in place of PHPUnit, and Symfony projects
+  add `phpstan-symfony` to PHPStan. Their `AGENTS.md` now states the PSR, PHPDoc, PHPStan and
+  Pest rules.
 - Action and refresh failures in the panel now appear as one toast per source in the
   bottom right corner, instead of banners and a repeated error on each recent operation
   row. Hover a row to read its error.

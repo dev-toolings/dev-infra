@@ -40,8 +40,13 @@
     "doctrine/orm": "3.7.6",
     "doctrine/doctrine-bundle": "3.3.4",
     "doctrine/doctrine-migrations-bundle": "4.0.1",
-    "phpunit/phpunit": "13.4.6",
+    "api-platform/symfony": "5.0.5",
+    "api-platform/doctrine-orm": "5.0.5",
+    "nelmio/cors-bundle": "2.6.1",
+    "pestphp/pest": "5.3.5",
+    "pestphp/pest-plugin-laravel": "5.0.1",
     "phpstan/phpstan": "2.3.5",
+    "phpstan/phpstan-symfony": "2.1.1",
     "friendsofphp/php-cs-fixer": "3.95.28"
   },
   "images": {
@@ -72,7 +77,8 @@
         "symfony/serializer": "7.4.23",
         "symfony/property-access": "7.4.23",
         "symfony/property-info": "7.4.23",
-        "symfony/mailer": "7.4.22"
+        "symfony/mailer": "7.4.22",
+        "symfony/twig-bundle": "7.4.21"
       },
       "8.1": {
         "symfony/framework-bundle": "8.1.11",
@@ -84,7 +90,8 @@
         "symfony/serializer": "8.1.11",
         "symfony/property-access": "8.1.11",
         "symfony/property-info": "8.1.11",
-        "symfony/mailer": "8.1.10"
+        "symfony/mailer": "8.1.10",
+        "symfony/twig-bundle": "8.1.9"
       }
     }
   }

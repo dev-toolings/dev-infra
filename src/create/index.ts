@@ -62,6 +62,7 @@ export function recipe(stack: string, id: string, mode: CreateMode, port: number
   if (stack === "php") {
     const laravel = options.framework === "laravel", modules = options.pattern === "modules";
     const orm = laravel ? options.laravelOrm : options.symfonyOrm;
+    const apiPlatform = !laravel && options.symfonyApi === "api-platform";
     const checks = ["composer validate --no-check-publish", "composer lint", "composer analyse", "composer test"];
     const layout = modules ? [
       `\`${laravel ? "app" : "src"}/Modules/<Name>\`: one folder per feature, like \`Health\`.`,
@@ -77,16 +78,17 @@ export function recipe(stack: string, id: string, mode: CreateMode, port: number
       "`src/Controller`: the controllers.",
       "`src/EventListener`: the access log and the error handler.",
       ...(orm === "doctrine" ? ["`src/Entity`: the Doctrine entities."] : []),
+      ...(apiPlatform ? ["`src/ApiResource`: the API Platform resources.", "`src/State`: their providers and processors."] : []),
     ];
     return {
       toolchain: "composer", checks, image: lineImage(versions.lines.php, options.phpVersion), tools: ["php", "composer"], ...(laravel ? { extensions: ["pcntl"] } : {}),
       hostExtensions: services.includes("postgres") ? ["pdo_pgsql"] : [],
       ...(laravel ? {} : { envFile: ".env.local" }), translateEnv: (env) => frameworkEnv(options.framework!, env), files: {
-        ...phpFiles({ name: id, framework: options.framework!, pattern: options.pattern!, symfonyVersion: options.symfonyVersion, orm: orm!, services, docker }),
+        ...phpFiles({ name: id, framework: options.framework!, pattern: options.pattern!, symfonyVersion: options.symfonyVersion, orm: orm!, apiPlatform, services, docker }),
         ...agents(laravel ? "Laravel" : "Symfony", checks, [
           ...layout,
           ...(laravel ? ["`routes/api.php`: the routes.", "`app/Providers/AppServiceProvider.php`: wires the services."] : ["`config/services.php`: wires the services.", "`config/packages`: configures the bundles."]),
-        ], [...(laravel ? AGENT_RULES.laravel : AGENT_RULES.symfony), ...(docker ? (laravel ? AGENT_RULES.octane : AGENT_RULES.frankenphp) : [])], laravel ? AGENT_FEATURE.laravel(modules, orm === "eloquent") : AGENT_FEATURE.symfony(modules, orm === "doctrine")),
+        ], [...AGENT_RULES.php, ...(laravel ? AGENT_RULES.laravel : AGENT_RULES.symfony), ...(apiPlatform ? AGENT_RULES.apiPlatform : []), ...(docker ? (laravel ? AGENT_RULES.octane : AGENT_RULES.frankenphp) : [])], laravel ? AGENT_FEATURE.laravel(modules, orm === "eloquent") : AGENT_FEATURE.symfony(modules, orm === "doctrine", apiPlatform)),
       }, install: "composer install",
       dev: !docker ? `php -S ${host}:${listen} -t public public/index.php` : laravel ? `php artisan octane:frankenphp --host=${host} --port=${listen} --watch --log-level=WARN` : "frankenphp run --config Caddyfile",
       env: laravel

@@ -2,23 +2,24 @@ import { layoutFor, pathOf, phpClass, sharedFiles, shortName } from "./php-share
 
 const raw = String.raw;
 
-export type SymfonyOptions = { name: string; modules: boolean; doctrine: boolean; postgres: boolean; redis: boolean; mail: boolean; docker: boolean };
+export type SymfonyOptions = { name: string; modules: boolean; doctrine: boolean; apiPlatform: boolean; postgres: boolean; redis: boolean; mail: boolean; docker: boolean };
 
 /** Same lines in every Symfony file of `config/`. */
 const configFile = (uses: string[], body: string) => ["<?php", "", ...[...uses.filter((item) => !item.startsWith("function ")), "Symfony\\Component\\DependencyInjection\\Loader\\Configurator\\ContainerConfigurator"].sort().map((item) => `use ${item};`), "", ...uses.filter((item) => item.startsWith("function ")).flatMap((item) => [`use ${item};`, ""]), "return static function (ContainerConfigurator $container): void {", body, "};", ""].join("\n");
 
-export function symfonyFiles({ name, modules, doctrine, postgres, redis, mail, docker }: SymfonyOptions): Record<string, string> {
+export function symfonyFiles({ name, modules, doctrine, apiPlatform, postgres, redis, mail, docker }: SymfonyOptions): Record<string, string> {
   const layout = layoutFor("src", modules, { error: "App\\Exception\\AppError", logging: "App\\Logging", health: "App\\Health" });
   const http = modules ? "App\\Shared\\Infrastructure\\Http" : "App\\EventListener";
   const health = modules ? "App\\Modules\\Health\\Infrastructure" : "App\\Health";
   const healthController = modules ? `${health}\\Http\\HealthController` : "App\\Controller\\HealthController";
   const databaseCheck = `${health}\\DatabaseCheck`, redisCheck = `${health}\\RedisCheck`;
-  const excluded = ["../src/Kernel.php", pathOf("../src", layout.error), ...(doctrine && !modules ? ["../src/Entity/"] : [])];
+  const excluded = ["../src/Kernel.php", pathOf("../src", layout.error), ...(doctrine && !modules ? ["../src/Entity/"] : []), ...(apiPlatform && !modules ? ["../src/ApiResource/"] : [])];
+  const resourcePaths = modules ? ["src/Modules"] : ["src/ApiResource", ...(doctrine ? ["src/Entity"] : [])];
 
   const files: Record<string, string> = {
     ...sharedFiles(layout),
-    "src/Kernel.php": ["<?php", "", "namespace App;", "", "use Symfony\\Bundle\\FrameworkBundle\\Kernel\\MicroKernelTrait;", "use Symfony\\Component\\HttpKernel\\Kernel as BaseKernel;", "", "final class Kernel extends BaseKernel", "{", "    use MicroKernelTrait;", "}", ""].join("\n"),
-    "public/index.php": ["<?php", "", "use App\\Kernel;", "", "require_once dirname(__DIR__).'/vendor/autoload_runtime.php';", "", "return static fn (array $context) => new Kernel($context['APP_ENV'] ?? 'dev', (bool) ($context['APP_DEBUG'] ?? true));", ""].join("\n"),
+    "src/Kernel.php": ["<?php", "", "namespace App;", "", "use Symfony\\Bundle\\FrameworkBundle\\Kernel\\MicroKernelTrait;", "use Symfony\\Component\\HttpKernel\\Kernel as BaseKernel;", "", "/** The app: it loads the bundles, the services and the routes. */", "final class Kernel extends BaseKernel", "{", "    use MicroKernelTrait;", "}", ""].join("\n"),
+    "public/index.php": ["<?php", "", "use App\\Kernel;", "", ...(apiPlatform && !docker ? ["// `php -S` runs this file for every path, and the API docs need their static files.", "if ('cli-server' === PHP_SAPI && is_file(__DIR__.parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH))) {", "    return false;", "}", ""] : []), "require_once dirname(__DIR__).'/vendor/autoload_runtime.php';", "", "return static fn (array $context) => new Kernel($context['APP_ENV'] ?? 'dev', (bool) ($context['APP_DEBUG'] ?? true));", ""].join("\n"),
     "bin/console": raw`#!/usr/bin/env php
 <?php
 
@@ -41,8 +42,8 @@ return function (array $context) {
     return new Application($kernel);
 };
 `,
-    "config/bundles.php": ["<?php", "", "return [", "    Symfony\\Bundle\\FrameworkBundle\\FrameworkBundle::class => ['all' => true],", "    Symfony\\Bundle\\MonologBundle\\MonologBundle::class => ['all' => true],", ...(doctrine ? ["    Doctrine\\Bundle\\DoctrineBundle\\DoctrineBundle::class => ['all' => true],", "    Doctrine\\Bundle\\MigrationsBundle\\DoctrineMigrationsBundle::class => ['all' => true],"] : []), "];", ""].join("\n"),
-    "config/routes.php": ["<?php", "", "use Symfony\\Component\\Routing\\Loader\\Configurator\\RoutingConfigurator;", "", "return static function (RoutingConfigurator $routes): void {", "    $routes->import('../src/', 'attribute');", "};", ""].join("\n"),
+    "config/bundles.php": ["<?php", "", "return [", "    Symfony\\Bundle\\FrameworkBundle\\FrameworkBundle::class => ['all' => true],", "    Symfony\\Bundle\\MonologBundle\\MonologBundle::class => ['all' => true],", ...(doctrine ? ["    Doctrine\\Bundle\\DoctrineBundle\\DoctrineBundle::class => ['all' => true],", "    Doctrine\\Bundle\\MigrationsBundle\\DoctrineMigrationsBundle::class => ['all' => true],"] : []), ...(apiPlatform ? ["    Symfony\\Bundle\\TwigBundle\\TwigBundle::class => ['all' => true],", "    Nelmio\\CorsBundle\\NelmioCorsBundle::class => ['all' => true],", "    ApiPlatform\\Symfony\\Bundle\\ApiPlatformBundle::class => ['all' => true],"] : []), "];", ""].join("\n"),
+    "config/routes.php": ["<?php", "", "use Symfony\\Component\\Routing\\Loader\\Configurator\\RoutingConfigurator;", "", "return static function (RoutingConfigurator $routes): void {", "    $routes->import('../src/', 'attribute');", ...(apiPlatform ? ["    $routes->import('.', 'api_platform')->prefix('/api');"] : []), "};", ""].join("\n"),
     "config/packages/framework.php": configFile([], [
       "    $container->extension('framework', [",
       "        'secret' => '%env(APP_SECRET)%',",
@@ -74,18 +75,21 @@ return function (array $context) {
       ...(postgres && !doctrine ? ["    $services->set(DatabaseCheck::class)->arg('$url', '%env(DATABASE_URL)%');"] : []),
       ...(redis ? ["    $services->set(Client::class)->args(['%env(REDIS_URL)%?timeout=2&read_write_timeout=2', ['prefix' => '%env(REDIS_PREFIX)%']]);"] : []),
     ].join("\n")),
-    ...phpClass("src", healthController, [layout.getHealth, "Symfony\\Component\\HttpFoundation\\JsonResponse", "Symfony\\Component\\Routing\\Attribute\\Route"], raw`final readonly class HealthController
+    ...phpClass("src", healthController, [layout.getHealth, "Symfony\\Component\\HttpFoundation\\JsonResponse", "Symfony\\Component\\Routing\\Attribute\\Route"], raw`/** The routes that tell the app is up. */
+final readonly class HealthController
 {
     public function __construct(private GetHealth $getHealth)
     {
     }
 
+    /** Names the app and points to its health route. */
     #[Route('/', methods: ['GET'])]
     public function index(): JsonResponse
     {
         return new JsonResponse(['name' => ${phpString(name)}, 'health' => '/health']);
     }
 
+    /** Answers 200 when every dependency is up, 503 otherwise. */
     #[Route('/health', methods: ['GET'])]
     public function health(): JsonResponse
     {
@@ -108,6 +112,7 @@ final readonly class RequestLogSubscriber implements EventSubscriberInterface
         return [KernelEvents::REQUEST => ['start', 4096], KernelEvents::RESPONSE => ['finish', -4096]];
     }
 
+    /** Gives the request an id and starts its timer. */
     public function start(RequestEvent $event): void
     {
         if (false === $event->isMainRequest()) {
@@ -119,6 +124,7 @@ final readonly class RequestLogSubscriber implements EventSubscriberInterface
         $request->attributes->set('startedAt', hrtime(true));
     }
 
+    /** Logs the request with its response. */
     public function finish(ResponseEvent $event): void
     {
         if (false === $event->isMainRequest()) {
@@ -141,7 +147,11 @@ final readonly class RequestLogSubscriber implements EventSubscriberInterface
         }
         $level = $status >= 500 ? 'error' : ($status >= 400 ? 'warning' : 'info');
         $this->logger->log($level, 'http request', $fields);
-    }
+${apiPlatform ? raw`        $failure = $request->attributes->get('failure');
+        if ($status >= 500 && $failure instanceof \Throwable) {
+            $this->logger->error('unhandled error', ['exception' => $failure, 'requestId' => $fields['requestId']]);
+        }
+` : ""}    }
 }
 `),
     ...phpClass("src", `${http}\\ErrorSubscriber`, [layout.error, "Psr\\Log\\LoggerInterface", "Symfony\\Component\\EventDispatcher\\EventSubscriberInterface", "Symfony\\Component\\HttpFoundation\\JsonResponse", "Symfony\\Component\\HttpKernel\\Event\\ExceptionEvent", "Symfony\\Component\\HttpKernel\\Exception\\HttpExceptionInterface", "Symfony\\Component\\HttpKernel\\Exception\\NotFoundHttpException", "Symfony\\Component\\HttpKernel\\KernelEvents", "Symfony\\Component\\Validator\\Exception\\ValidationFailedException"], raw`/** Every failure leaves as the same JSON, and an unknown one never shows its details. */
@@ -158,12 +168,20 @@ final readonly class ErrorSubscriber implements EventSubscriberInterface
         return [KernelEvents::EXCEPTION => ['onException', 1]];
     }
 
+    /** Turns any failure into the JSON error of the app. */
     public function onException(ExceptionEvent $event): void
     {
         $error = $event->getThrowable();
         $request = $event->getRequest();
         $requestId = $request->attributes->getString('requestId');
-        $invalid = $error->getPrevious();
+${apiPlatform ? raw`        // API Platform answers its own routes, in the format the client asked for.
+        if ($request->attributes->has('_api_resource_class') && !$error instanceof AppError) {
+            // Only API Platform knows the status: the access log reports it once the response exists.
+            $request->attributes->set('failure', $error);
+
+            return;
+        }
+` : ""}        $invalid = $error->getPrevious();
         [$status, $code, $message] = match (true) {
             $error instanceof AppError => [self::STATUS[$error->errorCode], $error->errorCode, $error->getMessage()],
             $invalid instanceof ValidationFailedException => [400, 'invalid', self::issues($invalid)],
@@ -189,99 +207,83 @@ final readonly class ErrorSubscriber implements EventSubscriberInterface
     }
 }
 `),
+    "tests/Pest.php": raw`<?php
+
+use App\Kernel;
+use Symfony\Component\HttpFoundation\Request;
+use Symfony\Component\HttpFoundation\Response;
+
+/** Sends a request. Pass the same kernel to two calls to keep its services between them; debug rebuilds its cache after a code change. */
+function send(string $method, string $path, ?string $body = null, Kernel $kernel = new Kernel('test', true), string $type = 'application/json'): Response
+{
+    return $kernel->handle(Request::create($path, $method, server: ['CONTENT_TYPE' => $type], content: $body));
+}
+
+/** @return array<string, mixed> */
+function payload(Response $response): array
+{
+    return json_decode((string) $response->getContent(), true, flags: JSON_THROW_ON_ERROR);
+}
+`,
     "tests/AppTest.php": raw`<?php
 
-namespace App\Tests;
+${[...new Set([layout.getHealth, layout.healthCheck])].sort().map((item) => `use ${item};`).join("\n")}
 
-${[...new Set([layout.getHealth, layout.healthCheck, "App\\Kernel", "PHPUnit\\Framework\\TestCase", "Symfony\\Component\\HttpFoundation\\Request", "Symfony\\Component\\HttpFoundation\\Response"])].sort().map((item) => `use ${item};`).join("\n")}
-
-final class AppTest extends TestCase
-{
-    private Kernel $kernel;
-
-    protected function setUp(): void
-    {
-        $this->kernel = new Kernel('test', false);
-    }
-
-    protected function tearDown(): void
-    {
-        $this->kernel->shutdown();
-    }
-
-    public function testHealthIsDegradedWhenADependencyFails(): void
-    {
-        $check = new class implements HealthCheck {
-            public function name(): string
-            {
-                return 'database';
-            }
-
-            public function run(): void
-            {
-                throw new \RuntimeException('down');
-            }
-        };
-
-        self::assertSame(['status' => 'degraded', 'checks' => ['database' => false]], (new GetHealth([$check]))());
-    }
-
-    public function testTheAppAnswers(): void
-    {
-        self::assertSame(200, $this->send('GET', '/')->getStatusCode());
-    }
-
-    public function testEveryFailureAnswersTheSameJsonWithARequestId(): void
-    {
-        $cases = [
-            [$this->send('GET', '/unknown'), 404, 'not_found'],
-            [$this->send('POST', '/health'), 405, 'http_error'],
-        ];
-        foreach ($cases as [$response, $status, $code]) {
-            self::assertSame($status, $response->getStatusCode());
-            self::assertSame($code, $this->json($response)['error']['code']);
-            self::assertNotEmpty($response->headers->get('X-Request-Id'));
+test('health is degraded when a dependency fails', function () {
+    $check = new class implements HealthCheck {
+        public function name(): string
+        {
+            return 'database';
         }
-    }
 
-    private function send(string $method, string $path, ?string $body = null): Response
-    {
-        return $this->kernel->handle(Request::create($path, $method, server: ['CONTENT_TYPE' => 'application/json'], content: $body));
-    }
+        public function run(): void
+        {
+            throw new RuntimeException('down');
+        }
+    };
 
-    /** @return array<string, mixed> */
-    private function json(Response $response): array
-    {
-        return json_decode((string) $response->getContent(), true, flags: JSON_THROW_ON_ERROR);
+    expect((new GetHealth([$check]))())->toBe(['status' => 'degraded', 'checks' => ['database' => false]]);
+});
+
+test('the app answers', function () {
+    expect(send('GET', '/')->getStatusCode())->toBe(200);
+});
+
+test('every failure answers the same JSON with a request id', function () {
+    $cases = [
+        [send('GET', '/unknown'), 404, 'not_found'],
+        [send('POST', '/health'), 405, 'http_error'],
+    ];
+    foreach ($cases as [$response, $status, $code]) {
+        expect($response->getStatusCode())->toBe($status);
+        expect(payload($response)['error']['code'])->toBe($code);
+        expect($response->headers->get('X-Request-Id'))->not->toBeEmpty();
     }
-}
-`,
+});
+${apiPlatform ? raw`
+test('the API publishes its documentation', function () {
+    expect(send('GET', '/api/docs.jsonopenapi')->getStatusCode())->toBe(200);
+});
+` : ""}`,
     "tests/LogTest.php": raw`<?php
 
-namespace App\Tests;
+${[...[layout.formatter, layout.redactor], "Monolog\\Level", "Monolog\\LogRecord"].sort().map((item) => `use ${item};`).join("\n")}
 
-${[...[layout.formatter, layout.redactor], "Monolog\\Level", "Monolog\\LogRecord", "PHPUnit\\Framework\\TestCase"].sort().map((item) => `use ${item};`).join("\n")}
+test('an HTTP line is readable and keeps its fields', function () {
+    $fields = ['requestId' => 'r', 'method' => 'GET', 'path' => '/users/1', 'route' => 'users', 'status' => 200, 'durationMs' => 5];
+    $line = (new PrettyLogFormatter(false))->format(new LogRecord(new DateTimeImmutable(), 'app', Level::Info, 'http request', $fields));
 
-final class LogTest extends TestCase
-{
-    public function testAnHttpLineIsReadableAndKeepsItsFields(): void
-    {
-        $fields = ['requestId' => 'r', 'method' => 'GET', 'path' => '/users/1', 'route' => 'users', 'status' => 200, 'durationMs' => 5];
-        $line = (new PrettyLogFormatter(false))->format(new LogRecord(new \DateTimeImmutable(), 'app', Level::Info, 'http request', $fields));
+    expect($line)->toEndWith("INFO: GET /users/1 200 5ms  requestId=r route=users\n");
+});
 
-        self::assertStringEndsWith("INFO: GET /users/1 200 5ms  requestId=r route=users\n", $line);
-    }
+test('secrets are redacted', function () {
+    $record = new LogRecord(new DateTimeImmutable(), 'app', Level::Info, 'login', ['password' => 'hunter2', 'nested' => ['token' => 'abc']]);
 
-    public function testSecretsAreRedacted(): void
-    {
-        $record = new LogRecord(new \DateTimeImmutable(), 'app', Level::Info, 'login', ['password' => 'hunter2', 'nested' => ['token' => 'abc']]);
-
-        self::assertSame(['password' => '[redacted]', 'nested' => ['token' => '[redacted]']], (new RedactLogProcessor())($record)->context);
-    }
-}
+    expect((new RedactLogProcessor())($record)->context)->toBe(['password' => '[redacted]', 'nested' => ['token' => '[redacted]']]);
+});
 `,
-    ".php-cs-fixer.dist.php": ["<?php", "", "$finder = (new PhpCsFixer\\Finder())->in(__DIR__)->exclude('var');", "", "return (new PhpCsFixer\\Config())->setRules(['@Symfony' => true])->setFinder($finder);", ""].join("\n"),
-    "phpstan.dist.neon": ["parameters:", "    level: 6", "    paths:", "        - src", "        - tests", ""].join("\n"),
+    ".php-cs-fixer.dist.php": ["<?php", "", "$finder = (new PhpCsFixer\\Finder())->in(__DIR__)->exclude('var')->notPath('config/reference.php');", "", "return (new PhpCsFixer\\Config())->setRules(['@Symfony' => true])->setFinder($finder);", ""].join("\n"),
+    "phpstan.dist.neon": ["includes:", "    - vendor/phpstan/phpstan-symfony/extension.neon", "    - vendor/phpstan/phpstan-symfony/rules.neon", "", "parameters:", "    level: 6", "    paths:", "        - src", "        - tests", "    symfony:", "        containerXmlPath: var/cache/dev/App_KernelDevDebugContainer.xml", ""].join("\n"),
     "phpunit.dist.xml": [
       '<?xml version="1.0" encoding="UTF-8"?>',
       '<phpunit bootstrap="vendor/autoload.php" colors="true" cacheDirectory=".phpunit.cache">',
@@ -290,6 +292,7 @@ final class LogTest extends TestCase
       '        <server name="APP_SECRET" value="test"/>',
       // Doctrine reads the variable at boot, and connects only on a first query, which tests never make.
       ...(doctrine ? ['        <server name="DATABASE_URL" value="postgres://test:test@127.0.0.1:5432/test"/>'] : []),
+      ...(apiPlatform ? ['        <server name="CORS_ALLOW_ORIGIN" value="^https?://localhost$"/>'] : []),
       "    </php>",
       "    <testsuites>",
       '        <testsuite name="app">',
@@ -298,7 +301,7 @@ final class LogTest extends TestCase
       "    </testsuites>",
       "</phpunit>", "",
     ].join("\n"),
-    ".gitignore": ["/.env.local", "/.env.local.php", "/.env.*.local", "/var/", "/vendor/", ".php-cs-fixer.cache", ".phpunit.cache", ".claude/settings.local.json", ""].join("\n"),
+    ".gitignore": ["/.env.local", "/.env.local.php", "/.env.*.local", "/var/", "/vendor/", ...(apiPlatform ? ["/public/bundles/"] : []), ".php-cs-fixer.cache", ".phpunit.cache", ".claude/settings.local.json", ""].join("\n"),
     // As in the official skeleton: `.env` is committed and holds no secret, `.env.local` holds the values of this machine.
     ".env": [
       "# In all environments, the following files are loaded if they exist,",
@@ -319,6 +322,7 @@ final class LogTest extends TestCase
       ...(mail ? ["###> symfony/mailer ###", "MAILER_DSN=null://null", "###< symfony/mailer ###", ""] : []),
       ...(postgres ? ["###> doctrine/doctrine-bundle ###", "# Format described at https://www.doctrine-project.org/projects/doctrine-dbal/en/latest/reference/configuration.html#connecting-using-a-url", 'DATABASE_URL="postgresql://app:!ChangeMe!@127.0.0.1:5432/app?serverVersion=16&charset=utf8"', "###< doctrine/doctrine-bundle ###", ""] : []),
       ...(redis ? ["###> predis/predis ###", "REDIS_URL=redis://127.0.0.1:6379", "REDIS_PREFIX=", "###< predis/predis ###", ""] : []),
+      ...(apiPlatform ? ["###> nelmio/cors-bundle ###", "CORS_ALLOW_ORIGIN='^https?://(localhost|127\\.0\\.0\\.1)(:[0-9]+)?$'", "###< nelmio/cors-bundle ###", ""] : []),
     ].join("\n"),
     "README.md": [
       `# ${name}`, "",
@@ -328,10 +332,36 @@ final class LogTest extends TestCase
       modules
         ? "Each feature lives in `src/Modules/<Name>`: `Domain` holds the rules and the ports, `Application` the use cases, `Infrastructure` HTTP and storage. Dependencies point inward, and `config/services.php` wires them. `Health` shows the layout."
         : "`src/Controller` holds the HTTP routes, `src/EventListener` the access log and error handling, and `config/services.php` wires them.",
+      ...(apiPlatform ? ["", "API Platform serves the API under `/api`, and its docs at `/api/docs`."] : []),
       "",
     ].join("\n"),
   };
 
+  if (apiPlatform) {
+    if (!modules) files["src/ApiResource/.gitignore"] = "";
+    files["config/packages/api_platform.php"] = configFile([], [
+      "    $container->extension('api_platform', [",
+      `        'title' => ${phpString(name)},`,
+      "        'version' => '1.0.0',",
+      `        'mapping' => ['paths' => [${resourcePaths.map((path) => `'%kernel.project_dir%/${path}'`).join(", ")}]],`,
+      "        'formats' => ['jsonld' => ['application/ld+json'], 'json' => ['application/json']],",
+      "        'defaults' => ['stateless' => true, 'cache_headers' => ['vary' => ['Content-Type', 'Authorization', 'Origin']]],",
+      "    ]);",
+    ].join("\n"));
+    files["config/packages/nelmio_cors.php"] = configFile([], [
+      "    $container->extension('nelmio_cors', [",
+      "        'defaults' => [",
+      "            'origin_regex' => true,",
+      "            'allow_origin' => ['%env(CORS_ALLOW_ORIGIN)%'],",
+      "            'allow_methods' => ['GET', 'OPTIONS', 'POST', 'PUT', 'PATCH', 'DELETE'],",
+      "            'allow_headers' => ['Content-Type', 'Authorization'],",
+      "            'expose_headers' => ['Link'],",
+      "            'max_age' => 3600,",
+      "        ],",
+      "        'paths' => ['^/' => null],",
+      "    ]);",
+    ].join("\n"));
+  }
   if (docker) {
     files.Caddyfile = [
       "# Paths are explicit: the default of `watch` also covers `var/cache`, which the app rewrites at boot.",
@@ -358,7 +388,8 @@ final class LogTest extends TestCase
     if (!modules) files["src/Entity/.gitignore"] = "";
   }
   if (postgres) {
-    Object.assign(files, phpClass("src", databaseCheck, [layout.healthCheck, ...(doctrine ? ["Doctrine\\DBAL\\Connection"] : [])], doctrine ? raw`final readonly class DatabaseCheck implements HealthCheck
+    Object.assign(files, phpClass("src", databaseCheck, [layout.healthCheck, ...(doctrine ? ["Doctrine\\DBAL\\Connection"] : [])], doctrine ? raw`/** Checks that the database answers. */
+final readonly class DatabaseCheck implements HealthCheck
 {
     public function __construct(private Connection $connection)
     {
@@ -374,7 +405,8 @@ final class LogTest extends TestCase
         $this->connection->executeQuery('select 1');
     }
 }
-` : raw`final readonly class DatabaseCheck implements HealthCheck
+` : raw`/** Checks that the database answers. */
+final readonly class DatabaseCheck implements HealthCheck
 {
     public function __construct(private string $url)
     {
@@ -396,7 +428,8 @@ final class LogTest extends TestCase
 `));
   }
   if (redis) {
-    Object.assign(files, phpClass("src", redisCheck, [layout.healthCheck, "Predis\\Client"], raw`final readonly class RedisCheck implements HealthCheck
+    Object.assign(files, phpClass("src", redisCheck, [layout.healthCheck, "Predis\\Client"], raw`/** Checks that Redis answers. */
+final readonly class RedisCheck implements HealthCheck
 {
     public function __construct(private Client $client)
     {

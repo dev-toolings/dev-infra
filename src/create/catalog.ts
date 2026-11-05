@@ -52,6 +52,7 @@ export const STACKS: StackDefinition[] = [{
     ] },
     { id: "pattern", label: "Code structure", default: "standard", choices: [{ value: "standard", label: "Framework layout" }, { value: "modules", label: "Modules by domain" }] },
     { id: "symfonyOrm", label: "Database layer", when: { option: "framework", value: "symfony" }, default: "none", choices: [{ value: "none", label: "None" }, { value: "doctrine", label: "Doctrine ORM", services: ["postgres"] }] },
+    { id: "symfonyApi", label: "API layer", when: { option: "framework", value: "symfony" }, default: "none", choices: [{ value: "none", label: "None" }, { value: "api-platform", label: "API Platform" }] },
     { id: "laravelOrm", label: "Database layer", when: { option: "framework", value: "laravel" }, default: "none", choices: [{ value: "none", label: "None" }, { value: "eloquent", label: "Eloquent", services: ["postgres"] }] },
   ],
 }];

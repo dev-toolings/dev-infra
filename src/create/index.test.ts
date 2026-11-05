@@ -247,8 +247,35 @@ test("AGENTS.md carries the rules of the framework, the runtime, the mode and th
   expect(native).not.toContain("docker compose");
   expect(native).not.toContain("drizzle");
   expect(await agents({ stack: "python", name: "api" })).toContain("`uv add`");
-  expect(await agents({ stack: "php", name: "sf", options: { framework: "symfony" } })).toContain("There is no Flex");
-  expect(await agents({ stack: "php", name: "lv", options: { framework: "laravel" } })).toContain("no `/api` prefix");
+  const symfony = await agents({ stack: "php", name: "sf", options: { framework: "symfony" } });
+  const laravel = await agents({ stack: "php", name: "lv", options: { framework: "laravel" } });
+  expect(symfony).toContain("There is no Flex");
+  expect(laravel).toContain("no `/api` prefix");
+  for (const rules of [symfony, laravel]) for (const rule of ["PSR-12", "Write a PHPDoc", "Never lower the PHPStan level", "Write tests with Pest"]) expect(rules).toContain(rule);
+  expect(laravel).toContain("`Pest\\Laravel`");
+  expect(symfony).toContain("`tests/Pest.php`");
+});
+
+test("API Platform is an option of Symfony projects", async () => {
+  const { creator } = fixture();
+  const plan = (options: Record<string, string>) => creator.plan(input({ stack: "php", mode: "native", options }));
+  const { contents } = await plan({ symfonyApi: "api-platform", symfonyOrm: "doctrine" });
+  const composer = JSON.parse(contents["composer.json"]!);
+  expect(composer.require).toContainKeys(["api-platform/symfony", "api-platform/doctrine-orm", "nelmio/cors-bundle", "symfony/twig-bundle"]);
+  expect(composer.scripts["post-install-cmd"]).toContain("assets:install");
+  expect(composer.conflict["symfony/security-core"]).toBe(">=8");
+  expect(contents["config/bundles.php"]).toContain("ApiPlatformBundle");
+  expect(contents["config/routes.php"]).toContain("'api_platform'");
+  expect(contents["config/packages/api_platform.php"]).toContain("/src/Entity'");
+  expect(contents["public/index.php"]).toContain("cli-server");
+  expect(contents["AGENTS.md"]).toContain("`#[ApiResource]`");
+  expect(contents[".claude/skills/add-feature/SKILL.md"]).toContain("add `#[ApiResource]` to the entity");
+  const plain = (await plan({})).contents;
+  expect(JSON.parse(plain["composer.json"]!).require).not.toContainKey("api-platform/symfony");
+  expect(plain).not.toHaveProperty(["config/packages/api_platform.php"]);
+  expect(plain["AGENTS.md"]).not.toContain("ApiResource");
+  expect((await plan({ framework: "laravel" })).input.options).not.toHaveProperty("symfonyApi");
+  expect((await creator.plan(input({ stack: "php", options: { symfonyApi: "api-platform" } }))).contents["public/index.php"]).not.toContain("cli-server");
 });
 
 test("the add-feature skill follows the stack, the code structure and the mode", async () => {

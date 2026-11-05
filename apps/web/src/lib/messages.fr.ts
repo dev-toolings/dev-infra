@@ -366,6 +366,7 @@ export const fr = {
   "Runtime": "Runtime",
   "Code structure": "Structure du code",
   "Database layer": "Couche base de données",
+  "API layer": "Couche API",
   "Node.js with npm": "Node.js avec npm",
   "Modules by domain": "Modules par domaine",
   "Standard routes": "Routes standard",

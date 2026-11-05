@@ -18,12 +18,16 @@ export const AGENT_FEATURE = {
     ...(sqlalchemy ? [`${pattern === "modules" ? "Rename the table in the copied `schema.py`" : "Add the table to `app/lib/schema.py` and copy `app/services/sqlalchemy_note_store.py`"}, then run \`uv run alembic revision --autogenerate -m "<name>"\` and \`uv run alembic upgrade head\`.`] : []),
     "Format with `uv run ruff format .`.",
   ],
-  symfony: (modules: boolean, doctrine: boolean) => [
+  symfony: (modules: boolean, doctrine: boolean, apiPlatform: boolean) => [
     `Route: create a controller in \`${modules ? "src/Modules/<Name>/Infrastructure/Http" : "src/Controller"}\` with \`#[Route('/path', methods: ['GET'])]\`. It is found on its own.`,
     "Request body: declare a readonly class of its fields with `Assert` constraints, and take it with `#[MapRequestPayload]`.",
     `Logic: create a class in \`${modules ? "src/Modules/<Name>/Application" : "src/Service"}\`, and take it in the constructor of the controller.`,
     ...(doctrine ? [`Table: create an entity in \`${modules ? "src/Modules/<Name>/Infrastructure/Persistence" : "src/Entity"}\`, then run \`php bin/console doctrine:migrations:diff\` and \`php bin/console doctrine:migrations:migrate --no-interaction\`. Both need the database.`] : []),
-    "Add a test to `tests/AppTest.php`.",
+    ...(apiPlatform ? doctrine ? ["API resource: add `#[ApiResource]` to the entity, with `Assert` constraints. API Platform reads and writes it through Doctrine."] : [
+      `API resource: create a class with \`#[ApiResource]\` in \`${modules ? "src/Modules/<Name>/Infrastructure/ApiResource" : "src/ApiResource"}\`, mark its id with \`#[ApiProperty(identifier: true)]\`, and add \`Assert\` constraints.`,
+      `State: implement \`ProviderInterface\` and \`ProcessorInterface\` in \`${modules ? "src/Modules/<Name>/Infrastructure/State" : "src/State"}\`, and name them in its operations: \`new Get(provider: BookProvider::class)\`.`,
+    ] : []),
+    `Add a test to \`tests/AppTest.php\`.${doctrine ? " `DATABASE_URL` in `phpunit.dist.xml` is a placeholder: a test that reaches Doctrine needs a real test database." : ""}`,
     "Package: run `composer require <package>:<exact version>`. A hand edit of `composer.json` leaves the lock stale, and `composer validate` fails.",
     "Bundle: also add it to `config/bundles.php`, and configure it in `config/packages`.",
     "Format with `vendor/bin/php-cs-fixer fix`.",
@@ -76,11 +80,23 @@ export const AGENT_RULES = {
     "Apply schema changes with `uv run alembic revision --autogenerate`, then `uv run alembic upgrade head`: never `create_all()`.",
     "Commit all of `migrations/`, and never edit a migration once applied: generate a new one.",
   ],
+  php: [
+    "Follow PSR-4 and PSR-12: `composer lint` enforces the style, and the formatter of the project wins where they differ.",
+    "Write a PHPDoc on classes and public methods, and always give the type of arrays (`array<string, int>`). Do not repeat what the signature says: a constructor that only receives dependencies, and a method that implements an interface, need none.",
+    "Never lower the PHPStan level or add `ignoreErrors` to pass a check: fix the code.",
+  ],
   symfony: [
     "There is no Flex: `composer require` applies no recipe, so add each bundle to `config/bundles.php` and configure it in `config/packages`.",
     "Declare routes with `#[Route]` attributes on a controller, and read a body with `#[MapRequestPayload]`.",
     "Throw `AppError` for an expected failure and let the rest reach `ErrorSubscriber`: no `try`/`catch` that hides it.",
     "`.env` is committed and holds defaults, never a secret. The values of this machine go in `.env.local`, and real environment variables win over both.",
+    "Write tests with Pest: `test()`, `expect()`, and the helpers of `tests/Pest.php` such as `send()` in place of `$this`, which PHPStan cannot read in a test closure.",
+  ],
+  apiPlatform: [
+    "Expose data with `#[ApiResource]` under `/api`, and keep a controller for what is not a resource. The docs are at `/api/docs`.",
+    "API Platform answers the errors of a resource, in the format of the request. `AppError` and everything else, such as an unknown path or a 405 under `/api`, go through `ErrorSubscriber`.",
+    "`CORS_ALLOW_ORIGIN` in `.env` lists the origins that a browser may call the API from. Restart the project after a change.",
+    "API Platform docs: https://api-platform.com/docs/core/",
   ],
   frankenphp: [
     "The app runs in FrankenPHP worker mode: a service outlives the request, so keep no request state on it, or implement `ResetInterface`.",
@@ -92,6 +108,7 @@ export const AGENT_RULES = {
     "Call `env()` only in `config/*.php`; elsewhere use `config()`.",
     "Throw `AppError` for an expected failure and let the rest reach `ErrorResponse`: no `try`/`catch` that hides it.",
     "Validate each request with a `FormRequest`.",
+    "Write tests with Pest: `test()`, `expect()`, and the functions of `Pest\\Laravel` such as `getJson()` in place of `$this`, which PHPStan cannot read in a test closure.",
   ],
   octane: [
     "The app runs under Octane on FrankenPHP: a singleton outlives the request, so never inject the request, the container or the config repository into one. Bind what needs them with `scoped()`.",

@@ -1,6 +1,6 @@
 ---
 name: update-scaffolds
-description: Use when updating what `devhub create` generates for Hono, FastAPI, Symfony or Laravel: moving a pinned version, following a framework release, or applying a newer practice. Triggers include "mets à jour les templates", "mets à jour les stacks", "garde les scaffolds à jour", and a `devhub versions` finding on a package of a new project. Not for the shared Docker services of compose.yml.
+description: Use when updating what `devhub create` generates for Hono, FastAPI, Symfony, API Platform or Laravel: moving a pinned version, following a framework release, or applying a newer practice. Triggers include "mets à jour les templates", "mets à jour les stacks", "garde les scaffolds à jour", and a `devhub versions` finding on a package of a new project. Not for the shared Docker services of compose.yml.
 ---
 
 # Update scaffolds
@@ -20,6 +20,7 @@ version and still teach an outdated pattern.
 | Hono | `src/create/hono.ts`, `src/create/node.ts` | `npm`, `images.bun`, `lines.node` | https://hono.dev/docs/guides/best-practices |
 | FastAPI | `src/create/fastapi.ts`, `src/create/python.ts` | `PyPI`, `lines.python` | https://fastapi.tiangolo.com/tutorial/bigger-applications/ |
 | Symfony | `src/create/symfony.ts`, `src/create/php-shared.ts`, `src/create/php.ts` | `lines.symfony`, `Packagist`, `lines.php`, `images.composer` | https://symfony.com/doc/current/best_practices.html |
+| API Platform | `src/create/symfony.ts`, `src/create/php.ts` | `Packagist`, `symfony/twig-bundle` of `lines.symfony` | https://api-platform.com/docs/core/upgrade-guide/ |
 | Laravel | `src/create/laravel.ts`, `src/create/php-shared.ts`, `src/create/php.ts` | `Packagist`, `lines.php`, `images.composer` | https://laravel.com/docs/structure |
 | FrankenPHP | `TOOLCHAINS.composer` in `src/imports/index.ts` | `lines.php` | https://frankenphp.dev/docs/docker/ and https://laravel.com/docs/octane |
 
@@ -76,6 +77,15 @@ database in `infra-postgres`, then drop that database and its role.
   user: `check:scaffolds` proves neither. After moving its image, ask the user to allow a real project, and report the path as unverified without it.
 - A Symfony 7.4 project stays on 7.4 only through `LINE_COMPONENTS` in `src/create/php.ts`:
   after a new dependency, look for `v8` in its `composer.lock`.
+- Pest accepts a single PHPUnit patch and installs it, so PHPUnit has no pin. It also needs
+  `symfony/process` 8: keep `process` out of `LINE_COMPONENTS`, it stays a dev dependency.
+- API Platform is installed without Flex: `symfonyFiles()` writes what its recipe would, so
+  compare it after a major version. Move `api-platform/symfony` and `api-platform/doctrine-orm`
+  together, and rerun the `add-feature` steps with and without Doctrine.
+- `ErrorSubscriber` leaves the resources of API Platform to it, through `_api_resource_class`:
+  check a 404, a 422 and a broken JSON body after a major version.
+- `composer analyse` of Symfony warms the dev cache first: `phpstan-symfony` reads the
+  container XML there, and PHPStan fails if the file is missing.
 - `.env` of Symfony and `.env.example` of Laravel copy the official skeletons: compare them
   after a major version. `frameworkEnv()` in `src/create/env.ts` maps DevHub variables to theirs.
 - A health check of Symfony needs its tag: `instanceof()` only reaches services defined after it.
