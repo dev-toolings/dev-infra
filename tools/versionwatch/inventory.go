@@ -46,7 +46,7 @@ var lifecycleProducts = map[string]map[string]string{
 	"package": {
 		"symfony/framework-bundle": "symfony", "symfony/runtime": "symfony", "symfony/string": "symfony", "symfony/console": "symfony",
 		"symfony/dotenv": "symfony", "symfony/validator": "symfony", "symfony/serializer": "symfony", "symfony/property-access": "symfony",
-		"symfony/property-info": "symfony", "symfony/mailer": "symfony", "laravel/framework": "laravel",
+		"symfony/property-info": "symfony", "symfony/mailer": "symfony", "symfony/twig-bundle": "symfony", "laravel/framework": "laravel",
 	},
 }
 

@@ -144,14 +144,21 @@ func TestAPackageOnAnLTSLineIsComparedWithinIt(t *testing.T) {
 		w.Write([]byte(`[{"cycle":"8.1","eol":"2027-01-31","lts":false,"latest":"8.1.10"},{"cycle":"7.4","eol":"2029-11-30","lts":true,"latest":"7.4.22"}]`))
 	})
 	mux.HandleFunc("/p2/symfony/string.json", func(w http.ResponseWriter, _ *http.Request) {
-		w.Write([]byte(`{"packages":{"symfony/string":[{"version":"v8.1.10"}]}}`))
+		w.Write([]byte(`{"packages":{"symfony/string":[{"version":"v8.1.10"},{"version":"v7.4.20"},{"version":"v7.4.19"}]}}`))
 	})
 	mux.HandleFunc("/v1/query", func(w http.ResponseWriter, _ *http.Request) { w.Write([]byte(`{}`)) })
 	server := httptest.NewServer(mux)
 	defer server.Close()
-	item := Item{Kind: "package", Ecosystem: "Packagist", Name: "symfony/string", Version: "7.4.22"}
-	check(context.Background(), Sources{Client: server.Client(), Lifecycle: server.URL, OSV: server.URL, Packagist: server.URL}, &item, now)
-	if item.State != stateOK || !item.LTS || item.Latest != "7.4.22" {
+	sources := Sources{Client: server.Client(), Lifecycle: server.URL, OSV: server.URL, Packagist: server.URL}
+	// The framework is at 7.4.22, but this component has no release since 7.4.20.
+	item := Item{Kind: "package", Ecosystem: "Packagist", Name: "symfony/string", Version: "7.4.20"}
+	check(context.Background(), sources, &item, now)
+	if item.State != stateOK || !item.LTS || item.Latest != "7.4.20" {
 		t.Errorf("got %+v", item)
+	}
+	behind := Item{Kind: "package", Ecosystem: "Packagist", Name: "symfony/string", Version: "7.4.19"}
+	check(context.Background(), sources, &behind, now)
+	if behind.State != stateOutdated || behind.Latest != "7.4.20" {
+		t.Errorf("got %+v", behind)
 	}
 }

@@ -78,7 +78,7 @@ func classify(item *Item, ended bool, now time.Time) {
 func check(ctx context.Context, sources Sources, item *Item, now time.Time) {
 	item.Vulns, item.Errors = []Vuln{}, []string{}
 	failed := func(source string, err error) { item.Errors = append(item.Errors, fmt.Sprintf("%s: %v", source, err)) }
-	ended, lineLatest := false, ""
+	ended := false
 	if product, ok := lifecycleProducts[item.Kind][item.Name]; ok && item.Version != "" {
 		cycles, err := sources.cycles(ctx, product)
 		if err != nil {
@@ -86,7 +86,6 @@ func check(ctx context.Context, sources Sources, item *Item, now time.Time) {
 		} else if cycle, ok := matchCycle(cycles, item.Version); ok {
 			item.Cycle, item.LTS = cycle.name(), isLTS(cycle.LTS, now)
 			item.EOL, ended = eolDate(cycle.EOL, now)
-			lineLatest = cycle.Latest
 			if item.Kind == "image" {
 				item.Latest = cycles[0].Latest // The API lists the newest release line first.
 			}
@@ -95,15 +94,13 @@ func check(ctx context.Context, sources Sources, item *Item, now time.Time) {
 		}
 	}
 	if item.Kind == "package" {
-		latest, err := sources.latest(ctx, item.Ecosystem, item.Name)
+		// A package on a release line, such as an LTS, is compared within that line: the newer major is a choice.
+		// With its own releases: the components of a framework do not all ship in each of its patches.
+		latest, err := sources.latest(ctx, item.Ecosystem, item.Name, item.Cycle)
 		if err != nil {
 			failed("registry", err)
 		}
 		item.Latest = latest
-		// A package on a release line, such as an LTS, is compared within that line: the newer major is a choice.
-		if lineLatest != "" {
-			item.Latest = lineLatest
-		}
 		vulns, err := sources.vulns(ctx, item.Ecosystem, item.Name, item.Version)
 		if err != nil {
 			failed("advisories", err)

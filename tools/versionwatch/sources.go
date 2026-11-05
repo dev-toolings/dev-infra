@@ -136,7 +136,8 @@ func behind(version, latest string) bool {
 
 var stableVersion = regexp.MustCompile(`^v?\d+\.\d+\.\d+$`)
 
-func (s Sources) latest(ctx context.Context, ecosystem, name string) (string, error) {
+// latest gives the newest stable release, within a release line when there is one. Only Packagist pins have a line.
+func (s Sources) latest(ctx context.Context, ecosystem, name, line string) (string, error) {
 	switch ecosystem {
 	case "npm":
 		var out struct{ Version string }
@@ -154,11 +155,12 @@ func (s Sources) latest(ctx context.Context, ecosystem, name string) (string, er
 			return "", err
 		}
 		for _, release := range out.Packages[name] {
-			if stableVersion.MatchString(release.Version) {
-				return strings.TrimPrefix(release.Version, "v"), nil
+			version := strings.TrimPrefix(release.Version, "v")
+			if stableVersion.MatchString(release.Version) && (line == "" || strings.HasPrefix(version, line+".")) {
+				return version, nil
 			}
 		}
-		return "", fmt.Errorf("no stable release of %s", name)
+		return "", fmt.Errorf("no stable release of %s %s", name, line)
 	}
 	return "", fmt.Errorf("unknown ecosystem %s", ecosystem)
 }
