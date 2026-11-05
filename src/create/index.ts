@@ -9,6 +9,7 @@ import versions from "../../data/versions.json";
 import { assertProjectAvailable, databaseName, DEFAULT_CONTAINER_PORT, FIRST_PORT, renderDockerfile } from "../imports";
 import { STACKS } from "./catalog";
 import { AGENT_FEATURE, AGENT_RULES, agentFiles } from "./agents";
+import { fillEnv, frameworkEnv } from "./env";
 import { nodeFiles } from "./node";
 import { phpFiles } from "./php";
 import { pythonFiles } from "./python";
@@ -23,7 +24,7 @@ function mysqlName(id: string): string {
   const name = databaseName(id);
   return name.length <= MYSQL_USER_LIMIT ? name : `${name.slice(0, MYSQL_USER_LIMIT - 9)}_${createHash("sha256").update(id).digest("hex").slice(0, 8)}`;
 }
-type Recipe = { files: Record<string, string>; install: string; /** What a new project must pass. */ checks: string[]; dev: string; env: Record<string, string>; toolchain: Toolchain; image: string; /** Needed on this machine in native mode. */ tools?: string[]; /** PHP extensions the code needs in its image. */ extensions?: string[]; /** PHP extensions needed on this machine in native mode. */ hostExtensions?: string[] };
+type Recipe = { files: Record<string, string>; install: string; /** What a new project must pass. */ checks: string[]; dev: string; env: Record<string, string>; toolchain: Toolchain; image: string; /** Needed on this machine in native mode. */ tools?: string[]; /** PHP extensions the code needs in its image. */ extensions?: string[]; /** PHP extensions needed on this machine in native mode. */ hostExtensions?: string[]; /** Where the values of this machine go, when it is not `.env`. */ envFile?: string; /** From DevHub names to the ones the framework reads. */ translateEnv?: (env: Record<string, string>) => Record<string, string> };
 const lineImage = (line: Record<string, string>, version: string | undefined) => line[version ?? ""] ?? Object.values(line)[0]!;
 const DOCKER_IGNORE = [".git", ".env*", "!.env.example", "*.key", "*.pem", ".venv", "__pycache__", "dist", "node_modules", "storage", "vendor", "var", ""].join("\n");
 const IMAGE = /^[a-z0-9][a-z0-9._/:@-]{0,200}$/, PACKAGE = /^[a-z0-9][a-z0-9+.-]{0,63}$/, EXTENSION = /^[a-z0-9_]{1,40}$/;
@@ -31,7 +32,7 @@ const IMAGE = /^[a-z0-9][a-z0-9._/:@-]{0,200}$/, PACKAGE = /^[a-z0-9][a-z0-9+.-]
 /** What each stack generates and runs. */
 export function recipe(stack: string, id: string, mode: CreateMode, port: number, options: Record<string, string>, services: string[]): Recipe {
   const docker = mode === "docker";
-  const agents = (label: string, checks: string[], layout: string[], rules: string[], feature: string[]) => agentFiles({ name: id, stack: label, checks, layout, rules, feature, services, docker });
+  const agents = (label: string, checks: string[], layout: string[], rules: string[], feature: string[]) => agentFiles({ name: id, stack: label, checks, layout, rules, feature, services, docker, ...(label === "Symfony" ? { localEnv: ".env.local" } : {}) });
   const host = docker ? "0.0.0.0" : "127.0.0.1", listen = docker ? DEFAULT_CONTAINER_PORT : port;
   if (stack === "python") {
     const checks = ["uv run ruff check .", "uv run ruff format --check .", "uv run mypy", "uv run pytest"];
@@ -82,7 +83,8 @@ export function recipe(stack: string, id: string, mode: CreateMode, port: number
     ];
     return {
       toolchain: "composer", checks, image: lineImage(versions.lines.php, options.phpVersion), tools: ["php", "composer"], ...(laravel ? { extensions: ["pcntl"] } : {}),
-      hostExtensions: [...(orm === "none" ? ["pdo_sqlite"] : []), ...(services.includes("postgres") ? ["pdo_pgsql"] : [])], files: {
+      hostExtensions: [...(orm === "none" ? ["pdo_sqlite"] : []), ...(services.includes("postgres") ? ["pdo_pgsql"] : [])],
+      ...(laravel ? {} : { envFile: ".env.local" }), translateEnv: (env) => frameworkEnv(options.framework!, env), files: {
         ...phpFiles({ name: id, framework: options.framework!, pattern: options.pattern!, symfonyVersion: options.symfonyVersion, orm: orm!, services, docker }),
         ...agents(laravel ? "Laravel" : "Symfony", checks, [
           ...layout,
@@ -91,7 +93,9 @@ export function recipe(stack: string, id: string, mode: CreateMode, port: number
         ], [...(laravel ? AGENT_RULES.laravel : AGENT_RULES.symfony), ...(docker ? (laravel ? AGENT_RULES.octane : AGENT_RULES.frankenphp) : [])], laravel ? AGENT_FEATURE.laravel(modules, orm === "eloquent") : AGENT_FEATURE.symfony(modules, orm === "doctrine")),
       }, install: "composer install",
       dev: !docker ? `php -S ${host}:${listen} -t public public/index.php` : laravel ? `php artisan octane:frankenphp --host=${host} --port=${listen} --watch --log-level=WARN` : "frankenphp run --config Caddyfile",
-      env: laravel ? { APP_ENV: "local", APP_DEBUG: "true", APP_KEY: `base64:${randomBytes(32).toString("base64")}`, ...(services.includes("redis") ? { REDIS_CLIENT: "predis" } : {}) } : { APP_ENV: "dev", APP_DEBUG: "1", APP_SECRET: randomBytes(16).toString("hex") },
+      env: laravel
+        ? { APP_ENV: "local", APP_DEBUG: "true", APP_KEY: `base64:${randomBytes(32).toString("base64")}`, APP_URL: `http://127.0.0.1:${port}`, ...(services.includes("redis") ? { REDIS_CLIENT: "predis" } : {}) }
+        : { APP_ENV: "dev", APP_DEBUG: "1", APP_SECRET: randomBytes(16).toString("hex"), DEFAULT_URI: `http://127.0.0.1:${port}` },
     };
   }
   const bun = options.runtime === "bun", tool = bun ? "bun" : "npm";
@@ -190,7 +194,7 @@ export class Creator implements CreatePort {
     let port = await discovery.freePort(FIRST_PORT);
     while (this.pending.has(port)) port = await discovery.freePort(port + 1);
     const built = recipe(stack.id, id, input.mode, port, options, services);
-    const { files, install, dev, tools = [], hostExtensions = [], toolchain, image, env } = built;
+    const { files, install, dev, tools = [], hostExtensions = [], toolchain, image, env, translateEnv = (values) => values } = built;
     if (input.mode === "native") {
       for (const tool of tools) {
         const found = await this.options.run(["which", tool], { timeoutMs: 5_000, maxOutputBytes: 4_000 });
@@ -212,7 +216,7 @@ export class Creator implements CreatePort {
       files: Object.keys(contents).sort(), contents, generatedInstructions: { "AGENTS.md": files["AGENTS.md"]! }, install, dev,
       ...(dockerfile && scaffold ? { docker: {
         dockerfile, compose: this.options.imports.compose({ ...scaffold, infra: services.map((service) => serviceContainer(service, versions[service]!)) }),
-        env: Object.fromEntries(Object.entries({ ...scaffold.env, ...(services.includes("postgres") ? { DATABASE_URL: "<generated>" } : {}) }).map(([key, value]) => [key, hidden(key) ? "<generated>" : value])),
+        env: Object.fromEntries(Object.entries(translateEnv({ ...scaffold.env, ...(services.includes("postgres") ? { DATABASE_URL: "<generated>" } : {}) })).map(([key, value]) => [key, hidden(key) ? "<generated>" : value])),
       } } : {}),
       ...(services.includes("postgres") ? { database: databaseName(id) } : {}),
       isolation: input.mode === "docker"
@@ -238,7 +242,8 @@ export class Creator implements CreatePort {
   private async register(plan: CreatePlan): Promise<Project> {
     const { input, id, path } = plan;
     const { imports } = this.options;
-    const { files, toolchain, image, env } = recipe(input.stack, id, input.mode, Number(new URL(plan.url).port), input.options, input.services);
+    const built = recipe(input.stack, id, input.mode, Number(new URL(plan.url).port), input.options, input.services);
+    const { files, toolchain, image, env } = built;
     mkdirSync(path);
     try {
       const own = plan.docker ? { Dockerfile: plan.docker.dockerfile, ".dockerignore": DOCKER_IGNORE } : {};
@@ -251,8 +256,10 @@ export class Creator implements CreatePort {
         if (git.code !== 0) fail("git init failed", "provisioning_failed", 409);
       }
       const links = await this.connect(plan);
-      if (input.mode === "native") return await this.prepareNative(plan, env, links);
-      if (toolchain === "uv" || toolchain === "composer") return await imports.prepare(this.linked(imports.scaffold({ root: path, name: input.name, id, toolchain, image, url: plan.url, install: plan.install, dev: plan.dev, services: input.services, env }), plan, links));
+      if (input.mode === "native") return await this.prepareNative(plan, built, links);
+      // Laravel expects a `.env` next to its example. In Docker, the real environment wins over it.
+      if (input.stack === "php" && !built.envFile) writeFileSync(join(path, ".env"), fillEnv(files[".env.example"]!, env), { mode: 0o600 });
+      if (toolchain === "uv" || toolchain === "composer") return await imports.prepare({ ...this.linked(imports.scaffold({ root: path, name: input.name, id, toolchain, image, url: plan.url, install: plan.install, dev: plan.dev, services: input.services, env }), plan, links), ...(built.translateEnv ? { translateEnv: built.translateEnv } : {}) });
       return await imports.prepare(this.linked({ ...await imports.plan({ path, name: input.name, id, toolchain, fresh: true }), image, ownDockerfile: true }, plan, links));
     } catch (error) {
       rmSync(path, { recursive: true, force: true });
@@ -309,10 +316,10 @@ export class Creator implements CreatePort {
     };
   }
 
-  private async prepareNative(plan: CreatePlan, stackEnv: Record<string, string>, links: Links) {
+  private async prepareNative(plan: CreatePlan, { env: stackEnv, envFile: target = ".env", translateEnv = (values) => values, files }: Recipe, links: Links) {
     const { input, id, path, url, database } = plan;
     const { catalog, run, infraDir } = this.options;
-    const envFile = join(path, ".env");
+    const envFile = join(path, target);
     const env: Record<string, string> = { ...stackEnv, HOST: "127.0.0.1", PORT: new URL(url).port, ...links.env };
     const postgres = links.postgres;
     if (database && postgres) {
@@ -320,7 +327,9 @@ export class Creator implements CreatePort {
       env.DEVHUB_DB_PASSWORD = password;
       env.DATABASE_URL = `postgres://${database}:${password}@127.0.0.1:${postgres.hostPort}/${database}`;
     }
-    writeFileSync(envFile, `${Object.entries(env).map(([key, value]) => `${key}=${value}`).join("\n")}\n`, { mode: 0o600 });
+    const values = translateEnv(env);
+    const example = input.stack === "php" ? files[".env.example"] : undefined;
+    writeFileSync(envFile, example ? fillEnv(example, values) : `${Object.entries(values).map(([key, value]) => `${key}=${value}`).join("\n")}\n`, { mode: 0o600 });
     // Install first: a failure here leaves no Postgres role behind.
     const installed = await run(plan.install.split(" "), { cwd: path, timeoutMs: 300_000, maxOutputBytes: 2_000_000 });
     if (installed.code !== 0) fail(`${plan.install} failed: ${redactText(installed.stderr.slice(-500))}`, "provisioning_failed", 409);
@@ -330,7 +339,7 @@ export class Creator implements CreatePort {
     }
     const project: ProjectInput = {
       id, name: input.name, root: path,
-      components: [{ id: "app", name: "App", kind: "native", cwd: path, argv: plan.dev.split(" "), envFiles: [".env"], url, health: { url: `${url}/health` }, dependsOn: [] }],
+      components: [{ id: "app", name: "App", kind: "native", cwd: path, argv: plan.dev.split(" "), envFiles: [target], url, health: { url: `${url}/health` }, dependsOn: [] }],
     };
     return catalog.createProject(project);
   }

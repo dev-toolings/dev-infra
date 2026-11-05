@@ -107,6 +107,11 @@ Biome. Python projects use uv, typed settings, Ruff, mypy and pytest. PHP projec
 Composer, PHPStan and PHPUnit, with PHP-CS-Fixer on Symfony and Pint on Laravel. They start
 from an API of their own, not the full framework skeleton.
 
+Symfony and Laravel keep their official environment files and variable names. Symfony
+commits `.env` with defaults and keeps the values of the machine in `.env.local`. Laravel
+commits `.env.example` and keeps them in `.env`, where `DB_URL`, `REDIS_HOST` and `MAIL_HOST`
+replace the `DATABASE_URL`, `REDIS_URL` and `SMTP_HOST` of the other stacks.
+
 PHP projects run on FrankenPHP in Docker: Symfony in worker mode, Laravel under Octane. Both
 restart their workers on a code change. A custom base image has to be a `dunglas/frankenphp`
 Debian tag; a whole Dockerfile stays free. In native mode, PHP projects use the PHP built-in server.

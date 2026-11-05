@@ -61,10 +61,10 @@ export function laravelFiles({ name, modules, eloquent, postgres, redis, mail, d
       "Route::patch('/notes/{id}', [NoteController::class, 'update']);",
       "Route::delete('/notes/{id}', [NoteController::class, 'destroy']);",
     ),
-    // Laravel merges these with its defaults: DevHub gives every stack the same variable names.
+    // Laravel merges these with its defaults.
     "config/app.php": lines("<?php", "", "return [", `    'name' => '${name}',`, "];"),
     // An API has no session: the default driver would need a table in the database.
-    "config/session.php": lines("<?php", "", "return [", "    'driver' => 'array',", "];"),
+    "config/session.php": lines("<?php", "", "return [", "    'driver' => env('SESSION_DRIVER', 'array'),", "];"),
     "config/logging.php": lines(
       "<?php", "",
       ...[layout.formatter, layout.redactor, "Monolog\\Formatter\\JsonFormatter", "Monolog\\Handler\\StreamHandler"].sort().map((item) => `use ${item};`), "",
@@ -83,13 +83,10 @@ export function laravelFiles({ name, modules, eloquent, postgres, redis, mail, d
       "    ],",
       "];",
     ),
-    ...(mail ? { "config/mail.php": lines(
-      "<?php", "", "return [", "    'default' => 'smtp',", "    'mailers' => [", "        'smtp' => ['transport' => 'smtp', 'host' => env('SMTP_HOST'), 'port' => env('SMTP_PORT')],", "    ],", "];",
-    ) } : {}),
     ...(postgres || redis ? { "config/database.php": lines(
       "<?php", "", "return [",
-      ...(postgres ? ["    'default' => 'pgsql',", "    'connections' => [", "        'pgsql' => ['driver' => 'pgsql', 'url' => env('DATABASE_URL'), 'options' => [PDO::ATTR_TIMEOUT => 2]],", "    ],"] : []),
-      ...(redis ? ["    'redis' => [", "        'client' => env('REDIS_CLIENT', 'predis'),", "        'options' => ['prefix' => env('REDIS_PREFIX', '')],", "        'default' => ['url' => env('REDIS_URL'), 'timeout' => 2, 'read_write_timeout' => 2],", "    ],"] : []),
+      ...(postgres ? ["    'default' => env('DB_CONNECTION', 'pgsql'),", "    'connections' => [", "        'pgsql' => ['driver' => 'pgsql', 'url' => env('DB_URL'), 'options' => [PDO::ATTR_TIMEOUT => 2]],", "    ],"] : []),
+      ...(redis ? ["    'redis' => [", "        'client' => env('REDIS_CLIENT', 'predis'),", "        'options' => ['prefix' => env('REDIS_PREFIX', '')],", "        'default' => ['host' => env('REDIS_HOST', '127.0.0.1'), 'port' => env('REDIS_PORT', '6379'), 'timeout' => 2, 'read_write_timeout' => 2],", "    ],"] : []),
       "];",
     ) } : {}),
     ...(docker ? { "config/octane.php": lines(
@@ -331,7 +328,22 @@ final class LogTest extends TestCase
     "storage/framework/sessions/.gitignore": KEEP,
     "storage/framework/views/.gitignore": KEEP,
     ".gitignore": lines(".env", "/vendor/", ".phpunit.cache", ".claude/settings.local.json", ...(docker ? ["/public/frankenphp-worker.php"] : [])),
-    ".env.example": lines("APP_ENV=local", "APP_DEBUG=true", "APP_KEY=", ...(postgres ? ["DATABASE_URL="] : []), ...(redis ? ["REDIS_URL=", "REDIS_PREFIX=", "REDIS_CLIENT=predis"] : []), ...(mail ? ["SMTP_HOST=", "SMTP_PORT="] : [])),
+    // The file of the official skeleton. Only what this API needs differs: logs, and stores that need no table.
+    ".env.example": lines(
+      `APP_NAME=${name}`, "APP_ENV=local", "APP_KEY=", "APP_DEBUG=true", "APP_URL=http://localhost:8000", "",
+      "APP_LOCALE=en", "APP_FALLBACK_LOCALE=en", "APP_FAKER_LOCALE=en_US", "",
+      "APP_MAINTENANCE_DRIVER=file", "# APP_MAINTENANCE_STORE=database", "",
+      "# PHP_CLI_SERVER_WORKERS=4", "", "BCRYPT_ROUNDS=12", "",
+      "LOG_CHANNEL=stderr", "LOG_DEPRECATIONS_CHANNEL=null", "LOG_LEVEL=debug", "",
+      `DB_CONNECTION=${postgres ? "pgsql" : "sqlite"}`, ...(postgres ? ["DB_URL="] : []), "# DB_HOST=127.0.0.1", "# DB_PORT=3306", "# DB_DATABASE=laravel", "# DB_USERNAME=root", "# DB_PASSWORD=", "",
+      "SESSION_DRIVER=array", "SESSION_LIFETIME=120", "SESSION_ENCRYPT=false", "SESSION_PATH=/", "SESSION_DOMAIN=null", "",
+      "BROADCAST_CONNECTION=log", "FILESYSTEM_DISK=local", "QUEUE_CONNECTION=sync", "",
+      "CACHE_STORE=file", "# CACHE_PREFIX=", "", "MEMCACHED_HOST=127.0.0.1", "",
+      `REDIS_CLIENT=${redis ? "predis" : "phpredis"}`, "REDIS_HOST=127.0.0.1", "REDIS_PASSWORD=null", "REDIS_PORT=6379", ...(redis ? ["REDIS_PREFIX="] : []), "",
+      `MAIL_MAILER=${mail ? "smtp" : "log"}`, "MAIL_SCHEME=null", "MAIL_HOST=127.0.0.1", "MAIL_PORT=2525", "MAIL_USERNAME=null", "MAIL_PASSWORD=null", 'MAIL_FROM_ADDRESS="hello@example.com"', 'MAIL_FROM_NAME="${APP_NAME}"', "",
+      "AWS_ACCESS_KEY_ID=", "AWS_SECRET_ACCESS_KEY=", "AWS_DEFAULT_REGION=us-east-1", "AWS_BUCKET=", "AWS_USE_PATH_STYLE_ENDPOINT=false", "",
+      'VITE_APP_NAME="${APP_NAME}"',
+    ),
     "README.md": lines(
       `# ${name}`, "",
       "Created with DevHub. Start, stop and read logs from the DevHub panel or `devhub project`.", "",

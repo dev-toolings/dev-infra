@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with its dependencies, tests, type checks and lint, in both code structures. An optional
   database layer adds SQLAlchemy with Alembic, Doctrine or Eloquent. PHP keeps `notes` in a
   SQLite file without one, and `standard` is its default structure.
+- Symfony and Laravel projects keep their official environment files and variable names: a
+  committed `.env` and a local `.env.local` for Symfony, `.env.example` and `.env` for Laravel.
 - PHP projects run on FrankenPHP in Docker, Symfony in worker mode and Laravel under Octane,
   and reload on a code change. A custom base image has to be a Debian `dunglas/frankenphp` tag.
 - New Hono projects start with a complete architecture in both code structures: chained

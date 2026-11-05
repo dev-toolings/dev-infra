@@ -34,19 +34,22 @@ export function symfonyFiles({ name, modules, doctrine, postgres, redis, mail, d
 
 use App\Kernel;
 use Symfony\Bundle\FrameworkBundle\Console\Application;
-use Symfony\Component\Console\Input\ArgvInput;
-use Symfony\Component\Dotenv\Dotenv;
 
-require dirname(__DIR__).'/vendor/autoload.php';
-
-// A running app gets its environment from DevHub. A command started by hand reads this file in native mode.
-if (is_file(dirname(__DIR__).'/.env')) {
-    (new Dotenv())->load(dirname(__DIR__).'/.env');
+if (!is_dir(dirname(__DIR__).'/vendor')) {
+    throw new LogicException('Dependencies are missing. Try running "composer install".');
 }
 
-$env = $_SERVER['APP_ENV'] ?? 'dev';
-$application = new Application(new Kernel($env, (bool) ($_SERVER['APP_DEBUG'] ?? 'prod' !== $env)));
-exit($application->run(new ArgvInput()));
+if (!is_file(dirname(__DIR__).'/vendor/autoload_runtime.php')) {
+    throw new LogicException('Symfony Runtime is missing. Try running "composer require symfony/runtime".');
+}
+
+require_once dirname(__DIR__).'/vendor/autoload_runtime.php';
+
+return function (array $context) {
+    $kernel = new Kernel($context['APP_ENV'], (bool) $context['APP_DEBUG']);
+
+    return new Application($kernel);
+};
 `,
     "config/bundles.php": ["<?php", "", "return [", "    Symfony\\Bundle\\FrameworkBundle\\FrameworkBundle::class => ['all' => true],", "    Symfony\\Bundle\\MonologBundle\\MonologBundle::class => ['all' => true],", ...(doctrine ? ["    Doctrine\\Bundle\\DoctrineBundle\\DoctrineBundle::class => ['all' => true],", "    Doctrine\\Bundle\\MigrationsBundle\\DoctrineMigrationsBundle::class => ['all' => true],"] : []), "];", ""].join("\n"),
     "config/routes.php": ["<?php", "", "use Symfony\\Component\\Routing\\Loader\\Configurator\\RoutingConfigurator;", "", "return static function (RoutingConfigurator $routes): void {", "    $routes->import('../src/', 'attribute');", "};", ""].join("\n"),
@@ -56,7 +59,7 @@ exit($application->run(new ArgvInput()));
       "        'validation' => ['enabled' => true],",
       "        'serializer' => ['enabled' => true],",
       "        'property_info' => ['enabled' => true, 'with_constructor_extractor' => true],",
-      ...(mail ? ["        'mailer' => ['dsn' => 'smtp://%env(SMTP_HOST)%:%env(SMTP_PORT)%'],"] : []),
+      ...(mail ? ["        'mailer' => ['dsn' => '%env(MAILER_DSN)%'],"] : []),
       "    ]);",
     ].join("\n")),
     "config/packages/monolog.php": configFile([layout.formatter], raw`    $handler = match ($container->env()) {
@@ -369,8 +372,28 @@ final class LogTest extends TestCase
       "    </testsuites>",
       "</phpunit>", "",
     ].join("\n"),
-    ".gitignore": ["/.env", "/var/", "/vendor/", ".php-cs-fixer.cache", ".phpunit.cache", ".claude/settings.local.json", ""].join("\n"),
-    ".env.example": ["APP_ENV=dev", "APP_DEBUG=1", "APP_SECRET=", ...(postgres ? ["DATABASE_URL="] : []), ...(redis ? ["REDIS_URL=", "REDIS_PREFIX="] : []), ...(mail ? ["SMTP_HOST=", "SMTP_PORT="] : []), ""].join("\n"),
+    ".gitignore": ["/.env.local", "/.env.local.php", "/.env.*.local", "/var/", "/vendor/", ".php-cs-fixer.cache", ".phpunit.cache", ".claude/settings.local.json", ""].join("\n"),
+    // As in the official skeleton: `.env` is committed and holds no secret, `.env.local` holds the values of this machine.
+    ".env": [
+      "# In all environments, the following files are loaded if they exist,",
+      "# the latter taking precedence over the former:",
+      "#",
+      "#  * .env                contains default values for the environment variables needed by the app",
+      "#  * .env.local          uncommitted file with local overrides",
+      "#  * .env.$APP_ENV       committed environment-specific defaults",
+      "#  * .env.$APP_ENV.local uncommitted environment-specific overrides",
+      "#",
+      "# Real environment variables win over .env files.",
+      "#",
+      "# DO NOT DEFINE PRODUCTION SECRETS IN THIS FILE NOR IN ANY OTHER COMMITTED FILES.",
+      "# https://symfony.com/doc/current/configuration/secrets.html",
+      "",
+      "###> symfony/framework-bundle ###", "APP_ENV=dev", "APP_SECRET=", "APP_SHARE_DIR=var/share", "###< symfony/framework-bundle ###", "",
+      "###> symfony/routing ###", "# Configure how to generate URLs in non-HTTP contexts, such as CLI commands.", "# See https://symfony.com/doc/current/routing.html#generating-urls-in-commands", "DEFAULT_URI=http://localhost", "###< symfony/routing ###", "",
+      ...(mail ? ["###> symfony/mailer ###", "MAILER_DSN=null://null", "###< symfony/mailer ###", ""] : []),
+      ...(postgres ? ["###> doctrine/doctrine-bundle ###", "# Format described at https://www.doctrine-project.org/projects/doctrine-dbal/en/latest/reference/configuration.html#connecting-using-a-url", 'DATABASE_URL="postgresql://app:!ChangeMe!@127.0.0.1:5432/app?serverVersion=16&charset=utf8"', "###< doctrine/doctrine-bundle ###", ""] : []),
+      ...(redis ? ["###> predis/predis ###", "REDIS_URL=redis://127.0.0.1:6379", "REDIS_PREFIX=", "###< predis/predis ###", ""] : []),
+    ].join("\n"),
     "README.md": [
       `# ${name}`, "",
       "Created with DevHub. Start, stop and read logs from the DevHub panel or `devhub project`.", "",

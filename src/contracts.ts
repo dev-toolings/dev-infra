@@ -81,7 +81,7 @@ export interface DiscoveryPort {
 export interface ImportInput { path: string; name?: string; id?: string; toolchain?: "bun"|"npm"; /** A new project has no lockfile yet: the first install writes it. */ fresh?: boolean }
 export type Toolchain = "bun"|"npm"|"uv"|"composer";
 export interface ImportPlan {
- project: ProjectInput; toolchain: Toolchain; image: string; /** The project keeps its own Dockerfile at its root. */ ownDockerfile?: boolean; install: string; dev: string; lockfile?: string; url: string; containerPort: number;
+ project: ProjectInput; toolchain: Toolchain; image: string; /** From DevHub names to the ones the framework reads. */ translateEnv?: (env: Record<string,string>) => Record<string,string>; /** The project keeps its own Dockerfile at its root. */ ownDockerfile?: boolean; install: string; dev: string; lockfile?: string; url: string; containerPort: number;
  infra: string[]; database?: string; /** Where the database runs, when it is not the shared Postgres. */ databaseHost?: string; databaseAdmin?: string; env: Record<string,string>; /** Replaces what a previous import left in the env file: these services were just provisioned. */ linkedEnv?: Record<string,string>; missing: string[]; warnings: string[];
 }
 export interface ImportResult { project: Project; operation: Operation; url: string; missing: string[] }

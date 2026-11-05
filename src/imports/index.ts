@@ -217,7 +217,7 @@ export class Imports implements ImportPort {
       env.DEVHUB_DB_PASSWORD = password;
       env.DATABASE_URL = `postgres://${plan.database}:${password}@${plan.databaseHost ?? "infra-postgres"}:5432/${plan.database}`;
     }
-    writeFileSync(envFile, `${Object.entries(env).map(([key, value]) => `${key}=${value}`).join("\n")}\n`, { mode: 0o600 });
+    writeFileSync(envFile, `${Object.entries(plan.translateEnv?.(env) ?? env).map(([key, value]) => `${key}=${value}`).join("\n")}\n`, { mode: 0o600 });
     if (plan.database) {
       const created = await run(["bash", resolve(infraDir, "bin/devhub"), "db", "provision", plan.database, envFile, ...(plan.databaseHost ? [plan.databaseHost, ...(plan.databaseAdmin ? [plan.databaseAdmin] : [])] : [])], { cwd: infraDir, timeoutMs: 60_000, maxOutputBytes: 64_000 });
       if (created.code !== 0) fail(`Database provisioning failed; check that ${plan.databaseHost ?? "infra-postgres"} runs with devhub up`, "provisioning_failed", 409);

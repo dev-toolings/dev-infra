@@ -1,4 +1,4 @@
-export type AgentOptions = { name: string; stack: string; checks: string[]; layout: string[]; rules: string[]; feature: string[]; services: string[]; docker: boolean };
+export type AgentOptions = { name: string; stack: string; checks: string[]; layout: string[]; rules: string[]; feature: string[]; services: string[]; docker: boolean; localEnv?: string };
 
 /** The steps of the `add-feature` skill. Each one was run on a generated project: an untested step does not belong here. */
 export const AGENT_FEATURE = {
@@ -79,7 +79,7 @@ export const AGENT_RULES = {
     "There is no Flex: `composer require` applies no recipe, so add each bundle to `config/bundles.php` and configure it in `config/packages`.",
     "Declare routes with `#[Route]` attributes on a controller, and read a body with `#[MapRequestPayload]`.",
     "Throw `AppError` for an expected failure and let the rest reach `ErrorSubscriber`: no `try`/`catch` that hides it.",
-    "A running app gets its environment from DevHub: `.env` is read only by `bin/console`, in native mode.",
+    "`.env` is committed and holds defaults, never a secret. The values of this machine go in `.env.local`, and real environment variables win over both.",
   ],
   frankenphp: [
     "The app runs in FrankenPHP worker mode: a service outlives the request, so keep no request state on it, or implement `ResetInterface`.",
@@ -100,14 +100,14 @@ export const AGENT_RULES = {
 };
 
 /** The services are shared with other projects, and only some of them enforce it. */
-const serviceRules = (name: string): Record<string, string> => ({
-  postgres: "PostgreSQL: connect with `DATABASE_URL`. This database and its role are the only ones this project may change.",
+const serviceRules = (name: string, stack: string): Record<string, string> => ({
+  postgres: `PostgreSQL: connect with \`${stack === "Laravel" ? "DB_URL" : "DATABASE_URL"}\`. This database and its role are the only ones this project may change.`,
   mysql: "MySQL: connect with `MYSQL_URL`. This database and its user are the only ones this project may change.",
   mariadb: "MariaDB: connect with `MARIADB_URL`. This database and its user are the only ones this project may change.",
-  redis: "Redis is shared: read `REDIS_URL`, keep every key under `REDIS_PREFIX` (a client with a `keyPrefix` already adds it), and never run `FLUSHALL`, `FLUSHDB` or `KEYS *`. Keys can be evicted: keep nothing there that you cannot rebuild.",
+  redis: `Redis is shared: read \`${stack === "Laravel" ? "REDIS_HOST` and `REDIS_PORT" : "REDIS_URL"}\`, keep every key under \`REDIS_PREFIX\` (a client with a \`keyPrefix\` already adds it), and never run \`FLUSHALL\`, \`FLUSHDB\` or \`KEYS *\`. Keys can be evicted: keep nothing there that you cannot rebuild.`,
   meilisearch: "Meilisearch is shared and the key is the master key: read `MEILISEARCH_URL` and `MEILISEARCH_API_KEY`, and start every index with `MEILISEARCH_INDEX_PREFIX`.",
   rabbitmq: `RabbitMQ is shared, on the \`/\` vhost: read \`RABBITMQ_URL\`, and start every queue and exchange with \`${name}.\`.`,
-  mailpit: "Send mail through `SMTP_HOST` and `SMTP_PORT`: Mailpit catches it, nothing leaves this machine.",
+  mailpit: `Send mail through \`${stack === "Laravel" ? "MAIL_HOST` and `MAIL_PORT" : stack === "Symfony" ? "MAILER_DSN" : "SMTP_HOST` and `SMTP_PORT"}\`: Mailpit catches it, nothing leaves this machine.`,
 });
 
 const fence = (commands: string[]) => ["```sh", ...commands, "```"];
@@ -116,7 +116,7 @@ const fence = (commands: string[]) => ["```sh", ...commands, "```"];
  * Instructions for coding agents. AGENTS.md is the source: Codex, Grok and Claude Code read it.
  * Skills go in `.agents/skills` for Codex and `.claude/skills` for Claude Code, which Grok also reads.
  */
-export function agentFiles({ name, stack, checks, layout, rules, feature, services, docker }: AgentOptions): Record<string, string> {
+export function agentFiles({ name, stack, checks, layout, rules, feature, services, docker, localEnv = ".env" }: AgentOptions): Record<string, string> {
   const addFeature = [
     "---", "name: add-feature",
     `description: Use when adding a feature, resource, route, service or package to ${name}. Gives the steps of this ${stack} project.`,
@@ -151,10 +151,10 @@ export function agentFiles({ name, stack, checks, layout, rules, feature, servic
       ...layout.map((item) => `- ${item}`), "",
       "## Rules", "",
       docker ? "- Keep `/health` working." : "- Keep `/health` working: DevHub uses it to know the project is up.",
-      "- Read configuration from the environment. Never commit `.env`.",
+      `- Read configuration from the environment. Never commit \`${localEnv}\`.`,
       "- Pin exact dependency versions.",
       "- To add a feature, use the `add-feature` skill.",
-      ...[...rules, ...services.map((service) => serviceRules(name)[service]!)].map((rule) => `- ${rule}`),
+      ...[...rules, ...services.map((service) => serviceRules(name, stack)[service]!)].map((rule) => `- ${rule}`),
       "",
     ].join("\n"),
     ".claude/settings.json": `${JSON.stringify({ permissions: { allow: checks.map((command) => `Bash(${docker ? `docker compose -p devhub-${name} exec app ` : ""}${command}:*)`) } }, null, 2)}\n`,

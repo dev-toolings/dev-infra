@@ -52,8 +52,6 @@ export function phpFiles({ name, framework, pattern = "standard", symfonyVersion
     }, { "friendsofphp/php-cs-fixer": VERSIONS["friendsofphp/php-cs-fixer"] }, services, {
       ...(symfonyVersion === "7.4" ? { conflict: Object.fromEntries(LINE_COMPONENTS.map((item) => [`symfony/${item}`, ">=8"])) } : {}),
       config: { "allow-plugins": { "symfony/runtime": true } },
-      // DevHub gives the environment: Docker has no `.env` file, and the runtime would stop on it.
-      extra: { runtime: { disable_dotenv: true } },
     }, CHECKS),
   };
 }

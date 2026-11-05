@@ -76,6 +76,8 @@ database in `infra-postgres`, then drop that database and its role.
   user: `check:scaffolds` proves neither. After moving its image, ask the user to allow a real project, and report the path as unverified without it.
 - A Symfony 7.4 project stays on 7.4 only through `LINE_COMPONENTS` in `src/create/php.ts`:
   after a new dependency, look for `v8` in its `composer.lock`.
+- `.env` of Symfony and `.env.example` of Laravel copy the official skeletons: compare them
+  after a major version. `frameworkEnv()` in `src/create/env.ts` maps DevHub variables to theirs.
 - A health check of Symfony needs its tag: `instanceof()` only reaches services defined after it.
 - Never point `watch` at what the app writes (`var/`, `storage/`): workers restart in a loop.
 - `touch` does not trigger `bun --hot`. Append to the file, and confirm the reload count.

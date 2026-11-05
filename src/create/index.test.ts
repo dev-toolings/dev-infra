@@ -117,7 +117,7 @@ test("Docker mode gives a Python project to the import engine as a known toolcha
 test("a native PHP project listens on its own port and gets its framework settings", async () => {
   const { root, created, commands, creator } = fixture();
   await creator.apply(await creator.plan(input({ stack: "php", mode: "native" })), true);
-  expect(readFileSync(join(root, "shop/.env"), "utf8")).toMatch(/APP_SECRET=\w+/);
+  expect(readFileSync(join(root, "shop/.env.local"), "utf8")).toMatch(/APP_SECRET=\w+/);
   expect(commands.some((argv) => argv.join(" ") === "composer install")).toBe(true);
   expect(created[0]!.components[0]).toMatchObject({ argv: ["php", "-S", "127.0.0.1:4100", "-t", "public", "public/index.php"], health: { url: "http://127.0.0.1:4100/health" } });
 });
@@ -303,6 +303,34 @@ test("a copied feature finds what the agent is told to copy", async () => {
   expect(JSON.parse(laravel.contents["composer.json"]!).scripts["post-autoload-dump"]).toContain("package:discover");
 });
 
+test("each framework gets its official env files and variable names", async () => {
+  const { root, creator, created } = fixture();
+  const symfony = await creator.plan(input({ stack: "php", name: "sf", mode: "native", services: ["postgres", "mailpit"] }));
+  expect(symfony.contents).not.toHaveProperty([".env.example"]);
+  expect(symfony.contents[".gitignore"]).toContain("/.env.local");
+  expect(symfony.contents[".gitignore"]!.split("\n")).not.toContain("/.env");
+  await creator.apply(symfony, false);
+  const local = readFileSync(join(root, "sf/.env.local"), "utf8");
+  expect(local).toContain("MAILER_DSN=smtp://127.0.0.1:15432");
+  expect(local).toMatch(/^APP_SECRET=[0-9a-f]{32}$/m);
+  expect(created[0]!.components[0]!.envFiles).toEqual([".env.local"]);
+
+  const laravel = await creator.plan(input({ stack: "php", name: "lv", mode: "native", options: { framework: "laravel" }, services: ["postgres", "redis", "mailpit"] }));
+  expect(laravel.contents[".env.example"]).toContain("MAIL_FROM_NAME=");
+  expect(laravel.contents).not.toHaveProperty([".env"]);
+  await creator.apply(laravel, false);
+  const env = readFileSync(join(root, "lv/.env"), "utf8");
+  expect(env).toMatch(/^APP_KEY=base64:/m);
+  expect(env).toContain("DB_CONNECTION=pgsql");
+  expect(env).toMatch(/^DB_URL=postgres:\/\//m);
+  expect(env).toContain("REDIS_HOST=127.0.0.1");
+  expect(env).toContain("MAIL_MAILER=smtp");
+  expect(env).not.toContain("DATABASE_URL");
+
+  await creator.apply(await creator.plan(input({ stack: "php", name: "dk", options: { framework: "laravel" } })), false);
+  expect(readFileSync(join(root, "dk/.env"), "utf8")).toMatch(/^APP_KEY=base64:/m);
+});
+
 test("the preview hides generated secrets", async () => {
   const { creator } = fixture();
   const plan = await creator.plan(input({ stack: "php", services: ["postgres"] }));
@@ -323,7 +351,8 @@ test("every stack ships agent instructions, and the plan shows what will be writ
     expect(plan.contents["AGENTS.md"]).toContain("use the `add-feature` skill");
     expect(Object.keys(plan.contents).sort()).toEqual(plan.files);
     expect(plan.contents[".gitignore"]).toContain(".claude/settings.local.json");
-    expect(plan.contents).not.toHaveProperty([".env"]);
+    if (stack === "php") expect(plan.contents[".env"]).toContain("\nAPP_SECRET=\n");
+    else expect(plan.contents).not.toHaveProperty([".env"]);
   }
   await creator.apply(await creator.plan(input({ stack: "python" })), false);
   expect(readFileSync(join(root, "shop/.claude/settings.json"), "utf8")).toContain("Bash(docker compose -p devhub-shop exec app uv run pytest:*)");
