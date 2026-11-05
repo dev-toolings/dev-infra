@@ -91,21 +91,30 @@ file DevHub manages: non-root user, no capabilities, ports on this machine only.
 | `node` | `orm` | `none`, `drizzle` (selects Postgres) |
 | `node` | `nodeVersion` | `24`, `26` (Docker, with `runtime=node`) |
 | `python` | `framework` | `fastapi` |
-| `python` | `pattern` | `modules`, `standard` |
+| `python` | `pattern` | `modules`, `standard`. Same `notes` example, JSON errors and request logs as Node |
+| `python` | `orm` | `none`, `sqlalchemy` (selects Postgres; `notes` needs `uv run alembic upgrade head`) |
 | `python` | `pythonVersion` | `3.14`, `3.13` (Docker) |
 | `php` | `framework` | `symfony`, `laravel` |
 | `php` | `phpVersion` | `8.5`, `8.4` (Docker) |
 | `php` | `symfonyVersion` | `7.4` (LTS), `8.1` |
+| `php` | `pattern` | `standard` (the framework layout), `modules`. Same `notes` example, JSON errors and request logs as Node |
+| `php` | `symfonyOrm` | `none` (SQLite file), `doctrine` (selects Postgres; `notes` needs `doctrine:migrations:migrate`) |
+| `php` | `laravelOrm` | `none` (SQLite file), `eloquent` (selects Postgres; `notes` needs `php artisan migrate`) |
 
 Services are `postgres`, `redis` and `mailpit`. Every project has a `/health` route and
 exact dependency versions. Node projects use strict TypeScript, Zod for configuration and
-Biome. Python projects use uv, Ruff and pytest. PHP projects use Composer and start from a
-minimal API, not the full framework skeleton.
+Biome. Python projects use uv, typed settings, Ruff, mypy and pytest. PHP projects use
+Composer, PHPStan and PHPUnit, with PHP-CS-Fixer on Symfony and Pint on Laravel. They start
+from an API of their own, not the full framework skeleton.
+
+PHP projects run on FrankenPHP in Docker: Symfony in worker mode, Laravel under Octane. Both
+restart their workers on a code change. A custom base image has to be a `dunglas/frankenphp`
+tag; a whole Dockerfile stays free. In native mode, PHP projects use the PHP built-in server.
 
 Native mode needs the stack's tools on this machine: `uv` for Python, `php` and `composer`
 for PHP. Docker mode needs neither. Choosing a service provisions it and sets its
-environment variables. Python adds its Postgres and Redis clients, PHP adds Predis: the
-rest of the client code is yours to write.
+environment variables. Node, Python and PHP add their Postgres, Redis and mail clients,
+and report Postgres and Redis in `/health`. The clients of other services are yours to write.
 
 | Mode | Runs in | Generated environment |
 |---|---|---|

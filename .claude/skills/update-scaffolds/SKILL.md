@@ -18,9 +18,10 @@ version and still teach an outdated pattern.
 | Stack | Generator | Pins in `data/versions.json` | Official docs |
 |---|---|---|---|
 | Hono | `src/create/hono.ts`, `src/create/node.ts` | `npm`, `images.bun`, `lines.node` | https://hono.dev/docs/guides/best-practices |
-| FastAPI | `src/create/python.ts` | `PyPI`, `lines.python` | https://fastapi.tiangolo.com/tutorial/bigger-applications/ |
-| Symfony | `src/create/php.ts` | `lines.symfony`, `lines.php`, `images.composer`, `images.phpExtensions` | https://symfony.com/doc/current/best_practices.html |
-| Laravel | `src/create/php.ts` | `Packagist`, `lines.php`, `images.composer`, `images.phpExtensions` | https://laravel.com/docs/structure |
+| FastAPI | `src/create/fastapi.ts`, `src/create/python.ts` | `PyPI`, `lines.python` | https://fastapi.tiangolo.com/tutorial/bigger-applications/ |
+| Symfony | `src/create/symfony.ts`, `src/create/php-shared.ts`, `src/create/php.ts` | `lines.symfony`, `Packagist`, `lines.php`, `images.composer` | https://symfony.com/doc/current/best_practices.html |
+| Laravel | `src/create/laravel.ts`, `src/create/php-shared.ts`, `src/create/php.ts` | `Packagist`, `lines.php`, `images.composer` | https://laravel.com/docs/structure |
+| FrankenPHP | `TOOLCHAINS.composer` in `src/imports/index.ts` | `lines.php` | https://frankenphp.dev/docs/docker/ and https://laravel.com/docs/octane |
 
 Options and their defaults live in `src/create/catalog.ts`, agent instructions in
 `src/create/agents.ts`, checks and install commands in `recipe()` of `src/create/index.ts`.
@@ -49,28 +50,34 @@ bun test src/create
 bunx tsc --noEmit -p tsconfig.json
 ```
 
-If a database adapter changed, or a pin of `drizzle-orm`, `drizzle-kit` or `postgres` moved,
-also run `db:generate`, `db:migrate` and the create, read, update and delete flow on a
-dedicated temporary database in `infra-postgres`, then drop that database and its role.
+If a database adapter changed, or a pin of an ORM, its migration tool or `postgres` moved,
+also run the migrations and the create, read, update and delete flow on a dedicated temporary
+database in `infra-postgres`, then drop that database and its role.
 
 ## Boundaries
 
 - Keep exact pins in `data/versions.json`. A release line also lives in
-  `src/create/catalog.ts`, and a PHP floor in `src/create/php.ts`: move them together, or
+  `src/create/catalog.ts`, and the PHP floor in `composer()` of `src/create/php.ts`: move them together, or
   the catalog offers a line with no image and falls back to the first one.
 - A new default or a removed option is a behavior change: ask first.
-- Do not start a dev server or build an image to check a template.
+- Do not start a dev server or build an image to check a template, unless the user asks.
 - A project of a user is not a template: this skill never edits one.
 
 ## Gotchas
 
 - `check:scaffolds` covers native mode, and each code option bare and with services, not
-  every subset of services. Docker mode adds a Dockerfile and text that it does not build
-  or run.
+  every subset of services, plus the Octane files of Laravel. Docker mode adds a Dockerfile
+  and text that it does not build or run.
 - `check:scaffolds` installs `runtime=node` projects with Bun, so it misses an npm peer
   conflict, which would stop a real creation. After moving an npm pin, read the peer ranges.
-- PHP checks prove that `composer.json` is valid and that dependencies install. They do not
-  boot the framework.
+- `src/create/php-shared.ts` has to pass both PHP-CS-Fixer and Pint: where they disagree,
+  `styleOf()` writes each form.
+- FrankenPHP needs `setcap -r` under `cap_drop: ALL`, and `/config` and `/data` owned by the
+  user: `check:scaffolds` proves neither. After moving its image, start a real project.
+- A Symfony 7.4 project stays on 7.4 only through `LINE_COMPONENTS` in `src/create/php.ts`:
+  after a new dependency, look for `v8` in its `composer.lock`.
+- A health check of Symfony needs its tag: `instanceof()` only reaches services defined after it.
+- Never point `watch` at what the app writes (`var/`, `storage/`): workers restart in a loop.
 - `touch` does not trigger `bun --hot`. Append to the file, and confirm the reload count.
 - `bun --hot` runs modules again: a client at module level needs `globalThis`, and a Pino
   worker transport leaks one thread per save.

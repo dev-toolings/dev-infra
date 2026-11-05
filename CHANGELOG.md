@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- New FastAPI, Symfony and Laravel projects start with the same base as Hono projects: a
+  `notes` example to copy, one JSON error shape, request ids, readable request logs, `/health`
+  with its dependencies, tests, type checks and lint, in both code structures. An optional
+  database layer adds SQLAlchemy with Alembic, Doctrine or Eloquent. PHP keeps `notes` in a
+  SQLite file without one, and `standard` is its default structure.
+- PHP projects run on FrankenPHP in Docker, Symfony in worker mode and Laravel under Octane,
+  and reload on a code change. A custom base image has to be a `dunglas/frankenphp` tag.
 - New Hono projects start with a complete architecture in both code structures: chained
   REST routes with a `notes` example to copy, Zod request validation, one JSON error shape,
   request ids, secure headers, Pino request logs and an exported `AppType` for typed clients.
@@ -20,8 +27,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `AGENTS.md` can be edited in the file preview of a new project, and the
   Layout section of `AGENTS.md` is now a bullet list in every stack.
 - The `AGENTS.md` of a new project now carries the rules of its framework, runtime, ORM, mode
-  and services: the exact command for the `app` container, what the minimal Symfony and Laravel
-  skeletons lack, and how to share Redis, Meilisearch and RabbitMQ.
+  and services: the exact command for the `app` container, what Symfony and Laravel leave out
+  here, and how to share Redis, Meilisearch and RabbitMQ.
 - New projects include an `add-feature` skill with the steps of their stack and code structure.
 - `bun run check:scaffolds` generates each code option of the catalog, bare and with
   services, and runs the checks of each new project, and the `update-scaffolds` skill keeps the templates current.
