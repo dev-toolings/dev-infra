@@ -32,6 +32,10 @@
   --color-log-muted: var(--log-muted);
 }
 
+@utility scrollbar-soft {
+  @apply scrollbar-thin scrollbar-thumb-muted-foreground scrollbar-track-transparent;
+}
+
 body {
   min-width: 320px;
 }

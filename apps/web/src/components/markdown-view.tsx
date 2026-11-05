@@ -15,7 +15,7 @@ function Fence({ children }: { children?: React.ReactNode }) {
 /** Raw HTML stays text: react-markdown does not render it. Spacing comes from `markdown-view` in styles.css. */
 export function MarkdownView({ children }: { children: string }) {
   return (
-    <div className="markdown-view h-full min-h-80 overflow-auto p-4 text-sm leading-relaxed md:px-5">
+    <div className="markdown-view scrollbar-soft h-full min-h-80 overflow-auto p-4 text-sm leading-relaxed md:px-5">
       <Markdown components={{ pre: Fence }}>{children.replace(FRONT_MATTER, "")}</Markdown>
     </div>
   );

@@ -66,13 +66,14 @@ function FilesView({ plan, edits, editable, busy, selected, view, onSelect, onVi
           <span className="text-xs text-muted-foreground">{t("{count} files", { count: plan.files.length })}</span>
         </div>
       </div>
-      <div className="grid min-h-0 flex-1 md:grid-cols-[minmax(12rem,16rem)_minmax(0,1fr)]">
-        <div className="min-w-0 overflow-auto border-b p-4 md:border-r md:border-b-0"><FileTree files={plan.files} selected={selected} onSelect={onSelect} /></div>
-        <div className="min-w-0">
+      <div className="grid min-h-0 flex-1 md:grid-cols-[minmax(12rem,16rem)_minmax(0,1fr)] xl:grid-rows-[minmax(0,1fr)]">
+        <div className="scrollbar-soft min-w-0 overflow-auto border-b p-4 md:border-r md:border-b-0"><FileTree files={plan.files} selected={selected} onSelect={onSelect} /></div>
+        {/* Keyed: each file opens at its top. */}
+        <div key={selected} className="scrollbar-soft min-w-0 xl:min-h-0 xl:overflow-auto">
           {content === undefined
             ? <p className="p-4 text-xs text-muted-foreground">{t("Select a file to see its content.")}</p>
             : shown === "edit"
-              ? <Textarea aria-label={selected} spellCheck={false} readOnly={busy} value={content} onChange={(event) => onEdit(selected!, event.target.value)} className="min-h-80 resize-none rounded-none border-0 p-4 font-mono text-xs leading-relaxed shadow-none focus-visible:ring-0 md:px-5" />
+              ? <Textarea aria-label={selected} spellCheck={false} readOnly={busy} value={content} onChange={(event) => onEdit(selected!, event.target.value)} className="scrollbar-soft h-full min-h-80 resize-none rounded-none border-0 p-4 font-mono text-xs leading-relaxed shadow-none focus-visible:ring-0 md:px-5" />
               : markdown && shown === "preview"
                 ? <MarkdownView>{content}</MarkdownView>
                 : <CodeBlock language={languageOf(selected!)}>{content || " "}</CodeBlock>}
@@ -328,9 +329,9 @@ export function CreateProjectView({ lifetime, onCancel, onCreated }: CreateProje
   const filesView = shownPlan ? <FilesView plan={shownPlan} edits={instructions} editable={editable} busy={busy} selected={selectedFile} view={fileView} onSelect={setSelectedFile} onView={setFileView} onEdit={editInstructions} /> : null;
 
   return (
-    <div className="grid w-full min-w-0 flex-1 gap-4 xl:grid-cols-[minmax(28rem,36rem)_minmax(0,1fr)]">
+    <div className="grid w-full min-w-0 flex-1 gap-4 xl:min-h-0 xl:grid-cols-[minmax(28rem,36rem)_minmax(0,1fr)] xl:grid-rows-[minmax(0,1fr)]">
       {error ? <ErrorToast key={failures} title={t("Project could not be created")} message={error} onDismiss={() => setError(undefined)} /> : null}
-      <Card className="min-w-0 overflow-hidden">
+      <Card className="scrollbar-soft min-w-0 overflow-hidden xl:min-h-0 xl:overflow-y-auto">
         <nav aria-label={t("Creation steps")} className="border-b px-4 py-3 md:px-5">
           <ol className="flex flex-wrap items-center gap-x-1 gap-y-1">
             {steps.map((item, index) => (
@@ -548,7 +549,7 @@ export function CreateProjectView({ lifetime, onCancel, onCreated }: CreateProje
         </div>
       </Card>
 
-      <aside aria-label={t("Files DevHub will write")} className="min-w-0">
+      <aside aria-label={t("Files DevHub will write")} className="min-w-0 xl:min-h-0">
         <Card className="h-full min-w-0 overflow-hidden">
           {shownDocker ? (
             <Tabs defaultValue="dockerfile" className="flex min-h-0 flex-1 flex-col gap-0">
@@ -560,14 +561,14 @@ export function CreateProjectView({ lifetime, onCancel, onCreated }: CreateProje
                   <TabsTrigger value="env">{t("Variables")}</TabsTrigger>
                 </TabsList>
               </div>
-              <TabsContent value="dockerfile" className="min-h-0 flex-1">
+              <TabsContent value="dockerfile" className="scrollbar-soft min-h-0 flex-1 xl:overflow-auto">
                 {dockerfile !== undefined ? (
-                  <Textarea aria-label="Dockerfile" spellCheck={false} value={dockerfile} onChange={(event) => changed(setDockerfile)(event.target.value)} className="h-full min-h-80 resize-none rounded-none border-0 p-4 font-mono text-xs leading-relaxed shadow-none focus-visible:ring-0 md:px-5" />
+                  <Textarea aria-label="Dockerfile" spellCheck={false} value={dockerfile} onChange={(event) => changed(setDockerfile)(event.target.value)} className="scrollbar-soft h-full min-h-80 resize-none rounded-none border-0 p-4 font-mono text-xs leading-relaxed shadow-none focus-visible:ring-0 md:px-5" />
                 ) : <CodeBlock language="docker">{shownDocker.dockerfile}</CodeBlock>}
               </TabsContent>
               <TabsContent value="files" className="flex min-h-0 flex-1 flex-col">{filesView}</TabsContent>
-              <TabsContent value="compose" className="min-h-0 flex-1"><CodeBlock language="yaml">{shownDocker.compose}</CodeBlock></TabsContent>
-              <TabsContent value="env" className="min-h-0 flex-1"><CodeBlock language="properties">{Object.entries(shownDocker.env).map(([key, value]) => `${key}=${value}`).join("\n")}</CodeBlock></TabsContent>
+              <TabsContent value="compose" className="scrollbar-soft min-h-0 flex-1 xl:overflow-auto"><CodeBlock language="yaml">{shownDocker.compose}</CodeBlock></TabsContent>
+              <TabsContent value="env" className="scrollbar-soft min-h-0 flex-1 xl:overflow-auto"><CodeBlock language="properties">{Object.entries(shownDocker.env).map(([key, value]) => `${key}=${value}`).join("\n")}</CodeBlock></TabsContent>
               <div className="space-y-1 border-t px-4 py-2.5 text-xs text-muted-foreground md:px-5">
                 {previewError ? <PlanState error={previewError} onRetry={() => setAttempt((count) => count + 1)} /> : null}
                 <p>{t("Managed by DevHub, not editable: non-root user, no capabilities, ports on this machine only.")}</p>
@@ -575,7 +576,7 @@ export function CreateProjectView({ lifetime, onCancel, onCreated }: CreateProje
               </div>
             </Tabs>
           ) : shownPlan ? (
-            <div className="flex min-h-80 flex-1 flex-col">
+            <div className="flex min-h-80 flex-1 flex-col xl:min-h-0">
               {filesView}
               {previewError ? <div className="border-t px-4 py-2.5 md:px-5"><PlanState error={previewError} onRetry={() => setAttempt((count) => count + 1)} /></div> : null}
               <dl className="space-y-1 border-t px-4 py-3 text-xs md:px-5">

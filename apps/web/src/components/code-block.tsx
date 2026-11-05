@@ -27,7 +27,7 @@ export function languageOf(file: string): string {
 }
 
 /** Colors come from `code-block` in styles.css, so they follow the theme. */
-export function CodeBlock({ language, className = "h-full min-h-80 overflow-auto p-4 md:px-5", children }: { language: string; className?: string; children: string }) {
+export function CodeBlock({ language, className = "scrollbar-soft h-full min-h-80 overflow-auto p-4 md:px-5", children }: { language: string; className?: string; children: string }) {
   return (
     <SyntaxHighlighter language={language} useInlineStyles={false} wrapLongLines className={cn("code-block font-mono text-xs leading-relaxed", className)}>
       {children}
