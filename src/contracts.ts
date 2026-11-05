@@ -3,10 +3,12 @@ export type ComponentKind = "compose" | "native";
 export type Action = "start" | "stop" | "restart" | "check";
 export type State = "stopped" | "starting" | "running" | "unhealthy" | "unknown";
 export interface Root { id: string; path: string; label: string }
+/** Folders of the machine running DevHub. The server builds every path, so clients never parse one. */
+export interface DirectoryListing { path: string; parent: string | null; places: string[]; entries: { name: string; path: string }[] }
 export interface SourceRef { file: string; service?: string; stage?: string }
 export interface Component {
  id: string; name: string; kind: ComponentKind; cwd: string; argv?: string[];
- compose?: { files: string[]; projectName: string; profiles: string[]; services: string[] };
+ compose?: { files: string[]; projectName: string; profiles: string[]; services: string[]; /** DevHub generated this stack: its Compose file lives in the state directory, not the project. */ managed?: { infra: string[] } };
  dependsOn: string[]; envFiles?: string[]; url?: string; health?: { url: string };
  limits?: { memoryMb?: number; cpuPercent?: number; tasks?: number };
  sources?: SourceRef[]; validation?: { argv: string[] };
@@ -38,6 +40,7 @@ export type Follower = (argv: string[], onLine: (line: string, stream: LogStream
 export interface ContainerLogLine { time: string; stream: LogStreamName; message: string }
 export interface CatalogPort {
  listRoots(): Root[]; addRoot(path: string, label?: string): Root; removeRoot(id: string): void;
+ listDirectories(path?: string): Promise<DirectoryListing>;
  assertAllowedPath(path: string, mustExist?: boolean): string;
  listProjects(): Project[]; getProject(id: string): Project; createProject(input: ProjectInput): Project; saveProject(input: ProjectInput): Project; removeProject(id: string): void;
  claimOperation(projectId: string, action: Action, componentIds: string[], idempotencyKey?: string): OperationClaim;
@@ -73,7 +76,41 @@ export interface SetupPlan { id: string; project: ProjectInput; files: PlannedFi
 export interface DiscoveryPort {
  scan(path: string, depth?: number): Promise<Detection[]>; inspect(path: string): Promise<Detection>;
  presets(): Preset[]; preview(input: SetupInput): Promise<SetupPlan>; apply(planId: string): Promise<Project>;
+ freePort(start: number): Promise<number>;
 }
+export interface ImportInput { path: string; name?: string; id?: string; toolchain?: "bun"|"npm"; /** A new project has no lockfile yet: the first install writes it. */ fresh?: boolean }
+export type Toolchain = "bun"|"npm"|"uv"|"composer";
+export interface ImportPlan {
+ project: ProjectInput; toolchain: Toolchain; image: string; /** The project keeps its own Dockerfile at its root. */ ownDockerfile?: boolean; install: string; dev: string; lockfile?: string; url: string; containerPort: number;
+ infra: string[]; database?: string; /** Where the database runs, when it is not the shared Postgres. */ databaseHost?: string; databaseAdmin?: string; env: Record<string,string>; /** Replaces what a previous import left in the env file: these services were just provisioned. */ linkedEnv?: Record<string,string>; missing: string[]; warnings: string[];
+}
+export interface ImportResult { project: Project; operation: Operation; url: string; missing: string[] }
+/** A project DevHub just generated: its toolchain and services are known, nothing is detected. */
+export interface ScaffoldInput { root: string; name: string; id: string; toolchain: Toolchain; image: string; url: string; install: string; dev: string; services: string[]; env: Record<string,string> }
+export interface ImportPort { plan(input: ImportInput): Promise<ImportPlan>; scaffold(input: ScaffoldInput): ImportPlan; compose(plan: ImportPlan): string; prepare(plan: ImportPlan): Promise<Project>; apply(plan: ImportPlan): Promise<ImportResult> }
+export type CreateMode = "docker"|"native";
+export interface StackChoice {
+ value: string; label: string; /** Selected with this choice, whatever the form says. */ services?: string[];
+ tag?: "lts"|"latest"; /** Where `devhub versions` reports on this version. */ check?: { name: string; version: string };
+}
+export interface StackOption {
+ id: string; label: string; default: string; choices: StackChoice[]; kind?: "version";
+ /** Only the image uses it: on this machine the installed version applies. */ docker?: boolean;
+ /** Applies only with this value of another option. */ when?: { option: string; value: string };
+}
+/** What a project changes in its Docker image. A whole `dockerfile` replaces the other fields. */
+export interface DockerCustom { image?: string; packages?: string[]; extensions?: string[]; dockerfile?: string }
+export interface DockerPreview { dockerfile: string; compose: string; env: Record<string,string> }
+export interface ServiceOption { id: string; name: string; versions: string[]; /** The version of the shared container: any other one runs in an instance of its own. */ default: string }
+export interface ServiceInstance { container: string; /** Inside the Docker network. */ port: number; hostPort: number; /** Set when the Postgres admin is not the one of the shared container. */ admin?: string }
+export interface SharedServicesPort { ensure(id: string, version: string): Promise<ServiceInstance>; containerEnv(container: string, name: string): Promise<string> }
+export interface StackDefinition { id: string; name: string; description: string; modes: CreateMode[]; services: ServiceOption[]; options: StackOption[] }
+export interface CreateInput { stack: string; name: string; rootId: string; mode: CreateMode; options: Record<string,string>; services: string[]; /** By service; a missing one means the shared version. */ versions?: Record<string,string>; docker?: DockerCustom; /** By file, AGENTS.md: the user's own text in place of the generated one. */ instructions?: Record<string,string>; git: boolean }
+/** The choices of a form that names no project yet: enough to preview the files, never to create them. */
+export type CreateDraft = Omit<CreateInput, "name" | "rootId"> & { rootId?: string };
+export interface CreatePlan { input: CreateInput; id: string; path: string; url: string; files: string[]; /** By file: what creation writes. */ contents: Record<string,string>; /** AGENTS.md as generated, whatever the user edited. */ generatedInstructions: Record<string,string>; install: string; dev: string; database?: string; isolation: string; docker?: DockerPreview }
+export interface CreateResult { project: Project; operation: Operation; url: string }
+export interface CreatePort { stacks(): StackDefinition[]; /** A `draft` plan only shows the files: its folder is neither required nor checked. */ plan(input: CreateInput, draft?: boolean): Promise<CreatePlan>; apply(plan: CreatePlan, wait: boolean): Promise<CreateResult> }
 export interface Finding { id: string; package: string; installedVersion: string; fixedVersion?: string; severity: string; title: string; target: string }
 export interface Scan { id: string; imageId: string; state: "succeeded"|"failed"; scannedAt: string; scanner: string; databaseUpdatedAt?: string; findings: Finding[]; error?: string }
 export interface RemediationInput { projectId: string; componentId: string; file: string; replacement: string; service?: string; stage?: string }
@@ -96,7 +133,16 @@ export interface MaintenancePort {
  validate(changeId: string): Promise<Change>; activate(changeId: string): Promise<Change>;
  listChanges(): Change[];
 }
-export interface AppServices { catalog: CatalogPort; discovery: DiscoveryPort; operations: OperationsPort; maintenance: MaintenancePort }
+export interface VersionVuln { id: string; cve?: string; summary: string; severity?: string; fixed?: string }
+export type VersionState = "ok"|"outdated"|"eol-soon"|"eol"|"vulnerable"|"untracked"|"unknown";
+export interface VersionItem {
+ kind: "package"|"image"; ecosystem?: string; name: string; version: string; source: string; state: VersionState;
+ latest?: string; cycle?: string; lts: boolean; eol?: string; vulns: VersionVuln[]; errors: string[];
+}
+export interface VersionReport { checkedAt: string; items: VersionItem[] }
+/** Lifecycle and advisories of every version DevHub pins, from `tools/versionwatch`. */
+export interface VersionsPort { latest(): VersionReport | undefined; check(): Promise<VersionReport> }
+export interface AppServices { catalog: CatalogPort; discovery: DiscoveryPort; operations: OperationsPort; maintenance: MaintenancePort; imports: ImportPort; create: CreatePort; versions: VersionsPort }
 export class DevHubError extends Error {
  constructor(message: string, public readonly code = "invalid", public readonly status = 400) { super(message); this.name = "DevHubError"; }
 }

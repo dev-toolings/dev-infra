@@ -14,10 +14,12 @@
       "ES2022",
       "DOM"
     ],
-    "allowImportingTsExtensions": true
+    "allowImportingTsExtensions": true,
+    "resolveJsonModule": true
   },
   "include": [
-    "src/**/*.ts"
+    "src/**/*.ts",
+    "tools/**/*.ts"
   ],
   "exclude": [
     "apps",

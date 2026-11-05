@@ -1,0 +1,71 @@
+/**
+ * Generates each code option of the catalog, bare and with services, and runs the checks of the new project.
+ * Usage: bun run check:scaffolds [node|python|php]
+ */
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { recipe } from "../src/create";
+import { STACKS } from "../src/create/catalog";
+import type { StackDefinition } from "../src/contracts";
+
+const ALL_SERVICES = ["postgres", "redis", "mailpit"];
+
+/** Options that change the code. Docker-only ones change the image, which this does not build. */
+function combinations(stack: StackDefinition): Record<string, string>[] {
+  let results: Record<string, string>[] = [{}];
+  for (const option of stack.options.filter((item) => !item.docker)) {
+    results = results.flatMap((chosen) => {
+      if (option.when && chosen[option.when.option] !== option.when.value) return [chosen];
+      return option.choices.map((choice) => ({ ...chosen, [option.id]: choice.value }));
+    });
+  }
+  return results;
+}
+
+/** Same scripts through Bun: this repository does not run npm. */
+const withoutNpm = (command: string) => command === "npm install" ? "bun install" : command.replace(/^npm (run )?/, "bun run ");
+
+async function run(command: string, cwd: string): Promise<{ code: number; output: string }> {
+  const child = Bun.spawn(["sh", "-c", command], { cwd, stdout: "pipe", stderr: "pipe", stdin: "ignore" });
+  const [stdout, stderr, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
+  return { code, output: `${stdout}${stderr}` };
+}
+
+async function check(stack: string, options: Record<string, string>, services: string[]): Promise<boolean> {
+  const label = [stack, ...Object.values(options), ...services].join(" ");
+  const root = mkdtempSync(join(tmpdir(), "devhub-scaffold-"));
+  try {
+    const { files, install, checks } = recipe(stack, "scaffold", "native", 4100, options, services);
+    for (const [file, content] of Object.entries(files)) {
+      mkdirSync(dirname(join(root, file)), { recursive: true });
+      writeFileSync(join(root, file), content);
+    }
+    // Generating a migration needs no database, and proves that drizzle-kit finds the schema.
+    const migrations = options.orm === "drizzle" ? ["bun run db:generate"] : [];
+    for (const command of ["git init -q", install, ...migrations, ...checks].map(withoutNpm)) {
+      const { code, output } = await run(command, root);
+      if (code === 0) continue;
+      console.log(`FAIL ${label}: ${command}\n${output.trim().split("\n").slice(-25).join("\n")}`);
+      return false;
+    }
+    console.log(`PASS ${label}`);
+    return true;
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
+const only = process.argv[2];
+let failed = 0, total = 0;
+for (const stack of STACKS.filter((item) => !only || item.id === only)) {
+  for (const options of combinations(stack)) {
+    const needed = options.orm === "drizzle" ? ["postgres"] : [];
+    for (const services of [needed, ALL_SERVICES]) {
+      total += 1;
+      if (!(await check(stack.id, options, services))) failed += 1;
+    }
+  }
+}
+console.log(`${total - failed}/${total} passed`);
+process.exit(failed > 0 || total === 0 ? 1 : 0);

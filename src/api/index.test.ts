@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import type { AppServices, ContainerLogLine, FollowHandle, Project } from "../contracts";
+import { DevHubError, type AppServices, type ContainerLogLine, type FollowHandle, type Operation, type Project } from "../contracts";
+import type { LogEntry } from "../contracts";
 import { createApp, issuePairingCode } from "./index";
 
 const fixtures: string[] = [];
@@ -15,9 +16,12 @@ function setup(now = () => Date.now()) {
   const stateDir = mkdtempSync(join("/dev/shm", "devhub-api-test-")); fixtures.push(stateDir);
   const code = "PAIRING_TEST_CODE_" + "x".repeat(40);
   const calls: unknown[][] = [];
+  const operations: Operation[] = [];
+  const pendingLogs: { current?: Promise<LogEntry[]> } = {};
   const services = {
     catalog: {
       listRoots: () => [{ id: "root", path: "/tmp/approved", label: "Approved" }],
+      listDirectories: async (path?: string) => { if (path === "/missing") throw new DevHubError("This folder does not exist", "path_not_found", 404); return { path: path ?? "/home/you", parent: "/", places: ["/"], entries: [] }; },
       assertAllowedPath: (path: string) => { if (!path.startsWith("/tmp/approved")) throw new Error("path denied"); return path; },
       listProjects: () => [project], getProject: () => project, removeProject: () => {},
     },
@@ -26,18 +30,19 @@ function setup(now = () => Date.now()) {
       scan: async () => [], preview: async () => { throw new Error("not used"); }, apply: async () => project,
     },
     operations: {
-      listOperations: () => [], status: async () => ({ projectId: "sample", components: [] }),
+      listOperations: () => operations, status: async () => ({ projectId: "sample", components: [] }),
       submit: (...args: unknown[]) => { calls.push(args); return { id: "op1", projectId: "sample", action: "start", componentIds: ["api"], state: "queued", createdAt: "now", updatedAt: "now" }; },
       getOperation: () => { throw new Error("not found"); },
-      logs: async () => [{ seq: 1, time: "now", projectId: "sample", componentId: "api", stream: "stdout", message: "safe" }],
+      logs: () => pendingLogs.current ?? Promise.resolve([{ seq: 1, time: "now", projectId: "sample", componentId: "api", stream: "stdout", message: "safe" }]),
       inventory: async () => [],
       followContainer: (id: string, since: string | undefined, onLine: (line: ContainerLogLine) => void) => follow.start(id, since, onLine),
     },
+    create: { plan: async (input: object, draft?: boolean) => ({ ...input, draft }) },
     maintenance: { scan: async () => { throw new Error("not used"); }, listScans: () => [], getScan: () => { throw new Error("not used"); }, preview: async () => { throw new Error("not used"); }, apply: async () => { throw new Error("not used"); }, validate: async () => { throw new Error("not used"); }, activate: async () => { throw new Error("not used"); }, listChanges: () => [] },
   } as unknown as AppServices;
   const app = createApp(services, { stateDir, pairingCode: code, origins: ["http://127.0.0.1:8040"], hostnames: ["127.0.0.1:8040"], now });
   const request = (path: string, init: RequestInit = {}) => app.request(path, { ...init, headers: { host: "127.0.0.1:8040", ...init.headers as Record<string, string> } });
-  return { app, code, calls, follow, request, stateDir };
+  return { app, code, calls, follow, operations, pendingLogs, request, stateDir };
 }
 
 async function paired(context: ReturnType<typeof setup>) {
@@ -52,9 +57,9 @@ describe("local API authentication", () => {
   test("requires a session on read and mutation routes, then pairs once and revokes on logout", async () => {
     const context = setup();
     const protectedRoutes: Array<[string, string]> = [
-      ["/api/v1/session", "GET"], ["/api/v1/logout", "POST"], ["/api/v1/roots", "GET"], ["/api/v1/presets", "GET"],
+      ["/api/v1/session", "GET"], ["/api/v1/logout", "POST"], ["/api/v1/roots", "GET"], ["/api/v1/directories", "GET"], ["/api/v1/presets", "GET"],
       ["/api/v1/discovery", "POST"], ["/api/v1/projects/preview", "POST"], ["/api/v1/projects", "GET"], ["/api/v1/projects", "POST"],
-      ["/api/v1/projects/sample", "DELETE"], ["/api/v1/projects/sample/status", "GET"], ["/api/v1/projects/sample/operations", "POST"],
+      ["/api/v1/projects/sample", "DELETE"], ["/api/v1/projects/sample/status", "GET"], ["/api/v1/projects/sample/operations", "GET"], ["/api/v1/projects/sample/operations", "POST"],
       ["/api/v1/projects/sample/logs", "GET"], ["/api/v1/operations/op1", "GET"], ["/api/v1/containers", "GET"], ["/api/v1/scans", "GET"],
       ["/api/v1/scans", "POST"], ["/api/v1/scans/scan1", "GET"], ["/api/v1/remediation", "GET"],
       ["/api/v1/remediation/preview", "POST"], ["/api/v1/remediation/apply", "POST"],
@@ -83,6 +88,51 @@ describe("local API authentication", () => {
     const tooLarge = "x".repeat(65_536);
     const response = await context.request("/api/v1/projects/preview", { method: "POST", headers: { cookie, origin: "http://127.0.0.1:8040", "content-type": "application/json" }, body: JSON.stringify({ path: tooLarge }) });
     expect(response.status).toBe(413);
+  });
+
+  test("a creation preview takes a multi-line Dockerfile but keeps checking the other Docker fields", async () => {
+    const context = setup(); const { auth } = await paired(context);
+    const body = (docker: unknown) => JSON.stringify({ stack: "php", name: "Shop", rootId: "root", mode: "docker", options: {}, services: [], docker, git: true });
+    const preview = (docker: unknown) => context.request("/api/v1/creations/preview", { method: "POST", headers: auth, body: body(docker) });
+    expect((await preview({ dockerfile: "FROM php:8.5\nRUN id\n" })).status).toBe(200);
+    expect((await preview({ image: "php\nRUN id" })).status).toBe(400);
+    expect((await preview({ unknown: "x" })).status).toBe(400);
+  });
+
+  test("a creation preview takes edited agent instructions, but no other file", async () => {
+    const context = setup(); const { auth } = await paired(context);
+    const preview = (instructions: unknown) => context.request("/api/v1/creations/preview", { method: "POST", headers: auth, body: JSON.stringify({ stack: "node", name: "Shop", rootId: "root", mode: "docker", options: {}, services: [], instructions, git: true }) });
+    expect((await preview({ "AGENTS.md": "# Mine\n\n- Rule\n" })).status).toBe(200);
+    expect((await preview({ "CLAUDE.md": "x" })).status).toBe(400);
+    expect((await preview({ "../evil": "x" })).status).toBe(400);
+    expect((await preview({ "AGENTS.md": 1 })).status).toBe(400);
+    const creation = await context.request("/api/v1/creations", { method: "POST", headers: auth, body: JSON.stringify({ stack: "node", name: "Shop", rootId: "root", mode: "docker", options: {}, services: [], instructions: { "../evil": "x" }, git: true }) });
+    expect(creation.status).toBe(400);
+  });
+
+  test("a creation preview without a name is a draft, and a creation still needs the name", async () => {
+    const context = setup(); const { auth } = await paired(context);
+    const body = JSON.stringify({ stack: "node", mode: "docker", options: {}, services: [], git: true });
+    const preview = await context.request("/api/v1/creations/preview", { method: "POST", headers: auth, body });
+    expect(preview.status).toBe(200);
+    const { data } = await preview.json();
+    expect(data.name).toBe("my-project");
+    expect(data.draft).toBe(true);
+    expect((await context.request("/api/v1/creations", { method: "POST", headers: auth, body })).status).toBe(400);
+    const named = JSON.stringify({ ...JSON.parse(body), name: "Shop", rootId: "root" });
+    expect((await (await context.request("/api/v1/creations/preview", { method: "POST", headers: auth, body: named })).json()).data.draft).toBe(false);
+  });
+
+  test("lists folders of a requested path, defaults to home, and maps errors", async () => {
+    const context = setup();
+    const { cookie } = await paired(context);
+    const list = (query = "") => context.request(`/api/v1/directories${query}`, { headers: { cookie } });
+    expect((await (await list()).json()).data.path).toBe("/home/you");
+    expect((await (await list("?path=%2Fsrv%2Fcode")).json()).data.path).toBe("/srv/code");
+    const missing = await list("?path=%2Fmissing");
+    expect(missing.status).toBe(404);
+    expect((await missing.json()).error.code).toBe("path_not_found");
+    expect((await list("?path=")).status).toBe(400);
   });
 
   test("uses submit for 202 operations and rejects surplus command fields", async () => {
@@ -211,5 +261,40 @@ describe("local API authentication", () => {
     expect((await preview.json()).error.code).toBe("source_forbidden");
     const command = await context.request("/api/v1/projects/sample/operations", { method: "POST", headers: auth, body: JSON.stringify({ action: "start", argv: ["sh", "-c", "id"] }) });
     expect(command.status).toBe(400);
+  });
+});
+
+describe("project operation history", () => {
+  test("returns the newest operations without their private fields, so the history survives a reload", async () => {
+    const context = setup();
+    const { auth } = await paired(context);
+    context.operations.push(...Array.from({ length: 25 }, (_, index): Operation => ({ id: `op${index}`, projectId: "sample", action: "start", componentIds: ["api"], state: "succeeded", createdAt: "now", updatedAt: "now", idempotencyKey: "SENTINEL_KEY" })));
+    const response = await context.request("/api/v1/projects/sample/operations", { headers: auth });
+    expect(response.status).toBe(200);
+    const { data } = await response.json() as { data: Operation[] };
+    expect(data.map((operation) => operation.id)).toEqual(Array.from({ length: 20 }, (_, index) => `op${index + 5}`));
+    expect(JSON.stringify(data)).not.toContain("SENTINEL_KEY");
+  });
+});
+
+describe("project log stream", () => {
+  test("a client that leaves during a read ends the stream quietly", async () => {
+    const context = setup();
+    const { auth } = await paired(context);
+    const unhandled: unknown[] = [];
+    const record = (reason: unknown) => { unhandled.push(reason); };
+    process.on("unhandledRejection", record);
+    try {
+      for (const failed of [false, true]) {
+        let entries!: (value: LogEntry[]) => void, failure!: (reason: Error) => void;
+        context.pendingLogs.current = new Promise<LogEntry[]>((resolve, reject) => { entries = resolve; failure = reject; });
+        const response = await context.request("/api/v1/projects/sample/logs?limit=10", { headers: auth });
+        await response.body!.cancel();
+        if (failed) failure(new Error("read failed"));
+        else entries([{ seq: 1, time: "now", projectId: "sample", componentId: "api", stream: "stdout", message: "late" }]);
+        await Bun.sleep(5);
+      }
+      expect(unhandled).toEqual([]);
+    } finally { process.off("unhandledRejection", record); }
   });
 });

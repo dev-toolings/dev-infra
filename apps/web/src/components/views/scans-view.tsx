@@ -1,3 +1,4 @@
+import { t } from "../../lib/i18n";
 import * as React from "react";
 import { LoaderCircle, ScanLine, ShieldCheck } from "lucide-react";
 import type { ContainerInfo, Finding, Scan, PublicChange } from "../../../../../src/contracts";
@@ -107,14 +108,14 @@ function buildRows(containers: ContainerInfo[], scans: Scan[]): ImageRow[] {
 }
 
 function FindingCounts({ row }: { row: ImageRow }) {
-  if (!row.latest) return <span className="text-muted-foreground">Not scanned</span>;
-  if (row.latest.state === "failed") return <span className="text-muted-foreground">No result</span>;
-  if (row.severe + row.medium + row.other === 0) return <span className="text-status-up">None found</span>;
+  if (!row.latest) return <span className="text-muted-foreground">{t("Not scanned")}</span>;
+  if (row.latest.state === "failed") return <span className="text-muted-foreground">{t("No result")}</span>;
+  if (row.severe + row.medium + row.other === 0) return <span className="text-status-up">{t("None found")}</span>;
   return (
     <span className="flex flex-wrap items-center gap-1">
-      {row.severe > 0 ? <Badge variant="down" size="sm">{row.severe} high</Badge> : null}
-      {row.medium > 0 ? <Badge variant="degraded" size="sm">{row.medium} medium</Badge> : null}
-      {row.other > 0 ? <Badge variant="muted" size="sm">{row.other} low</Badge> : null}
+      {row.severe > 0 ? <Badge variant="down" size="sm">{t("{count} high", { count: row.severe })}</Badge> : null}
+      {row.medium > 0 ? <Badge variant="degraded" size="sm">{t("{count} medium", { count: row.medium })}</Badge> : null}
+      {row.other > 0 ? <Badge variant="muted" size="sm">{t("{count} low", { count: row.other })}</Badge> : null}
     </span>
   );
 }
@@ -140,10 +141,10 @@ export function ScansView({ scans, changes, containers, inventoryLoading = false
   const open = rows.find((row) => row.imageId === openId);
   const toggle = (next: ImageFilter) => setFilter((current) => (current === next ? "all" : next));
   const filters: { value: ImageFilter; label: string }[] = [
-    { value: "all", label: "All" },
-    { value: "unscanned", label: "Not scanned" },
-    { value: "findings", label: "With findings" },
-    { value: "failed", label: "Failed scans" },
+    { value: "all", label: t("All") },
+    { value: "unscanned", label: t("Not scanned") },
+    { value: "findings", label: t("With findings") },
+    { value: "failed", label: t("Failed scans") },
   ];
 
   function scanButton(row: ImageRow, className?: string) {
@@ -158,12 +159,12 @@ export function ScansView({ scans, changes, containers, inventoryLoading = false
         variant="outline"
         aria-busy={scanning}
         disabled={busy || !scannable}
-        title={scannable ? undefined : "This image is no longer used by an observed container"}
+        title={scannable ? undefined : t("This image is no longer used by an observed container")}
         className={className}
         onClick={(event) => { event.stopPropagation(); void onScan(row.imageId); }}
       >
         {scanning ? <LoaderCircle aria-hidden="true" className="animate-spin" /> : <ScanLine aria-hidden="true" />}
-        {scanning ? "Scanning" : row.latest ? "Rescan" : "Scan"}
+        {scanning ? t("Scanning") : row.latest ? t("Rescan") : t("Scan")}
       </Button>
     );
   }
@@ -172,18 +173,18 @@ export function ScansView({ scans, changes, containers, inventoryLoading = false
   if (loading || inventoryLoading) return <ScansSkeleton />;
 
   return (
-    <section className="min-w-0 space-y-6" aria-label="Image maintenance">
+    <section className="min-w-0 space-y-6" aria-label={t("Image maintenance")}>
       <div className="space-y-4">
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-          <StatTile label="Local images" value={rows.length} hint={`Used by ${containers.length} containers`} pressed={filter === "all" && !query} onSelect={() => setFilter("all")} />
-          <StatTile label="Never scanned" value={counts.unscanned} tone="muted" hint="Scan to check for vulnerabilities" pressed={filter === "unscanned"} onSelect={() => toggle("unscanned")} />
-          <StatTile label="High or critical" value={counts.severe} tone="down" hint="Images in their latest scan" pressed={filter === "findings"} onSelect={() => toggle("findings")} />
-          <StatTile label="Failed scans" value={counts.failed} tone="degraded" hint="Latest scan did not complete" pressed={filter === "failed"} onSelect={() => toggle("failed")} />
+          <StatTile label={t("Local images")} value={rows.length} hint={t("Used by {count} containers", { count: containers.length })} pressed={filter === "all" && !query} onSelect={() => setFilter("all")} />
+          <StatTile label={t("Never scanned")} value={counts.unscanned} tone="muted" hint={t("Scan to check for vulnerabilities")} pressed={filter === "unscanned"} onSelect={() => toggle("unscanned")} />
+          <StatTile label={t("High or critical")} value={counts.severe} tone="down" hint={t("Images in their latest scan")} pressed={filter === "findings"} onSelect={() => toggle("findings")} />
+          <StatTile label={t("Failed scans")} value={counts.failed} tone="degraded" hint={t("Latest scan did not complete")} pressed={filter === "failed"} onSelect={() => toggle("failed")} />
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          <SearchField value={query} onChange={setQuery} label="Search image or container" />
-          <div role="group" aria-label="Filter images" className="inline-flex items-center gap-0.5 rounded-lg bg-muted p-0.5">
+          <SearchField value={query} onChange={setQuery} label={t("Search image or container")} />
+          <div role="group" aria-label={t("Filter images")} className="inline-flex items-center gap-0.5 rounded-lg bg-muted p-0.5">
             {filters.map((item) => (
               <button
                 key={item.value}
@@ -200,24 +201,24 @@ export function ScansView({ scans, changes, containers, inventoryLoading = false
             ))}
           </div>
           <span className="tabular ml-auto text-xs text-muted-foreground">
-            {visible.length === rows.length ? `${rows.length} images` : `${visible.length} of ${rows.length} images`}
+            {visible.length === rows.length ? t("{count} images", { count: rows.length }) : t("{shown} of {count} images", { shown: visible.length, count: rows.length })}
           </span>
         </div>
 
         {rows.length === 0 ? (
-          <EmptyState icon={<ShieldCheck aria-hidden="true" className="size-5" />} title="No local images" description="Images appear here once Docker reports containers that use them. Nothing is pulled." />
+          <EmptyState icon={<ShieldCheck aria-hidden="true" className="size-5" />} title={t("No local images")} description={t("Images appear here once Docker reports containers that use them. Nothing is pulled.")} />
         ) : visible.length === 0 ? (
-          <EmptyState title="No image matches" description="Change the search or the filter to see more images." className="min-h-36" />
+          <EmptyState title={t("No image matches")} description={t("Change the search or the filter to see more images.")} className="min-h-36" />
         ) : (
           <Card className="overflow-hidden p-0">
             <Table className="table-fixed">
               <TableHeader>
                 <TableRow className="bg-muted/40 hover:bg-muted/40">
-                  <TableHead>Image</TableHead>
-                  <TableHead className="hidden w-56 md:table-cell">Used by</TableHead>
-                  <TableHead className="hidden w-40 sm:table-cell">Last scan</TableHead>
-                  <TableHead className="w-44">Findings</TableHead>
-                  {onScan ? <TableHead className="w-28"><span className="sr-only">Actions</span></TableHead> : null}
+                  <TableHead>{t("Image")}</TableHead>
+                  <TableHead className="hidden w-56 md:table-cell">{t("Used by")}</TableHead>
+                  <TableHead className="hidden w-40 sm:table-cell">{t("Last scan")}</TableHead>
+                  <TableHead className="w-44">{t("Findings")}</TableHead>
+                  {onScan ? <TableHead className="w-28"><span className="sr-only">{t("Actions")}</span></TableHead> : null}
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -230,12 +231,12 @@ export function ScansView({ scans, changes, containers, inventoryLoading = false
                         className="flex w-full min-w-0 items-center gap-1.5 rounded-sm text-left font-medium outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
                       >
                         <span className="truncate">{row.references[0] ? displayReference(row.references[0]).name : shortId(row.imageId)}</span>
-                        {row.references[0] && displayReference(row.references[0]).pinned ? <Badge variant="outline" size="sm" title="Referenced by digest">pinned</Badge> : null}
+                        {row.references[0] && displayReference(row.references[0]).pinned ? <Badge variant="outline" size="sm" title={t("Referenced by digest")}>pinned</Badge> : null}
                       </button>
                       <span className="block truncate font-mono text-xs text-muted-foreground">{shortId(row.imageId)}{row.references.length > 1 ? `, +${row.references.length - 1} tags` : ""}</span>
                     </TableCell>
                     <TableCell className="hidden text-xs md:table-cell">
-                      {row.containers.length === 0 ? <span className="text-muted-foreground">No running container</span> : (
+                      {row.containers.length === 0 ? <span className="text-muted-foreground">{t("No running container")}</span> : (
                         <span className="flex min-w-0 items-center gap-1.5">
                           <span className="truncate">{row.containers[0]!.name}</span>
                           {row.containers.length > 1 ? <Badge variant="muted" size="sm" className="shrink-0">+{row.containers.length - 1}</Badge> : null}
@@ -246,9 +247,9 @@ export function ScansView({ scans, changes, containers, inventoryLoading = false
                       {row.latest ? (
                         <>
                           <span className="block">{formatDateTime(row.latest.scannedAt)}</span>
-                          {row.latest.state === "failed" ? <span className="text-status-down">Failed</span> : <span className="text-muted-foreground">{row.latest.scanner}</span>}
+                          {row.latest.state === "failed" ? <span className="text-status-down">{t("Failed")}</span> : <span className="text-muted-foreground">{row.latest.scanner}</span>}
                         </>
-                      ) : <span className="text-muted-foreground">Never</span>}
+                      ) : <span className="text-muted-foreground">{t("Never")}</span>}
                     </TableCell>
                     <TableCell className="text-xs"><FindingCounts row={row} /></TableCell>
                     {onScan ? <TableCell className="text-right">{scanButton(row)}</TableCell> : null}
@@ -271,34 +272,34 @@ export function ScansView({ scans, changes, containers, inventoryLoading = false
               <div className="space-y-5 p-4">
                 <div className="flex flex-wrap items-center gap-2">
                   {scanButton(open)}
-                  {open.containers.length === 0 ? <span className="text-xs text-muted-foreground">Not used by an observed container, so it cannot be scanned.</span> : null}
+                  {open.containers.length === 0 ? <span className="text-xs text-muted-foreground">{t("Not used by an observed container, so it cannot be scanned.")}</span> : null}
                 </div>
                 <section aria-labelledby="image-usage">
-                  <h3 id="image-usage" className="text-sm font-semibold">Used by</h3>
-                  {open.containers.length === 0 ? <p className="mt-1 text-xs text-muted-foreground">No observed container uses this image.</p> : (
+                  <h3 id="image-usage" className="text-sm font-semibold">{t("Used by")}</h3>
+                  {open.containers.length === 0 ? <p className="mt-1 text-xs text-muted-foreground">{t("No observed container uses this image.")}</p> : (
                     <ul className="mt-2 flex flex-wrap gap-1.5">
                       {open.containers.map((container) => (
                         <li key={container.id}><Badge variant={container.projectId ? "outline" : "muted"}>{container.name}{container.projectId ? ` (${container.projectId})` : ""}</Badge></li>
                       ))}
                     </ul>
                   )}
-                  {open.references.length > 1 ? <p className="mt-2 break-all text-xs text-muted-foreground">Tags: {open.references.join(", ")}</p> : null}
+                  {open.references.length > 1 ? <p className="mt-2 break-all text-xs text-muted-foreground">{t("Tags: {items}", { items: open.references.join(", ") })}</p> : null}
                 </section>
                 {open.latest ? (
                   <section aria-labelledby="image-scan" className="space-y-3">
-                    <h3 id="image-scan" className="text-sm font-semibold">Latest scan</h3>
+                    <h3 id="image-scan" className="text-sm font-semibold">{t("Latest scan")}</h3>
                     <dl className="divide-y">
-                      <DetailRow label="Result">{open.latest.state === "failed" ? <Badge variant="down">Failed</Badge> : <Badge variant="muted">Completed</Badge>}</DetailRow>
-                      <DetailRow label="Scanned">{formatDateTime(open.latest.scannedAt)}</DetailRow>
-                      <DetailRow label="Scanner">{open.latest.scanner}</DetailRow>
-                      <DetailRow label="Database">{open.latest.databaseUpdatedAt ? `Updated ${formatDateTime(open.latest.databaseUpdatedAt)}` : "Freshness unknown"}</DetailRow>
+                      <DetailRow label={t("Result")}>{open.latest.state === "failed" ? <Badge variant="down">{t("Failed")}</Badge> : <Badge variant="muted">{t("Completed")}</Badge>}</DetailRow>
+                      <DetailRow label={t("Scanned")}>{formatDateTime(open.latest.scannedAt)}</DetailRow>
+                      <DetailRow label={t("Scanner")}>{open.latest.scanner}</DetailRow>
+                      <DetailRow label={t("Database")}>{open.latest.databaseUpdatedAt ? t("Updated {date}", { date: formatDateTime(open.latest.databaseUpdatedAt) }) : t("Freshness unknown")}</DetailRow>
                     </dl>
                     {open.latest.state === "failed" ? (
                       <p role="status" className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs">
-                        {open.latest.error ?? "The scan did not complete. Check that the local scanner is installed, then rescan."}
+                        {open.latest.error ?? t("The scan did not complete. Check that the local scanner is installed, then rescan.")}
                       </p>
                     ) : open.latest.findings.length === 0 ? (
-                      <p className="rounded-md border border-dashed px-3 py-4 text-xs text-muted-foreground">The scanner reported no vulnerability for this image.</p>
+                      <p className="rounded-md border border-dashed px-3 py-4 text-xs text-muted-foreground">{t("The scanner reported no vulnerability for this image.")}</p>
                     ) : (
                       <ul className="divide-y rounded-lg border">
                         {[...open.latest.findings].sort((a, b) => severityRank(a) - severityRank(b)).map((finding) => (
@@ -307,15 +308,15 @@ export function ScansView({ scans, changes, containers, inventoryLoading = false
                               <p className="min-w-0 break-words text-sm font-medium">{finding.title}</p>
                               <Badge variant={severityVariant(finding.severity)} className="shrink-0">{finding.severity.toLowerCase()}</Badge>
                             </div>
-                            <p className="break-all font-mono text-xs text-muted-foreground">{finding.id} in {finding.package} {finding.installedVersion}</p>
-                            <p className="text-xs text-muted-foreground">{finding.fixedVersion ? `Fixed in ${finding.fixedVersion}` : "No fix released yet"}</p>
+                            <p className="break-all font-mono text-xs text-muted-foreground">{t("{id} in {package} {version}", { id: finding.id, package: finding.package, version: finding.installedVersion })}</p>
+                            <p className="text-xs text-muted-foreground">{finding.fixedVersion ? t("Fixed in {version}", { version: finding.fixedVersion }) : t("No fix released yet")}</p>
                           </li>
                         ))}
                       </ul>
                     )}
                   </section>
                 ) : (
-                  <p className="text-xs text-muted-foreground">This image has never been scanned.</p>
+                  <p className="text-xs text-muted-foreground">{t("This image has never been scanned.")}</p>
                 )}
               </div>
             </>
@@ -326,8 +327,8 @@ export function ScansView({ scans, changes, containers, inventoryLoading = false
       {!error && !loading && changes.length > 0 ? (
         <section className="space-y-3" aria-labelledby="source-changes-heading">
           <div>
-            <h3 id="source-changes-heading" className="text-sm font-semibold">Existing source changes</h3>
-            <p className="mt-1 text-xs leading-5 text-muted-foreground">Source change records and their current review state.</p>
+            <h3 id="source-changes-heading" className="text-sm font-semibold">{t("Existing source changes")}</h3>
+            <p className="mt-1 text-xs leading-5 text-muted-foreground">{t("Source change records and their current review state.")}</p>
           </div>
           <ul className="space-y-2">
             {changes.map((change) => (
@@ -336,23 +337,23 @@ export function ScansView({ scans, changes, containers, inventoryLoading = false
                   <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-3">
                     <div className="min-w-0 space-y-1">
                       <CardTitle className="break-all text-sm">{change.file}</CardTitle>
-                      <CardDescription className="break-all">Project {change.projectId} · Component {change.componentId}</CardDescription>
+                      <CardDescription className="break-all">{t("Project {project} · Component {component}", { project: change.projectId, component: change.componentId })}</CardDescription>
                     </div>
                     <Badge variant={changeVariant(change.state)}>{change.state}</Badge>
                   </CardHeader>
                   <CardContent className="space-y-3">
-                    <p className="text-xs text-muted-foreground">Created {formatDateTime(change.createdAt)} · Line {change.changedLine.line}</p>
+                    <p className="text-xs text-muted-foreground">{t("Created {date} · Line {line}", { date: formatDateTime(change.createdAt), line: change.changedLine.line })}</p>
                     <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2">
                       <div className="min-w-0 rounded-md border border-border bg-muted/50 p-3">
-                        <p className="mb-1 text-xs font-medium text-muted-foreground">Before</p>
+                        <p className="mb-1 text-xs font-medium text-muted-foreground">{t("Before")}</p>
                         <code className="block break-all text-xs leading-5">{change.changedLine.before}</code>
                       </div>
                       <div className="min-w-0 rounded-md border border-border bg-muted/50 p-3">
-                        <p className="mb-1 text-xs font-medium text-muted-foreground">After</p>
+                        <p className="mb-1 text-xs font-medium text-muted-foreground">{t("After")}</p>
                         <code className="block break-all text-xs leading-5">{change.changedLine.after}</code>
                       </div>
                     </div>
-                    {change.branch ? <p className="break-all text-xs text-muted-foreground">Branch: <code>{change.branch}</code></p> : null}
+                    {change.branch ? <p className="break-all text-xs text-muted-foreground">{t("Branch:")}<code>{change.branch}</code></p> : null}
                     {change.error ? <p role="status" className="break-words text-xs text-destructive">{change.error}</p> : null}
                   </CardContent>
                 </Card>

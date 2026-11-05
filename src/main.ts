@@ -4,8 +4,9 @@ import { existsSync, lstatSync, realpathSync } from "node:fs";
 import { ensureStateDir } from "./state";
 import { parseCliArgs } from "./cli/args";
 import { guardExecutor } from "./guard";
+import { SharedServices } from "./services/index";
 import { terminateChildren } from "./runtime/executor";
-import type { AppServices, CatalogPort, DiscoveryPort, RuntimePort, OperationsPort, MaintenancePort, Executor } from "./contracts";
+import type { AppServices, CatalogPort, CreatePort, DiscoveryPort, ImportPort, RuntimePort, OperationsPort, MaintenancePort, SharedServicesPort, VersionsPort, Executor } from "./contracts";
 
 export const LISTEN_HOST = "127.0.0.1" as const;
 export const DEFAULT_PORT = 8040;
@@ -14,10 +15,11 @@ export function stateDirectory(): string {
   const configured = process.env.XDG_STATE_HOME;
   return join(configured && isAbsolute(configured) ? configured : join(homedir(), ".local", "state"), "devhub");
 }
-type ListenerOptions = { hostname: string; port: number; fetch: (request: Request) => Response | Promise<Response> };
+type ListenerOptions = { hostname: string; port: number; idleTimeout: number; fetch: (request: Request) => Response | Promise<Response> };
 export function listen(fetch: ListenerOptions["fetch"], port = DEFAULT_PORT, serve: (options: ListenerOptions) => unknown = (options) => Bun.serve(options)): unknown {
   if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Error("Port must be an integer between 1024 and 65535");
-  return serve({ hostname: LISTEN_HOST, port, fetch });
+  // Creating a native project installs its dependencies inside the request; Bun would cut it after 10 s of silence.
+  return serve({ hostname: LISTEN_HOST, port, idleTimeout: 0, fetch });
 }
 
 // Fixed module paths keep foundation independently typecheckable before worker integration.
@@ -28,6 +30,9 @@ export interface ManagerModules {
   Discovery: new (options: {catalog:CatalogPort;run:Executor}) => DiscoveryPort;
   Operations: new (options: {catalog:CatalogPort;runtime:RuntimePort}) => OperationsPort;
   Maintenance: new (options: {catalog:CatalogPort;runtime:RuntimePort;run:Executor;stateDir:string}) => MaintenancePort;
+  Imports: new (options: {catalog:CatalogPort;discovery:DiscoveryPort;operations:OperationsPort;run:Executor;stateDir:string;infraDir:string}) => ImportPort;
+  Creator: new (options: {catalog:CatalogPort;discovery:DiscoveryPort;imports:ImportPort;operations:OperationsPort;services:SharedServicesPort;run:Executor;infraDir:string}) => CreatePort;
+  Versions: new (options: {run:Executor;stateDir:string;infraDir:string}) => VersionsPort;
 }
 export function composeServices(modules: ManagerModules, executor: Executor, stateDir: string, infraDir: string, reservedPorts = CONTROLLER_PORTS): AppServices {
   const run = guardExecutor(executor);
@@ -36,12 +41,15 @@ export function composeServices(modules: ManagerModules, executor: Executor, sta
   const discovery = new modules.Discovery({ catalog, run });
   const operations = new modules.Operations({ catalog, runtime });
   const maintenance = new modules.Maintenance({ catalog, runtime, run, stateDir });
-  return { catalog, discovery, operations, maintenance };
+  const imports = new modules.Imports({ catalog, discovery, operations, run, stateDir, infraDir });
+  const create = new modules.Creator({ catalog, discovery, imports, operations, services: new SharedServices({ run, discovery, stateDir, infraDir }), run, infraDir });
+  const versions = new modules.Versions({ run, stateDir, infraDir });
+  return { catalog, discovery, operations, maintenance, imports, create, versions };
 }
 export async function services(stateDir = stateDirectory(), reservedPorts = CONTROLLER_PORTS): Promise<AppServices> {
-  const [catalogModule, discoveryModule, runtimeModule, operationsModule, securityModule] = await Promise.all(["catalog", "discovery", "runtime", "operations", "security"].map(moduleAt));
+  const [catalogModule, discoveryModule, runtimeModule, operationsModule, securityModule, importsModule, createModule, versionsModule] = await Promise.all(["catalog", "discovery", "runtime", "operations", "security", "imports", "create", "versions"].map(moduleAt));
   const { execCommand } = await import("./runtime/" + "executor.ts") as { execCommand: Executor };
-  return composeServices({ Catalog: catalogModule.Catalog, Runtime: runtimeModule.Runtime, Discovery: discoveryModule.Discovery, Operations: operationsModule.Operations, Maintenance: securityModule.Maintenance }, execCommand, stateDir, resolve(import.meta.dir, ".."), reservedPorts);
+  return composeServices({ Catalog: catalogModule.Catalog, Runtime: runtimeModule.Runtime, Discovery: discoveryModule.Discovery, Operations: operationsModule.Operations, Maintenance: securityModule.Maintenance, Imports: importsModule.Imports, Creator: createModule.Creator, Versions: versionsModule.Versions }, execCommand, stateDir, resolve(import.meta.dir, ".."), reservedPorts);
 }
 
 export function parseServeOptions(argv: string[]): { port: number; devOrigin?: string } {
@@ -112,6 +120,24 @@ export async function startDevPanel(devOrigin: string, checkout: string, apiPort
   });
   return { state: "started", stop: () => { stopping = true; child.kill(); } };
 }
+/**
+ * Development mode owns two children: Vite, and an API that Bun restarts when a source file changes.
+ * Vite reloads the panel by itself, so an API left on old code would answer 404 to new routes.
+ */
+export async function superviseDev(devOrigin: string, port: number, checkout: string, deps: {
+  startPanel?: typeof startDevPanel;
+  spawn?: DevPanelSpawn;
+  onSignal?: (stop: () => void) => void;
+} = {}): Promise<number> {
+  const panel = await (deps.startPanel ?? startDevPanel)(devOrigin, checkout, port);
+  const spawn = deps.spawn ?? ((argv, options) => Bun.spawn(argv, { ...options, stdin: "ignore", stdout: "inherit", stderr: "inherit" }));
+  const api = spawn([process.execPath, "--watch", join(checkout, "src", "main.ts"), "serve", "--port", String(port), "--dev-origin", devOrigin], { cwd: checkout, env: { ...process.env, DEVHUB_WATCHED_API: panel.state } });
+  const stop = () => { api.kill(); panel.stop(); };
+  (deps.onSignal ?? ((handler) => { for (const signal of ["SIGINT", "SIGTERM"] as const) process.once(signal, handler); }))(stop);
+  const code = await api.exited;
+  panel.stop();
+  return code;
+}
 const paint = (code: string, text: string, enabled: boolean) => enabled ? `\u001b[${code}m${text}\u001b[0m` : text;
 /** Startup summary that says where the API and the panel actually are in each mode. */
 export function serveBanner(options: { port: number; devOrigin?: string; devPanel?: "started" | "reused"; panelBuilt: boolean; checkout: string; color?: boolean }): string {
@@ -146,6 +172,8 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
   const serveOptions = argv[0] === "serve" ? parseServeOptions(argv.slice(1)) : undefined;
   // Development mode turns on the colored key=value terminal logger unless the operator chose a mode.
   if (serveOptions?.devOrigin) process.env.DEVHUB_ENV ??= "development";
+  const watchedPanel = process.env.DEVHUB_WATCHED_API as "started" | "reused" | undefined;
+  if (serveOptions?.devOrigin && !watchedPanel) return superviseDev(serveOptions.devOrigin, serveOptions.port, resolve(import.meta.dir, ".."));
   const stateDir = ensureStateDir(stateDirectory());
   const api = argv[0] === "serve" || argv[0] === "pair" ? await moduleAt("api") : undefined;
   if (argv[0] === "pair") {
@@ -174,13 +202,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     const distDir = resolve(import.meta.dir, "..", "apps", "web", "dist");
     const checkout = resolve(import.meta.dir, "..");
     listen(controllerFetch(app, distDir), port);
-    const devPanel = devOrigin ? await startDevPanel(devOrigin, checkout, port) : undefined;
-    if (devPanel) {
-      // Ctrl+C or a stop signal takes the Vite child down with the controller.
-      for (const signal of ["SIGINT", "SIGTERM"] as const) process.once(signal, () => devPanel.stop());
-      process.once("exit", () => devPanel.stop());
-    }
-    process.stdout.write(serveBanner({ port, devOrigin, devPanel: devPanel?.state, panelBuilt: existsSync(join(distDir, "index.html")), checkout }));
+    process.stdout.write(serveBanner({ port, devOrigin, devPanel: watchedPanel, panelBuilt: existsSync(join(distDir, "index.html")), checkout }));
     return 0;
   }
   try {

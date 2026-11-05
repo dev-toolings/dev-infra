@@ -1,18 +1,19 @@
+import { locale, t } from "../../lib/i18n";
 import * as React from "react";
 import { ArrowDown, ChevronRight } from "lucide-react";
 import type { ContainerLogEntry } from "../../lib/api";
 import { parseAnsi } from "../../lib/ansi";
 import { useContainerLogs } from "../../lib/use-container-logs";
+import { useStickToBottom } from "../../lib/use-stick-to-bottom";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { EmptyState, ErrorState } from "../ui/state";
 
-const STICK_THRESHOLD_PX = 48;
 const JSON_TOKEN = /("(?:\\.|[^"\\])*")(\s*:)?|\b(?:true|false|null)\b|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/g;
 
 function clock(time: string): string {
   const date = new Date(time);
-  return Number.isNaN(date.getTime()) ? "" : date.toLocaleTimeString(undefined, { hour12: false });
+  return Number.isNaN(date.getTime()) ? "" : date.toLocaleTimeString(locale, { hour12: false });
 }
 
 function parseJson(message: string): Record<string, unknown> | unknown[] | undefined {
@@ -58,7 +59,7 @@ function JsonTokens({ text }: { text: string }) {
 }
 
 // Memoized so a new batch renders only its own rows, not the 1,000 already on screen.
-const LogRow = React.memo(function LogRow({ entry }: { entry: ContainerLogEntry }) {
+export const LogRow = React.memo(function LogRow({ entry, source }: { entry: Pick<ContainerLogEntry, "time" | "stream" | "message">; source?: string }) {
   const [expanded, setExpanded] = React.useState(false);
   const json = React.useMemo(() => parseJson(entry.message), [entry.message]);
   const level = json && field(json, ["level_name", "level", "severity"]);
@@ -66,6 +67,7 @@ const LogRow = React.memo(function LogRow({ entry }: { entry: ContainerLogEntry 
   return (
     <li title={entry.stream} className="flex min-w-0 gap-2 px-3 py-px font-mono text-xs leading-5 hover:bg-log-foreground/5">
       <time dateTime={entry.time} className="tabular shrink-0 text-log-muted">{clock(entry.time)}</time>
+      {source ? <span className="w-16 shrink-0 truncate text-log-muted">{source}</span> : null}
       {json ? (
         <div className="min-w-0 flex-1">
           <button
@@ -91,57 +93,30 @@ const LogRow = React.memo(function LogRow({ entry }: { entry: ContainerLogEntry 
 
 export function ContainerLogs({ containerId, live }: { containerId: string; live: boolean }) {
   const { entries, dropped, error, loading } = useContainerLogs(containerId, live);
-  const scroller = React.useRef<HTMLDivElement>(null);
-  const list = React.useRef<HTMLOListElement>(null);
-  const following = React.useRef(true);
-  const [stuck, setStuck] = React.useState(true);
-  const hasEntries = entries.length > 0;
-
-  const follow = React.useCallback((next: boolean) => {
-    following.current = next;
-    setStuck(next);
-  }, []);
-  const toBottom = () => {
-    if (scroller.current) scroller.current.scrollTop = scroller.current.scrollHeight;
-    follow(true);
-  };
-
-  // ResizeObserver runs after layout and before paint, so a new line is never drawn above the bottom.
-  // Do not use flex-col-reverse here: the Sheet scroll lock misreads its negative scrollTop and cancels the wheel.
-  React.useEffect(() => {
-    const box = scroller.current;
-    if (!box || !list.current) return;
-    const observer = new ResizeObserver(() => { if (following.current) box.scrollTop = box.scrollHeight; });
-    observer.observe(list.current);
-    observer.observe(box);
-    return () => observer.disconnect();
-  }, [hasEntries]);
+  const { scroller, list, stuck, onScroll, toBottom } = useStickToBottom(entries.length > 0);
 
   return (
     <section aria-labelledby="container-logs" className="flex min-h-96 min-w-0 flex-1 flex-col gap-2 lg:min-h-0">
       <div className="flex flex-wrap items-center gap-2">
-        <h3 id="container-logs" className="text-sm font-semibold">Logs</h3>
-        <Badge variant={live ? "outline" : "muted"}>{live ? "Live" : "Stopped"}</Badge>
-        <span className="tabular text-xs text-muted-foreground">{entries.length} lines</span>
-        {dropped > 0 ? <span className="tabular text-xs text-muted-foreground">{dropped} skipped, too fast to display</span> : null}
+        <h3 id="container-logs" className="text-sm font-semibold">{t("Logs")}</h3>
+        <Badge variant={live ? "outline" : "muted"}>{live ? t("Live") : t("Stopped")}</Badge>
+        <span className="tabular text-xs text-muted-foreground">{t("{count} lines", { count: entries.length })}</span>
+        {dropped > 0 ? <span className="tabular text-xs text-muted-foreground">{t("{count} skipped, too fast to display", { count: dropped })}</span> : null}
         {!stuck ? (
           <Button type="button" variant="ghost" size="sm" className="ml-auto" onClick={toBottom}>
-            Jump to latest <ArrowDown aria-hidden="true" />
+            {t("Jump to latest")} <ArrowDown aria-hidden="true" />
           </Button>
         ) : null}
       </div>
       {error ? <ErrorState description={error} /> : null}
-      {!error && !loading && entries.length === 0 ? <EmptyState title="No log output" description={live ? "This container has written nothing yet." : "This container left no logs."} className="min-h-36" /> : null}
+      {!error && !loading && entries.length === 0 ? <EmptyState title={t("No log output")} description={live ? t("This container has written nothing yet.") : t("This container left no logs.")} className="min-h-36" /> : null}
       {entries.length > 0 ? (
         <div
           ref={scroller}
-          onScroll={(event) => {
-            const { scrollHeight, scrollTop, clientHeight } = event.currentTarget;
-            follow(scrollHeight - scrollTop - clientHeight < STICK_THRESHOLD_PX);
-          }}
+          onScroll={onScroll}
           className="min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden rounded-lg border border-log-panel bg-log-panel py-2 [scrollbar-color:var(--log-muted)_transparent] [scrollbar-width:thin]"
         >
-          <ol ref={list} role="log" aria-label="Container log output" aria-live="off" className="min-w-0">
+          <ol ref={list} role="log" aria-label={t("Container log output")} aria-live="off" className="min-w-0">
             {entries.map((entry) => <LogRow key={`${entry.time}:${entry.seq}`} entry={entry} />)}
           </ol>
         </div>

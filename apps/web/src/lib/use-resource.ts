@@ -26,15 +26,18 @@ export function useResource<T>(load: (signal: AbortSignal) => Promise<T>, key: s
   const [tick, setTick] = React.useState(0);
   const loadRef = React.useRef(load);
   loadRef.current = load;
+  const loading = React.useRef(false);
   const { refreshMs } = options;
 
   React.useEffect(() => {
     if (key === undefined) return;
     const controller = new AbortController();
+    loading.current = true;
     loadRef.current(controller.signal).then(
-      (data) => { if (!controller.signal.aborted) setSlot({ key, data, error: undefined }); },
+      (data) => { if (!controller.signal.aborted) { loading.current = false; setSlot({ key, data, error: undefined }); } },
       (error: unknown) => {
         if (controller.signal.aborted || isAbortError(error)) return;
+        loading.current = false;
         setSlot((previous) => ({ key, data: previous.key === key ? previous.data : undefined, error: errorMessage(error) }));
       },
     );
@@ -43,7 +46,8 @@ export function useResource<T>(load: (signal: AbortSignal) => Promise<T>, key: s
 
   React.useEffect(() => {
     if (key === undefined || !refreshMs) return;
-    const timer = setInterval(() => { if (document.visibilityState !== "hidden") setTick((value) => value + 1); }, refreshMs);
+    // A refresh must not abort a slower read still in flight, or that read would never finish.
+    const timer = setInterval(() => { if (document.visibilityState !== "hidden" && !loading.current) setTick((value) => value + 1); }, refreshMs);
     return () => clearInterval(timer);
   }, [key, refreshMs]);
 

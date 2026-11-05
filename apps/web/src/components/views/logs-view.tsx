@@ -1,3 +1,4 @@
+import { locale, t } from "../../lib/i18n";
 import { Pause, Play, Trash2 } from "lucide-react";
 import type { ComponentKind, LogEntry, PublicComponent } from "../../../../../src/contracts";
 import { Badge } from "../ui/badge";
@@ -25,13 +26,13 @@ export interface LogsViewProps {
 function formatLogTime(value: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat("en", { hour: "2-digit", minute: "2-digit", second: "2-digit" }).format(date);
+  return new Intl.DateTimeFormat(locale, { hour: "2-digit", minute: "2-digit", second: "2-digit" }).format(date);
 }
 
 function sourceLabel(kind?: ComponentKind): string {
-  if (kind === "native") return "Native";
-  if (kind === "compose") return "Docker / Compose";
-  return "Source unknown";
+  if (kind === "native") return t("Native");
+  if (kind === "compose") return t("Docker / Compose");
+  return t("Source unknown");
 }
 
 export function LogsView({
@@ -57,34 +58,34 @@ export function LogsView({
   return (
     <section className="min-w-0 space-y-4" aria-labelledby="logs-heading">
       <ViewHeading
-        title="Project logs"
+        title={t("Project logs")}
         titleId="logs-heading"
-        description="Merged native and Docker output for the selected project. This view keeps at most the newest 1,000 entries."
+        description={t("Merged native and Docker output for the selected project. This view keeps at most the newest 1,000 entries.")}
         action={(
           <>
             <Button type="button" variant="outline" aria-pressed={paused} onClick={() => onPausedChange(!paused)}>
               {paused ? <Play aria-hidden="true" /> : <Pause aria-hidden="true" />}
-              {paused ? "Resume updates" : "Pause updates"}
+              {paused ? t("Resume updates") : t("Pause updates")}
             </Button>
             <Button type="button" variant="outline" disabled={entries.length === 0} onClick={onClear}>
               <Trash2 aria-hidden="true" />
-              Clear view
+              {t("Clear view")}
             </Button>
           </>
         )}
       />
       <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div className="w-full max-w-sm space-y-2">
-          <Label htmlFor="log-component-filter">Component</Label>
+          <Label htmlFor="log-component-filter">{t("Component")}</Label>
           <Select
             value={selectValue}
             onValueChange={(value) => onComponentFilterChange(value === "all" ? undefined : value.slice("component:".length))}
           >
-            <SelectTrigger id="log-component-filter" aria-label="Filter logs by component">
-              <SelectValue placeholder="All components" />
+            <SelectTrigger id="log-component-filter" aria-label={t("Filter logs by component")}>
+              <SelectValue placeholder={t("All components")} />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">All components</SelectItem>
+              <SelectItem value="all">{t("All components")}</SelectItem>
               {options.map((component) => (
                 <SelectItem key={component.id} value={`component:${component.id}`}>{component.name}</SelectItem>
               ))}
@@ -92,21 +93,21 @@ export function LogsView({
           </Select>
         </div>
         <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-          <Badge variant={paused ? "secondary" : "outline"}>{paused ? "Paused" : "Following"}</Badge>
-          <span>{newestEntries.length} {newestEntries.length === 1 ? "entry" : "entries"}</span>
-          {filteredEntries.length > newestEntries.length ? <span>Showing newest 1,000 of {filteredEntries.length}</span> : null}
+          <Badge variant={paused ? "secondary" : "outline"}>{paused ? t("Paused") : t("Following")}</Badge>
+          <span>{newestEntries.length === 1 ? t("1 entry") : t("{count} entries", { count: newestEntries.length })}</span>
+          {filteredEntries.length > newestEntries.length ? <span>{t("Showing newest 1,000 of {count}", { count: filteredEntries.length })}</span> : null}
         </div>
       </div>
 
       {error ? <ErrorState description={error} /> : loading ? <LogsSkeleton /> : null}
       {!error && !loading && newestEntries.length === 0 ? (
-        <EmptyState title="No log entries" description="No entries are available for the current project and component filter." />
+        <EmptyState title={t("No log entries")} description={t("No entries are available for the current project and component filter.")} />
       ) : null}
 
       {!error && !loading && newestEntries.length > 0 ? (
         <ol
           role="log"
-          aria-label="Recent project log entries"
+          aria-label={t("Recent project log entries")}
           aria-live="off"
           className="max-h-[min(68dvh,48rem)] min-w-0 overflow-y-auto overflow-x-hidden rounded-lg border border-log-panel bg-log-panel px-3 text-log-foreground sm:px-4"
         >

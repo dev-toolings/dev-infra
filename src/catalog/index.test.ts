@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, lstatSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, lstatSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Catalog } from "./index";
@@ -28,6 +28,38 @@ describe("Catalog", () => {
     const outside = join(base,"outside"); mkdirSync(outside);
     const link = join(projectRoot,"escape"); symlinkSync(outside,link);
     expect(() => catalog.assertAllowedPath(join(link,"missing"),false)).toThrow();
+  });
+
+  test("lists real subfolders only, sorted, and hides dot folders, symlinks and files", async () => {
+    const dir = join(base,"browse"); mkdirSync(join(dir,"zeta"),{recursive:true}); mkdirSync(join(dir,"alpha")); mkdirSync(join(dir,".hidden"));
+    writeFileSync(join(dir,"file.txt"),""); symlinkSync(join(dir,"alpha"),join(dir,"link"));
+    const listing = await catalog.listDirectories(dir);
+    expect(listing.entries).toEqual([{name:"alpha",path:join(dir,"alpha")},{name:"zeta",path:join(dir,"zeta")}]);
+    expect(listing.parent).toBe(base);
+    expect((await catalog.listDirectories(join(dir,"link"))).path).toBe(join(dir,"alpha"));
+  });
+
+  test("starts in the home folder and reports no parent at the disk root", async () => {
+    const home = process.env.HOME; process.env.HOME = projectRoot;
+    try { expect((await catalog.listDirectories()).path).toBe(projectRoot); } finally { process.env.HOME = home; }
+    const root = await catalog.listDirectories("/");
+    expect(root.parent).toBeNull();
+    expect(root.places).toContain("/");
+  });
+
+  test("keeps protected DevHub folders out of the listing and refuses to open them", async () => {
+    expect((await catalog.listDirectories(base)).entries.map((entry) => entry.name)).toEqual(["roots"]);
+    await expect(catalog.listDirectories(join(base,"infra"))).rejects.toMatchObject({code:"unsafe_path",status:403});
+  });
+
+  test("maps folder read failures to a clear error", async () => {
+    writeFileSync(join(base,"file.txt"),"");
+    await expect(catalog.listDirectories("relative/path")).rejects.toMatchObject({status:400});
+    await expect(catalog.listDirectories(join(base,"missing"))).rejects.toMatchObject({code:"path_not_found",status:404});
+    await expect(catalog.listDirectories(join(base,"file.txt"))).rejects.toMatchObject({status:400});
+    const locked = join(base,"locked"); mkdirSync(locked,{mode:0o000});
+    await expect(catalog.listDirectories(locked)).rejects.toMatchObject({code:"path_forbidden",status:403});
+    chmodSync(locked,0o700);
   });
 
   test("Compose components may declare validation argv, never run argv, and keep it out of public DTOs", () => {

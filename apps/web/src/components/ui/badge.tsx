@@ -19,10 +19,11 @@ const badgeVariants = cva(
         outline:
           "border-border text-foreground [a&]:hover:bg-accent [a&]:hover:text-accent-foreground",
         ghost: "[a&]:hover:bg-accent [a&]:hover:text-accent-foreground",
-        muted: "bg-muted text-muted-foreground",
-        up: "border-status-up/30 bg-status-up/10 text-status-up",
-        degraded: "border-status-degraded/30 bg-status-degraded/10 text-status-degraded",
-        down: "border-status-down/30 bg-status-down/10 text-status-down",
+        muted: "bg-status-unknown-bg text-status-unknown",
+        up: "bg-status-up-bg text-status-up",
+        degraded: "bg-status-degraded-bg text-status-degraded",
+        down: "bg-status-down-bg text-status-down",
+        info: "bg-status-info-bg text-status-info",
       },
       size: {
         default: "h-5.5 min-w-5.5 gap-1 rounded-sm px-1.5 py-0.5 text-xs leading-none",

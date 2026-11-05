@@ -35,10 +35,17 @@
   --sidebar-border: oklch(0.922 0 0);
   --sidebar-ring: oklch(0.708 0 0);
 
-  --status-up: oklch(0.696 0.17 162.48);
-  --status-degraded: oklch(0.769 0.153 70.08);
-  --status-down: oklch(0.577 0.245 27.325);
-  --status-unknown: oklch(0.708 0 0);
+  /* BoardUI status tokens: lime, yellow, rose, blue and neutral, 800 on 200. */
+  --status-up: oklch(45.3% 0.124 130.933);
+  --status-up-bg: oklch(93.8% 0.127 124.321);
+  --status-degraded: oklch(47.6% 0.114 61.907);
+  --status-degraded-bg: oklch(94.5% 0.129 101.54);
+  --status-down: oklch(45.5% 0.188 13.697);
+  --status-down-bg: oklch(89.2% 0.058 10.001);
+  --status-info: oklch(42.4% 0.199 265.638);
+  --status-info-bg: oklch(88.2% 0.059 254.128);
+  --status-unknown: oklch(55.6% 0 0);
+  --status-unknown-bg: oklch(92.2% 0 0);
 
   --chart-1: oklch(0.205 0 0);
   --chart-2: oklch(0.556 0 0);
@@ -79,10 +86,17 @@
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: oklch(0.556 0 0);
 
-  --status-up: oklch(0.696 0.17 162.48);
-  --status-degraded: oklch(0.828 0.189 84.429);
-  --status-down: oklch(0.704 0.191 22.216);
-  --status-unknown: oklch(0.556 0 0);
+  /* Same BoardUI tokens: 500 (blue 300) on 950 at 60%. */
+  --status-up: oklch(76.8% 0.233 130.85);
+  --status-up-bg: oklch(27.4% 0.072 132.109 / 60%);
+  --status-degraded: oklch(79.5% 0.184 86.047);
+  --status-degraded-bg: oklch(28.6% 0.066 53.813 / 60%);
+  --status-down: oklch(64.5% 0.246 16.439);
+  --status-down-bg: oklch(27.1% 0.105 12.094 / 60%);
+  --status-info: oklch(80.9% 0.105 251.813);
+  --status-info-bg: oklch(28.2% 0.091 267.935 / 60%);
+  --status-unknown: oklch(70.8% 0 0);
+  --status-unknown-bg: oklch(26.9% 0 0);
 
   --chart-1: oklch(0.985 0 0);
   --chart-2: oklch(0.708 0 0);
@@ -129,9 +143,15 @@
   --color-sidebar-ring: var(--sidebar-ring);
 
   --color-status-up: var(--status-up);
+  --color-status-up-bg: var(--status-up-bg);
   --color-status-degraded: var(--status-degraded);
+  --color-status-degraded-bg: var(--status-degraded-bg);
   --color-status-down: var(--status-down);
+  --color-status-down-bg: var(--status-down-bg);
+  --color-status-info: var(--status-info);
+  --color-status-info-bg: var(--status-info-bg);
   --color-status-unknown: var(--status-unknown);
+  --color-status-unknown-bg: var(--status-unknown-bg);
 
   --color-chart-1: var(--chart-1);
   --color-chart-2: var(--chart-2);

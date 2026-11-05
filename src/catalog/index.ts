@@ -1,10 +1,12 @@
 import { Database } from "bun:sqlite";
 import { chmodSync, existsSync, lstatSync, mkdirSync, realpathSync, statSync, readFileSync } from "node:fs";
+import { readdir, realpath } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { DevHubError, type Action, type CatalogPort, type Component, type Operation, type OperationClaim, type Project, type ProjectInput, type Root } from "../contracts";
+import { DevHubError, type Action, type CatalogPort, type Component, type DirectoryListing, type Operation, type OperationClaim, type Project, type ProjectInput, type Root } from "../contracts";
 import { ensureStateDir } from "../state";
 import { redactText } from "../operations/logger";
+import { SERVICE_CONTAINERS } from "../services";
 
 const DB_VERSION = 1;
 const BUSY_MS = 5000;
@@ -281,6 +283,7 @@ export class Catalog implements CatalogPort {
   listRoots(): Root[] { return (this.db.query("SELECT id,path,label FROM roots ORDER BY id").all() as Root[]).map(clone); }
   addRoot(path: string, label = basename(resolve(path))): Root {
     if (!isAbsolute(path) || path.includes("\0")) error("Root path must be absolute");
+    if (!existsSync(path)) error("This folder does not exist", "path_not_found", 404);
     const canonical = realpathSync(resolve(path)); const info = lstatSync(canonical);
     if (!info.isDirectory() || info.isSymbolicLink()) error("Root must be a real directory");
     this.ensureNoProtectedContainment(canonical, true);
@@ -288,6 +291,26 @@ export class Catalog implements CatalogPort {
     const id = `root-${crypto.randomUUID()}`; const root = { id, path: canonical, label };
     try { this.transaction(() => this.db.query("INSERT INTO roots(id,path,label) VALUES(?,?,?)").run(id,canonical,label)); } catch (cause) { if ((cause as {code?:string}).code === "SQLITE_CONSTRAINT_UNIQUE") error("Root is already registered", "conflict", 409); throw cause; }
     return root;
+  }
+  /** Lists subfolders anywhere on this machine so a folder can be chosen before it is approved. Async: a slow mount must not stall the server. */
+  async listDirectories(path?: string): Promise<DirectoryListing> {
+    const home = resolve(process.env.HOME || homedir()), target = path ?? home;
+    if (!isAbsolute(target) || target.includes("\0")) error("Folder path must be absolute");
+    let canonical: string, children;
+    try {
+      canonical = await realpath(target); this.ensureNoProtectedContainment(canonical, true);
+      children = await readdir(canonical, { withFileTypes: true });
+    } catch (cause) {
+      const code = (cause as NodeJS.ErrnoException).code;
+      if (code === "ENOENT") error("This folder does not exist", "path_not_found", 404);
+      if (code === "ENOTDIR") error("This path is not a folder");
+      if (code === "EACCES" || code === "EPERM") error("DevHub cannot read this folder", "path_forbidden", 403);
+      throw cause;
+    }
+    const protectedPaths = this.protectedPaths(), parent = dirname(canonical);
+    const entries = children.filter((child) => child.isDirectory() && !child.name.startsWith(".")).map(({ name }) => ({ name, path: join(canonical, name) }))
+      .filter((entry) => !protectedPaths.some((item) => isBelow(entry.path, item))).sort((a, b) => a.name.localeCompare(b.name));
+    return { path: canonical, parent: parent === canonical ? null : parent, places: [home, ...["/", "/mnt", "/media", "/Volumes"].filter(existsSync)], entries };
   }
   removeRoot(id: string): void {
     safeId(id,"root ID"); this.transaction(() => {
@@ -336,7 +359,7 @@ export class Catalog implements CatalogPort {
         this.validateLimits(component.limits);
       } else this.validateCompose(component);
       // Component file references are relative to the component working directory, as Runtime and Discovery resolve them.
-      for (const file of [...(component.compose?.files ?? []),...(component.envFiles ?? []),...(component.sources ?? []).map((source) => source.file)]) {
+      for (const file of [...(component.compose?.managed ? [] : component.compose?.files ?? []),...(component.envFiles ?? []),...(component.sources ?? []).map((source) => source.file)]) {
         if (typeof file !== "string" || !file || isAbsolute(file) || file.split(/[\\/]/).includes("..")) error("Configuration file must be relative to the component directory");
         const absolute = resolve(cwd,file); this.assertAllowedPath(absolute,true); if (!isBelow(absolute,rootPath)) error("Configuration file is outside project root", "path_forbidden",403);
         const info = lstatSync(absolute); if (info.isSymbolicLink() || !info.isFile()) error("Configuration files must be regular files", "path_forbidden",403);
@@ -353,7 +376,8 @@ export class Catalog implements CatalogPort {
   private validateArgv(argv: string[] | undefined, label: string): void { if (!Array.isArray(argv) || argv.length < 1 || argv.length > 64 || typeof argv[0] !== "string" || !argv[0] || argv[0].startsWith("-")) error(`Invalid ${label}`); for (const arg of argv) if (typeof arg !== "string" || !arg || arg.length > 4096 || arg.includes("\0") || /[\r\n]/.test(arg)) error(`Invalid ${label}`); }
   private validateCompose(component: Component): void {
     const compose = component.compose; if (!compose || !Array.isArray(compose.files) || !compose.files.length || !Array.isArray(compose.services) || !compose.services.length || !Array.isArray(compose.profiles)) error("Compose identity, files, profiles and services are required");
-    assertKeys(compose as object,["files","projectName","profiles","services"],"Compose");
+    assertKeys(compose as object,["files","projectName","profiles","services","managed"],"Compose");
+    if (compose.managed && (!Array.isArray(compose.managed.infra) || compose.managed.infra.some((item) => !SERVICE_CONTAINERS.includes(item)))) error("Managed stacks can only reach known shared services");
     this.validateLimits(component.limits);
     for (const value of [compose.projectName,...compose.profiles,...compose.services]) if (typeof value !== "string" || !SELECTOR.test(value.toLowerCase()) || value !== value.toLowerCase()) error("Invalid Compose selector");
     if ([...compose.profiles,...compose.services].some((item) => !SELECTOR.test(item))) error("Invalid Compose selector");

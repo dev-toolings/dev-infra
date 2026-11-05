@@ -2,7 +2,7 @@
 
 ## Product
 
-DevHub provides eight shared local Docker Compose services for applications: PostgreSQL, MySQL, Redis, Meilisearch, Mailpit, Adminer, Dozzle and RabbitMQ. Applications connect through localhost ports or the shared network.
+DevHub provides nine shared local Docker Compose services for applications: PostgreSQL, MySQL, MariaDB, Redis, Meilisearch, Mailpit, Adminer, Dozzle and RabbitMQ. Applications connect through localhost ports or the shared network.
 
 ## Register
 

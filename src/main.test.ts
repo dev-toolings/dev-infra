@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { join } from "node:path";
-import { listen, LISTEN_HOST, stateDirectory, parseServeOptions, composeServices, type ManagerModules } from "./main";
+import { listen, LISTEN_HOST, stateDirectory, parseServeOptions, composeServices, type ManagerModules, superviseDev } from "./main";
 test("controller explicitly binds loopback and rejects invalid ports", () => {
   let binding: { hostname: string; port: number } | undefined;
   listen(() => new Response("ok"), 8040, (options) => { binding = options; return {}; });
@@ -28,10 +28,10 @@ test("composition injects only the guarded executor into privileged modules", as
   class Catalog { assertAllowedPath(path: string) { return path; } }
   class Tool { constructor(options: {run: import("./contracts").Executor}) { runners.push(options.run); } }
   class Operations {}
-  const modules = { Catalog, Runtime: Tool, Discovery: Tool, Operations, Maintenance: Tool } as unknown as ManagerModules;
+  const modules = { Catalog, Runtime: Tool, Discovery: Tool, Operations, Maintenance: Tool, Imports: Tool, Creator: Tool, Versions: Tool } as unknown as ManagerModules;
   let calls = 0;
   composeServices(modules, async () => { calls++; return {code:0,stdout:"",stderr:""}; }, "/fixture/state", "/fixture/infra");
-  expect(runners).toHaveLength(3);
+  expect(runners).toHaveLength(6);
   for (const run of runners) {
     await expect(run(["git", "status"])).rejects.toThrow("gitRun");
     await expect(run(["docker", "compose", "down", "-v"])).rejects.toThrow();
@@ -151,3 +151,20 @@ test("serve exits with the stop signal's code without the Vite panel", async () 
     expect(serve.signalCode).toBeNull();
   } finally { rmSync(base, { recursive: true, force: true }); }
 }, 20_000);
+
+test("development mode runs a watched API next to Vite and stops both", async () => {
+  const calls: string[][] = [], stopped: string[] = [];
+  let finish!: (code: number) => void, stop!: () => void, env: Record<string, string | undefined> = {};
+  const running = superviseDev("http://localhost:5175", 8040, "/checkout", {
+    startPanel: async () => ({ state: "started", stop: () => stopped.push("vite") }),
+    spawn: (argv, options) => { calls.push(argv); env = options.env; return { exited: new Promise<number>((done) => { finish = done; }), kill: () => { stopped.push("api"); finish(0); } }; },
+    onSignal: (handler) => { stop = handler; },
+  });
+  await Bun.sleep(0);
+  expect(calls[0]!.slice(1)).toEqual(["--watch", "/checkout/src/main.ts", "serve", "--port", "8040", "--dev-origin", "http://localhost:5175"]);
+  expect(env.DEVHUB_WATCHED_API).toBe("started");
+  stop();
+  expect(await running).toBe(0);
+  expect(stopped).toContain("api");
+  expect(stopped).toContain("vite");
+});

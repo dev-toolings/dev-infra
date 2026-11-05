@@ -7,7 +7,7 @@ import { DevHubError, type CatalogPort, type Change, type Component, type Contai
 import { gitRun } from "../git";
 import { redactText } from "../operations/logger";
 import { ensureStateDir } from "../state";
-import { assertSharedDataUntouched, type ComposeModel } from "../runtime/mounts";
+import { assertSharedDataUntouched, managedEntry, type ComposeModel } from "../runtime/mounts";
 import { approvedOverride, overrideContent, overrideFile, retireOverrides } from "./override";
 import { envFileKeys } from "../guard";
 
@@ -368,7 +368,7 @@ export class Maintenance implements MaintenancePort {
     if (!preferredService && buildServices.length !== 1) throw fail("Validation requires one unambiguous selected service", "validation_unsupported", 409);
     const selected = preferredService ?? buildServices[0]!;
     for (const service of component.compose.services) if (!model.services[service]) throw fail("Selected service is absent from Compose configuration");
-    assertSharedDataUntouched(model as ComposeModel, component.compose.services, this.stateDir);
+    assertSharedDataUntouched(model as ComposeModel, component.compose.services, this.stateDir, component.compose.managed ? managedEntry(this.stateDir, project.id) : undefined);
     const service = model.services[selected];
     if (service.privileged === true || service.devices || service.userns_mode === "host" || service.cgroup_parent || service.cgroup || service.volumes_from) throw fail("Selected Compose service uses unsupported privileged settings", "unsafe_compose", 403);
     for (const key of ["network_mode", "ipc", "pid"]) if (typeof service[key] === "string" && /^(?:host|container:)/.test(service[key])) throw fail("Selected Compose service shares a host or container namespace", "unsafe_compose", 403);

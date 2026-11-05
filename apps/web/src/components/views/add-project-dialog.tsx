@@ -1,5 +1,6 @@
+import { t, translate } from "../../lib/i18n";
 import * as React from "react";
-import { FileText, FolderSearch, Plus, WandSparkles } from "lucide-react";
+import { FileText, FolderPlus, FolderSearch, Plus, WandSparkles } from "lucide-react";
 import type { Preset, PublicComponent, PublicDetection, PublicSetupPlan, Root, SetupInput } from "../../../../../src/contracts";
 import { Alert, AlertDescription, AlertTitle } from "../ui/alert";
 import { Badge } from "../ui/badge";
@@ -10,6 +11,7 @@ import { EmptyState } from "../ui/state";
 import { Input } from "../ui/input";
 import { Label } from "../ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
+import { FolderPicker } from "./folder-picker";
 import { ViewTask, formatDateTime } from "./shared";
 
 export interface AddProjectDialogProps {
@@ -24,11 +26,12 @@ export interface AddProjectDialogProps {
   onPreview: (input: SetupInput) => ViewTask;
   onApply: (planId: string) => ViewTask;
   onOpenChange: (open: boolean) => ViewTask;
+  onRootApproved: (root: Root) => void;
 }
 
 function ProjectComponents({ components }: { components: PublicComponent[] }) {
   if (components.length === 0) {
-    return <p className="text-sm text-muted-foreground">No components are included in this plan.</p>;
+    return <p className="text-sm text-muted-foreground">{t("No components are included in this plan.")}</p>;
   }
   return (
     <ul className="space-y-2">
@@ -36,12 +39,12 @@ function ProjectComponents({ components }: { components: PublicComponent[] }) {
         <li key={component.id} className="min-w-0 rounded-md border border-border bg-card p-3">
           <div className="flex min-w-0 flex-wrap items-center gap-2">
             <span className="break-words text-sm font-medium">{component.name}</span>
-            <Badge variant="outline">{component.kind === "native" ? "Native" : "Compose"}</Badge>
+            <Badge variant="outline">{component.kind === "native" ? t("Native") : t("Compose")}</Badge>
           </div>
           <code className="mt-1 block break-all text-xs leading-5 text-muted-foreground">{component.cwd}</code>
           {component.compose ? (
             <p className="mt-1 break-words text-xs text-muted-foreground">
-              Services: {component.compose.services.join(", ") || "None selected"}
+              {t("Services: {items}", { items: component.compose.services.join(", ") || t("None selected") })}
             </p>
           ) : null}
         </li>
@@ -62,7 +65,9 @@ export function AddProjectDialog({
   onPreview,
   onApply,
   onOpenChange,
+  onRootApproved,
 }: AddProjectDialogProps) {
+  const [pickingRoot, setPickingRoot] = React.useState(false);
   const [rootId, setRootId] = React.useState<string>();
   const [pathOverride, setPathOverride] = React.useState<string>();
   const [name, setName] = React.useState("");
@@ -119,33 +124,35 @@ export function AddProjectDialog({
     invalidatePreview();
   }
 
+  const scanWarnings = [...new Set(detections.flatMap((detection) => detection.warnings))];
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
-          <DialogTitle>Add an existing project</DialogTitle>
-          <DialogDescription>Inspect an approved folder, review the generated setup plan, then explicitly confirm it.</DialogDescription>
+          <DialogTitle>{t("Add an existing project")}</DialogTitle>
+          <DialogDescription>{t("Inspect an approved folder, review the generated setup plan, then explicitly confirm it.")}</DialogDescription>
         </DialogHeader>
 
         {error ? (
           <Alert variant="destructive">
-            <AlertTitle>Project setup could not continue</AlertTitle>
+            <AlertTitle>{t("Project setup could not continue")}</AlertTitle>
             <AlertDescription className="break-words">{error}</AlertDescription>
           </Alert>
         ) : null}
 
         {roots.length === 0 ? (
           <EmptyState
-            title="No approved project roots"
-            description="Add a root in the local terminal, then reopen this dialog."
+            title={t("No approved project roots")}
+            description={t("Approve the folder that holds your projects.")}
             icon={<FolderSearch aria-hidden="true" className="size-5" />}
-            action={<code className="rounded bg-muted px-2 py-1 text-xs">devhub root add ~/Projects</code>}
+            action={<Button type="button" variant="outline" onClick={() => setPickingRoot(true)}><FolderPlus aria-hidden="true" />{t("Approve a parent folder")}</Button>}
           />
         ) : (
-          <form className="min-w-0 space-y-5" onSubmit={handlePreview}>
+          <form className="min-w-0 space-y-4" onSubmit={handlePreview}>
             <div className="grid min-w-0 grid-cols-1 gap-4 sm:grid-cols-2">
               <div className="min-w-0 space-y-2">
-                <Label htmlFor="project-root">Approved root</Label>
+                <Label htmlFor="project-root">{t("Approved root")}</Label>
                 <Select
                   value={root?.id ?? ""}
                   onValueChange={(value) => {
@@ -157,46 +164,56 @@ export function AddProjectDialog({
                   }}
                 >
                   <SelectTrigger id="project-root" disabled={busy}>
-                    <SelectValue placeholder="Choose a root" />
+                    <SelectValue placeholder={t("Choose a root")} />
                   </SelectTrigger>
                   <SelectContent>
                     {roots.map((item) => <SelectItem key={item.id} value={item.id}>{item.label} ({item.path})</SelectItem>)}
                   </SelectContent>
                 </Select>
+                <Button type="button" variant="ghost" size="sm" className="-ml-2 text-muted-foreground" disabled={busy} onClick={() => setPickingRoot(true)}>
+                  <FolderPlus aria-hidden="true" />
+                  {t("Approve another folder")}
+                </Button>
               </div>
 
               <div className="min-w-0 space-y-2">
-                <Label htmlFor="project-preset">Setup preset</Label>
+                <Label htmlFor="project-preset">{t("Setup preset")}</Label>
                 {presets.length > 0 ? (
                   <Select value={preset} onValueChange={(value) => { setPresetId(value); invalidatePreview(); }}>
                     <SelectTrigger id="project-preset" disabled={busy}>
-                      <SelectValue placeholder="Choose a preset" />
+                      <SelectValue placeholder={t("Choose a preset")} />
                     </SelectTrigger>
                     <SelectContent>
-                      {presets.map((item) => <SelectItem key={item.id} value={item.id}>{item.name}</SelectItem>)}
+                      {presets.map((item) => <SelectItem key={item.id} value={item.id}>{translate(item.name)}</SelectItem>)}
                     </SelectContent>
                   </Select>
                 ) : (
-                  <p className="rounded-md border border-dashed border-border px-3 py-2 text-sm text-muted-foreground">No setup presets are available.</p>
+                  <p className="rounded-md border border-dashed border-border px-3 py-2 text-sm text-muted-foreground">{t("No setup presets are available.")}</p>
                 )}
               </div>
 
               <div className="min-w-0 space-y-2 sm:col-span-2">
-                <Label htmlFor="project-path">Project folder path</Label>
-                <Input
-                  id="project-path"
-                  value={path}
-                  autoComplete="off"
-                  spellCheck={false}
-                  placeholder="/home/user/Projects/example"
-                  disabled={busy}
-                  onChange={(event) => { setPathOverride(event.currentTarget.value); invalidatePreview(); }}
-                />
-                <p className="text-xs leading-5 text-muted-foreground">Use a folder inside the selected approved root. The local manager checks the path before acting.</p>
+                <Label htmlFor="project-path">{t("Project folder path")}</Label>
+                <div className="flex min-w-0 gap-2">
+                  <Input
+                    id="project-path"
+                    className="font-mono"
+                    value={path}
+                    autoComplete="off"
+                    spellCheck={false}
+                    placeholder="/home/user/Projects/example"
+                    disabled={busy}
+                    onChange={(event) => { setPathOverride(event.currentTarget.value); invalidatePreview(); }}
+                  />
+                  <Button type="button" variant="outline" disabled={!trimmedPath || busy} onClick={handleDiscover}>
+                    <FolderSearch aria-hidden="true" />
+                    {t("Inspect folder")}
+                  </Button>
+                </div>
               </div>
 
               <div className="min-w-0 space-y-2">
-                <Label htmlFor="project-name">Project name</Label>
+                <Label htmlFor="project-name">{t("Project name")}</Label>
                 <Input
                   id="project-name"
                   value={name}
@@ -207,7 +224,7 @@ export function AddProjectDialog({
               </div>
 
               <div className="min-w-0 space-y-2">
-                <Label htmlFor="compose-project-name">Compose project name (optional)</Label>
+                <Label htmlFor="compose-project-name">{t("Compose project name (optional)")}</Label>
                 <Input
                   id="compose-project-name"
                   value={composeProjectName}
@@ -216,60 +233,37 @@ export function AddProjectDialog({
                   disabled={busy}
                   onChange={(event) => { setComposeProjectName(event.currentTarget.value); invalidatePreview(); }}
                 />
-                <p className="text-xs leading-5 text-muted-foreground">Use this when the existing Compose identity needs to be selected explicitly.</p>
               </div>
             </div>
 
-            <div className="flex flex-wrap gap-2">
-              <Button type="button" variant="outline" disabled={!trimmedPath || busy} onClick={handleDiscover}>
-                <FolderSearch aria-hidden="true" />
-                Inspect folder
-              </Button>
-              <Button type="submit" disabled={!canPreview}>
-                <WandSparkles aria-hidden="true" />
-                Preview setup
-              </Button>
-            </div>
-
             {detections.length > 0 ? (
-              <section className="space-y-3" aria-labelledby="discovery-results-heading">
-                <div>
-                  <h3 id="discovery-results-heading" className="text-sm font-semibold">Detected project folders</h3>
-                  <p className="mt-1 text-xs text-muted-foreground">Choose a result to use its path and detected name in the form.</p>
-                </div>
-                <ul className="space-y-2">
+              <section className="space-y-2" aria-labelledby="discovery-results-heading">
+                <h3 id="discovery-results-heading" className="text-sm font-medium">{t("Detected project folders ({count})", { count: detections.length })}</h3>
+                <ul className="max-h-52 divide-y divide-border overflow-y-auto rounded-lg border border-border">
                   {detections.map((detection) => (
-                    <li key={detection.path}>
-                      <Card>
-                        <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-3">
-                          <div className="min-w-0 space-y-1">
-                            <CardTitle className="break-words text-sm">{detection.name}</CardTitle>
-                            <CardDescription className="break-all">{detection.path}</CardDescription>
-                          </div>
-                          <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => useDetection(detection)}>
-                            Use this folder
-                          </Button>
-                        </CardHeader>
-                        <CardContent className="space-y-2 text-xs">
-                          <p className="break-words text-muted-foreground">Git: {detection.git} · Stacks: {detection.stacks.join(", ") || "None detected"}</p>
-                          {detection.composeFiles.length > 0 ? <p className="break-all text-muted-foreground">Compose: {detection.composeFiles.join(", ")}</p> : null}
-                          {detection.components.length > 0 ? <p className="text-muted-foreground">{detection.components.length} component candidates</p> : null}
-                          {detection.warnings.length > 0 ? (
-                            <ul className="list-disc space-y-1 pl-4 text-muted-foreground">
-                              {detection.warnings.map((warning, index) => <li key={`${index}:${warning}`} className="break-words">{warning}</li>)}
-                            </ul>
-                          ) : null}
-                        </CardContent>
-                      </Card>
+                    <li key={detection.path} className="flex min-w-0 items-center gap-3 px-3 py-2">
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium">{detection.name}</p>
+                        <p className="truncate text-xs text-muted-foreground" title={detection.path}>{detection.stacks.join(", ") || t("No stack detected")} · <span className="font-mono">{detection.path}</span></p>
+                      </div>
+                      <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => useDetection(detection)}>{t("Use")}</Button>
                     </li>
                   ))}
                 </ul>
+                {scanWarnings.map((warning) => <p key={warning} className="text-xs text-muted-foreground">{translate(warning)}</p>)}
               </section>
             ) : null}
 
+            <div className="flex justify-end">
+              <Button type="submit" disabled={!canPreview}>
+                <WandSparkles aria-hidden="true" />
+                {t("Preview setup")}
+              </Button>
+            </div>
+
             {planIsStale ? (
               <p role="status" className="rounded-md border border-border bg-muted/50 px-3 py-2 text-sm text-muted-foreground">
-                The form changed after this preview. Preview again before applying a plan.
+                {t("The form changed after this preview. Preview again before applying a plan.")}
               </p>
             ) : null}
             {waitingForPreview && !busy ? (
@@ -281,8 +275,8 @@ export function AddProjectDialog({
             {currentPlan ? (
               <section className="space-y-3 border-t border-border pt-4" aria-labelledby="setup-preview-heading">
                 <div>
-                  <h3 id="setup-preview-heading" className="text-base font-semibold">Review setup plan</h3>
-                  <p className="mt-1 text-xs text-muted-foreground">Preview created {formatDateTime(currentPlan.createdAt)}. No files are changed until you confirm.</p>
+                  <h3 id="setup-preview-heading" className="text-base font-semibold">{t("Review setup plan")}</h3>
+                  <p className="mt-1 text-xs text-muted-foreground">{t("Preview created {date}. No files are changed until you confirm.", { date: formatDateTime(currentPlan.createdAt) })}</p>
                 </div>
 
                 <Card>
@@ -295,7 +289,7 @@ export function AddProjectDialog({
                     {currentPlan.warnings.length > 0 ? (
                       <Alert>
                         <FileText aria-hidden="true" />
-                        <AlertTitle>Review these warnings</AlertTitle>
+                        <AlertTitle>{t("Review these warnings")}</AlertTitle>
                         <AlertDescription>
                           <ul className="list-disc space-y-1 pl-4">
                             {currentPlan.warnings.map((warning, index) => <li key={`${index}:${warning}`} className="break-words">{warning}</li>)}
@@ -307,9 +301,9 @@ export function AddProjectDialog({
                 </Card>
 
                 <div className="space-y-2">
-                  <h4 className="text-sm font-medium">Planned files</h4>
+                  <h4 className="text-sm font-medium">{t("Planned files")}</h4>
                   {currentPlan.files.length === 0 ? (
-                    <p className="rounded-md border border-dashed border-border px-3 py-4 text-sm text-muted-foreground">No project files will be created by this plan.</p>
+                    <p className="rounded-md border border-dashed border-border px-3 py-4 text-sm text-muted-foreground">{t("No project files will be created by this plan.")}</p>
                   ) : (
                     <ul className="space-y-2">
                       {currentPlan.files.map((file) => (
@@ -328,16 +322,28 @@ export function AddProjectDialog({
                 </div>
 
                 <DialogFooter>
-                  <Button type="button" variant="outline" disabled={busy} onClick={() => onOpenChange(false)}>Cancel</Button>
+                  <Button type="button" variant="outline" disabled={busy} onClick={() => onOpenChange(false)}>{t("Cancel")}</Button>
                   <Button type="button" disabled={!canApply} onClick={() => currentPlan && onApply(currentPlan.id)}>
                     <Plus aria-hidden="true" />
-                    Confirm and add project
+                    {t("Confirm and add project")}
                   </Button>
                 </DialogFooter>
               </section>
             ) : null}
           </form>
         )}
+        <FolderPicker
+          open={pickingRoot}
+          roots={roots}
+          onOpenChange={setPickingRoot}
+          onPicked={(picked) => {
+            onRootApproved(picked);
+            setRootId(picked.id);
+            setPathOverride(picked.path);
+            invalidatePreview();
+            setPickingRoot(false);
+          }}
+        />
       </DialogContent>
     </Dialog>
   );

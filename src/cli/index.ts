@@ -2,11 +2,12 @@ import { readFileSync } from "node:fs";
 import { createInterface } from "node:readline/promises";
 import { stdin, stdout, stderr } from "node:process";
 import { isAbsolute, resolve, relative, basename } from "node:path";
-import { DevHubError, type Action, type AppServices, type Component, type Executor, type Project, type ProjectInput, type SetupInput } from "../contracts";
+import { DevHubError, type Action, type AppServices, type Component, type CreatePlan, type Executor, type ImportPlan, type Project, type ProjectInput, type SetupInput } from "../contracts";
 import { publicChange, publicProject, publicSetupPlan } from "../public";
 import { parseCliArgs, usage } from "./args";
 import { resolveSelection } from "../operations/graph";
 import { redactOutput, redactText } from "../operations/logger";
+import { projectNetwork } from "../services";
 
 export type CliOptions = { stateDir: string; infraDir: string; run: Executor };
 
@@ -57,6 +58,39 @@ function validateProjectInput(value: unknown, catalog: AppServices["catalog"]): 
   }
   resolveSelection(components);
   return { id: input.id, name: input.name, root, components };
+}
+
+function importPreview(plan: ImportPlan): string {
+  return [
+    `Import preview: ${plan.project.name} (${plan.project.id})`,
+    `  Root: ${plan.project.root}`,
+    `  Image: ${plan.image}, non-root, no capabilities, only the project mounted`,
+    `  Install: ${plan.install}`,
+    `  Dev: ${plan.dev}`,
+    `  URL: ${plan.url} (container port ${plan.containerPort})`,
+    `  Network: ${projectNetwork(plan.project.id, plan.infra)}${plan.infra.length ? ` with ${plan.infra.join(", ")}` : ""}`,
+    ...(plan.database ? [`  Database: ${plan.database} with its own role on infra-postgres`] : []),
+    `  Env: ${[...Object.keys(plan.env), ...(plan.database ? ["DATABASE_URL"] : [])].join(", ")}`,
+    ...(plan.missing.length ? [`  To fill in: ${plan.missing.join(", ")}`] : []),
+    ...plan.warnings.map((warning) => `  warning: ${warning}`),
+    "",
+  ].join("\n");
+}
+
+function createPreview(plan: CreatePlan): string {
+  return [
+    `New project: ${plan.input.name} (${plan.id})`,
+    `  Folder: ${plan.path}`,
+    `  Mode: ${plan.input.mode}. ${plan.isolation}`,
+    `  Options: ${Object.entries(plan.input.options).map(([key, value]) => `${key}=${value}`).join(", ")}`,
+    `  Services: ${plan.input.services.map((service) => `${service} ${plan.input.versions?.[service]}`).join(", ") || "none"}`,
+    ...(plan.database ? [`  Database: ${plan.database} with its own role on PostgreSQL ${plan.input.versions?.postgres}`] : []),
+    `  Install: ${plan.install}`,
+    `  Dev: ${plan.dev}`,
+    `  URL: ${plan.url}`,
+    `  Files: ${plan.files.length}`,
+    "",
+  ].join("\n");
 }
 
 async function promptLine(question: string): Promise<string> {
@@ -116,6 +150,36 @@ export async function runCli(argv: string[], services: AppServices, options: Cli
     json = "json" in command ? command.json : false;
     if (command.command === "help") { write(command.text || usage(), false); return 0; }
     if (command.command === "presets") { write(services.discovery.presets(), command.json); return 0; }
+    if (command.command === "versions") {
+      const report = await services.versions.check();
+      const problems = report.items.filter((item) => item.state !== "ok" && item.state !== "untracked");
+      const lines = problems.map((item) => `${item.state.padEnd(10)} ${item.name} ${item.version}${item.latest ? ` (latest ${item.latest})` : ""}${item.eol ? ` eol ${item.eol}` : ""}${item.vulns.length ? ` ${item.vulns.length} advisories` : ""}`);
+      write(report, command.json, [`${report.items.length} versions checked, ${problems.length} to look at`, ...lines].join("\n"));
+      return report.items.some((item) => item.state === "eol" || item.state === "vulnerable" || item.state === "unknown") ? 1 : 0;
+    }
+    if (command.command === "import") {
+      const plan = await services.imports.plan({ path: resolve(command.path), name: command.name, id: command.id });
+      const { env, ...shown } = plan;
+      const summary = { ...shown, project: projectInputSummary(plan.project), env: Object.keys(env) };
+      if (!command.json) stdout.write(importPreview(plan));
+      if (!command.apply) { write({ preview: true, plan: summary }, command.json, "Nothing changed. Run again with --apply to import and start."); return 0; }
+      const result = await services.imports.apply(plan);
+      const ok = result.operation.state === "succeeded";
+      write({ project: projectSummary(result.project), operation: result.operation, url: result.url, missing: result.missing }, command.json,
+        ok ? `Running: ${result.url}` : `Start failed: ${redactText(result.operation.error ?? "unknown error")}\nLogs: devhub project logs ${result.project.id}`);
+      return ok ? 0 : 1;
+    }
+    if (command.command === "new") {
+      const { stack, name, mode, options: chosen, services: selected, versions, git } = command;
+      const plan = await services.create.plan({ stack, name, rootId: resolve(command.root), mode, options: chosen, services: selected, versions, git });
+      if (!command.json) stdout.write(createPreview(plan));
+      if (!command.apply) { write({ preview: true, plan }, command.json, "Nothing changed. Run again with --apply to create and start."); return 0; }
+      const result = await services.create.apply(plan, true);
+      const ok = result.operation.state === "succeeded";
+      write({ project: projectSummary(result.project), operation: result.operation, url: result.url }, command.json,
+        ok ? `Running: ${result.url}` : `Start failed: ${redactText(result.operation.error ?? "unknown error")}\nLogs: devhub project logs ${result.project.id}`);
+      return ok ? 0 : 1;
+    }
     if (command.command === "setup") {
       const checks: Record<string, { ok: boolean; detail?: string }> = {};
       for (const [label, argv] of [["bun", ["bun", "--version"]], ["dockerCompose", ["docker", "compose", "version"]]] as const) {

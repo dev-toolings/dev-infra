@@ -139,7 +139,7 @@ function candidateDirectories(root: string, depth: number, ctx: ScanContext): st
     let entries;
     try { entries = readdirSync(dir, { withFileTypes: true }); } catch { ctx.warnings.push("Some approved paths could not be read"); return; }
     for (const ent of entries) {
-      if (++ctx.entries > 5000) { ctx.warnings.push("Scan stopped at 5000 directory entries"); return; }
+      if (++ctx.entries > 5000) { if (!ctx.warnings.includes("Scan stopped at 5000 directory entries")) ctx.warnings.push("Scan stopped at 5000 directory entries"); return; }
       if (ent.isSymbolicLink() || SKIP.has(ent.name) || ent.name.startsWith(".")) continue;
       if (!ent.isDirectory()) continue;
       const child = join(dir, ent.name);
@@ -282,6 +282,13 @@ export class Discovery implements DiscoveryPort {
     const ports = new Set<number>();
     for (const match of result.stdout.matchAll(/:(\d+)(?:\s|$)/gm)) { const port = Number(match[1]); if (port > 0 && port < 65536) ports.add(port); }
     return ports;
+  }
+  async freePort(start: number): Promise<number> {
+    const used = new Set([...await this.listeners(), ...projectPorts(this.catalog), 8040, 5175]);
+    let port = start;
+    while (used.has(port) && port < 65536) port++;
+    if (port >= 65536) fail("No available project port", "port_unavailable", 409);
+    return port;
   }
   async preview(input: SetupInput): Promise<SetupPlan> {
     if (!input || typeof input !== "object" || !PRESETS.some((p) => p.id === input.preset) || typeof input.name !== "string" || input.name.trim().length < 1 || input.name.length > 128) fail("Invalid setup input");

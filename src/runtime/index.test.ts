@@ -167,6 +167,24 @@ describe("Runtime Compose readiness", () => {
   });
 });
 
+test("generated native unit puts start limits in Unit before Service", async () => {
+  const f = fixture();
+  const previousRuntime = process.env.XDG_RUNTIME_DIR, previousBus = process.env.DBUS_SESSION_BUS_ADDRESS;
+  const userRuntime = join(f.root, "user-runtime"); mkdirSync(userRuntime, { mode: 0o700 }); chmodSync(userRuntime, 0o700);
+  process.env.XDG_RUNTIME_DIR = userRuntime; delete process.env.DBUS_SESSION_BUS_ADDRESS;
+  try {
+    const native: Component = { id: "native", name: "Native", kind: "native", cwd: f.app, argv: ["example"], dependsOn: [] };
+    const runtime = new Runtime({ run: async () => ({ code: 0, stdout: "LoadState=not-found\nFragmentPath=\nDropInPaths=\n", stderr: "" }), resolveExecutable: () => "/usr/bin/example", stateDir: join(f.root, "state"), assertAllowedPath: (path) => path });
+    await runtime.start({ ...f.project, components: [native] }, native);
+    const unitPath = join(f.root, "state", "units", `devhub-${(await import("node:crypto")).createHash("sha256").update("sample\0native").digest("hex").slice(0, 20)}.service`);
+    const unit = readFileSync(unitPath, "utf8");
+    expect(unit).toContain("[Unit]\nDescription=Native\nStartLimitIntervalSec=60s\nStartLimitBurst=3\n[Service]\n");
+  } finally {
+    if (previousRuntime === undefined) delete process.env.XDG_RUNTIME_DIR; else process.env.XDG_RUNTIME_DIR = previousRuntime;
+    if (previousBus === undefined) delete process.env.DBUS_SESSION_BUS_ADDRESS; else process.env.DBUS_SESSION_BUS_ADDRESS = previousBus;
+  }
+});
+
 test("unit escaping protects quotes, percent, and backslash, and rejects newline values", async () => {
   const f = fixture();
   const previousRuntime = process.env.XDG_RUNTIME_DIR, previousBus = process.env.DBUS_SESSION_BUS_ADDRESS;

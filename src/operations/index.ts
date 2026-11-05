@@ -20,6 +20,8 @@ import { OperationsLogs } from "./logs";
 
 const DEFAULT_READINESS_TIMEOUT_MS = 30_000;
 const DEFAULT_POLL_MS = 250;
+/** A generated stack installs its dependencies on first start, before it can answer. */
+const MANAGED_READINESS_TIMEOUT_MS = 300_000;
 const MAX_FIXED_DIAGNOSTICS = 256;
 const FIXED_PROJECT_CHANGED = "DEVHUB_PROJECT_CHANGED";
 const FIXED_STORAGE_FAILED = "DEVHUB_OPERATION_STORAGE_FAILED";
@@ -133,7 +135,8 @@ export class Operations implements OperationsPort {
     }
   }
 
-  listOperations(projectId?: string): Operation[] { return this.catalog.listOperations(projectId); }
+  /** An operation whose process died stays running until recovered, and the panel locks its project while it does. */
+  listOperations(projectId?: string): Operation[] { this.catalog.recoverOperations(); return this.catalog.listOperations(projectId); }
 
   async inventory(): Promise<ContainerInfo[]> {
     const projects = this.catalog.listProjects();
@@ -218,7 +221,8 @@ export class Operations implements OperationsPort {
   }
 
   private async waitReady(project: Project, component: Component): Promise<void> {
-    const deadline = Date.now() + this.readinessTimeoutMs;
+    const managed = Boolean(component.compose?.managed);
+    const deadline = Date.now() + (managed ? MANAGED_READINESS_TIMEOUT_MS : this.readinessTimeoutMs);
     while (true) {
       this.assertCurrent(project);
       const remaining = deadline - Date.now();
@@ -232,6 +236,7 @@ export class Operations implements OperationsPort {
       try { status = await Promise.race([checked, timeout]); }
       finally { if (timer !== undefined) clearTimeout(timer); }
       if (status.ready) return;
+      if (managed && status.state === "stopped") throw new DevHubError(`${component.id} exited during startup; check the project logs`, "runtime_start", 502);
       const after = deadline - Date.now();
       if (after <= 0) throw new DevHubError(`Readiness timed out for ${component.id}`, "timeout", 504);
       await this.delay(Math.min(this.pollMs, after));

@@ -212,3 +212,19 @@ test("serve and pair remain owned by the composition entry point", () => {
     }
   }
 });
+
+test("import takes one path and previews unless --apply is given", () => {
+  expect(parseCliArgs(["import", "/code/api", "--name", "API"])).toEqual({ command: "import", path: "/code/api", name: "API", id: undefined, apply: false, json: false });
+  expect(parseCliArgs(["import", "/code/api", "--apply", "--json"])).toMatchObject({ apply: true, json: true });
+  expect(() => parseCliArgs(["import"])).toThrow("project path");
+});
+
+test("new requires a stack, a name and a root, and defaults to Docker with Git", () => {
+  expect(parseCliArgs(["new", "node", "shop", "--root", "/code", "--option", "runtime=node,orm=drizzle", "--service", "redis"])).toEqual({
+    command: "new", stack: "node", name: "shop", root: "/code", mode: "docker", options: { runtime: "node", orm: "drizzle" }, services: ["redis"], versions: {}, git: true, apply: false, json: false,
+  });
+  expect(parseCliArgs(["new", "node", "shop", "--root", "/code", "--service", "postgres@17,redis"])).toMatchObject({ services: ["postgres", "redis"], versions: { postgres: "17" } });
+  expect(parseCliArgs(["new", "node", "shop", "--root", "/code", "--mode", "native", "--no-git", "--apply"])).toMatchObject({ mode: "native", git: false, apply: true });
+  expect(() => parseCliArgs(["new", "node", "shop"])).toThrow("--root");
+  expect(() => parseCliArgs(["new", "node", "shop", "--root", "/code", "--mode", "vm"])).toThrow("--mode");
+});

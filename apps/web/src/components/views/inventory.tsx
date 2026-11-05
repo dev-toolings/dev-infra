@@ -3,13 +3,14 @@ import { Search } from "lucide-react";
 import { cn } from "../../lib/utils";
 import { Input } from "../ui/input";
 
-export type Tone = "neutral" | "up" | "degraded" | "down" | "muted";
+export type Tone = "neutral" | "up" | "degraded" | "down" | "info" | "muted";
 
 const toneText: Record<Tone, string> = {
   neutral: "text-foreground",
   up: "text-status-up",
   degraded: "text-status-degraded",
   down: "text-status-down",
+  info: "text-status-info",
   muted: "text-muted-foreground",
 };
 
@@ -18,6 +19,7 @@ const toneDot: Record<Tone, string> = {
   up: "bg-status-up",
   degraded: "bg-status-degraded",
   down: "bg-status-down",
+  info: "bg-status-info",
   muted: "bg-status-unknown",
 };
 

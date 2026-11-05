@@ -25,6 +25,7 @@ DEFAULT_PROFILES=(core async)
 ALL_PROFILES="core,async"
 STARTABLE_PROFILES="$ALL_PROFILES"
 POSTGRES_CONTAINER="${POSTGRES_CONTAINER:-infra-postgres}"
+INSTANCE_LABEL="devhub.service-instance"
 
 require_cmd() {
   command -v "$1" >/dev/null 2>&1 || {
@@ -93,6 +94,11 @@ print_ports() {
   fi
 }
 
+# Other versions of a shared service: DevHub creates them on demand, outside compose.yml.
+service_instances() {
+  docker ps -q "$@" --filter "label=$INSTANCE_LABEL"
+}
+
 cmd_up() {
   local requested=()
   while [ $# -gt 0 ]; do
@@ -133,11 +139,15 @@ cmd_up() {
   local profile_csv
   profile_csv="$(join_profiles "${profiles[@]}")"
   COMPOSE_PROFILES="$profile_csv" dc up -d
+  # A failing instance must not stop the reconnect below, or every project would lose its services.
+  service_instances -a | xargs -r docker start >/dev/null || echo "Some service instances did not start; check devhub ps" >&2
+  "$SCRIPTS_DIR/reconnect-project-networks.sh"
   echo "Running profiles: $profile_csv"
 }
 
 cmd_down() {
   COMPOSE_PROFILES="$ALL_PROFILES" dc down
+  service_instances | xargs -r docker stop >/dev/null || echo "Some service instances did not stop; check devhub ps" >&2
 }
 
 cmd_restart() {
@@ -147,6 +157,7 @@ cmd_restart() {
 
 cmd_ps() {
   COMPOSE_PROFILES="$ALL_PROFILES" dc ps
+  docker ps -a --filter "label=$INSTANCE_LABEL" --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}'
 }
 
 cmd_logs() {
@@ -191,6 +202,9 @@ cmd_db() {
       COMPOSE_PROFILES="core" dc up -d postgres >/dev/null
       POSTGRES_ADMIN_USER="${POSTGRES_ADMIN_USER:-$(postgres_user)}" "$SCRIPTS_DIR/create-project-db.sh" "$@"
       ;;
+    provision)
+      POSTGRES_ADMIN_USER="${POSTGRES_ADMIN_USER:-$(postgres_user)}" "$SCRIPTS_DIR/provision-project-db.sh" "$@"
+      ;;
     import)
       local importer="${DEVHUB_IMPORT_SCRIPT:-$SCRIPTS_DIR/import-db.sh}"
       [ -x "$importer" ] || { echo "DB importer not found or not executable: $importer" >&2; echo "Place a custom script at $SCRIPTS_DIR/import-db.sh or set DEVHUB_IMPORT_SCRIPT." >&2; exit 1; }
@@ -204,7 +218,7 @@ cmd_db() {
       docker exec "$POSTGRES_CONTAINER" psql -U "$pg_user" -d postgres -Atc "SELECT datname FROM pg_database WHERE datistemplate=false ORDER BY datname;"
       ;;
     *)
-      echo "Usage: devhub db [create <db_name> [db_user] [db_password]|import [trading|distribution|all]|list]" >&2
+      echo "Usage: devhub db [create <db_name> [db_user] [db_password]|provision <db_name> <env_file>|import [trading|distribution|all]|list]" >&2
       exit 1
       ;;
   esac
@@ -240,12 +254,16 @@ Commands:
   logs [service]                      Follow logs
   open <target>                       Open service URL
   db create <db> [user] [password]    Create project database/user
+  db provision <db> <env_file>        Create a private database and role from an env file
   db import [args]                     Run custom DB import script (see DEVHUB_IMPORT_SCRIPT)
   db list                             List non-template databases
   doctor                              Show health and networking diagnostics
   setup [--install-deps]              Check local manager prerequisites
   root | project | maintenance|security Manage approved local projects
+  import <path> [--apply]              Run a Hono project in an isolated dev container
+  new <stack> <name> --root <path>     Create a project, in Docker or native mode
   presets                             List supported project presets
+  versions                            Check pinned versions for end of life and CVEs (needs Go)
   serve | pair                        Start the panel API (--dev adds Vite) or create a pairing code
   infra <legacy-command>              Run an existing infrastructure command
   version                             Show the installed DevHub version
@@ -271,7 +289,7 @@ main() {
   shift || true
 
   case "$cmd" in
-    root|project|maintenance|security|setup|serve|pair|presets)
+    root|project|import|new|maintenance|security|setup|serve|pair|presets|versions)
       command -v bun >/dev/null 2>&1 || { echo "Bun is required for '$cmd'. Install it for your user with: curl -fsSL https://bun.sh/install | bash" >&2; exit 1; }
       exec bun "$DEVHUB_CHECKOUT_DIR/src/main.ts" "$cmd" "$@"
       ;;

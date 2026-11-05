@@ -1,8 +1,14 @@
+import { t } from "./i18n";
 import type {
   Action,
   ApiError,
   ApiSuccess,
   ContainerInfo,
+  VersionReport,
+  CreateDraft,
+  CreateInput,
+  DirectoryListing,
+  CreatePlan,
   LogEntry,
   Operation,
   Preset,
@@ -15,6 +21,7 @@ import type {
   Root,
   Scan,
   SetupInput,
+  StackDefinition,
 } from "../../../../src/contracts";
 
 /**
@@ -39,7 +46,7 @@ export function isAbortError(error: unknown): boolean {
 
 export function errorMessage(error: unknown): string {
   if (error instanceof Error && error.message) return error.message;
-  return "Something went wrong. Try again.";
+  return t("Something went wrong. Try again.");
 }
 
 export function isUnauthorized(error: unknown): boolean {
@@ -63,7 +70,7 @@ interface RequestOptions {
 
 async function readFailure(response: Response): Promise<ApiRequestError> {
   let code = "http_error";
-  let message = `The request failed with status ${response.status}.`;
+  let message = t("The request failed with status {status}.", { status: response.status });
   try {
     const payload = (await response.json()) as Partial<ApiError> | null;
     if (payload && typeof payload === "object" && payload.error && typeof payload.error.message === "string") {
@@ -78,7 +85,7 @@ async function readFailure(response: Response): Promise<ApiRequestError> {
 
 function networkFailure(error: unknown): unknown {
   if (isAbortError(error) || error instanceof ApiRequestError) return error;
-  return new ApiRequestError("DevHub could not be reached. Check that the local manager is running.", "network", 0);
+  return new ApiRequestError(t("DevHub could not be reached. Check that the local manager is running."), "network", 0);
 }
 
 async function send(method: "GET" | "POST", path: string, options: RequestOptions, accept: string): Promise<Response> {
@@ -110,7 +117,7 @@ async function request<T>(method: "GET" | "POST", path: string, options: Request
   } catch (error) {
     if (isAbortError(error)) throw error;
   }
-  throw new ApiRequestError("DevHub returned an unexpected response.", "bad_response", response.status);
+  throw new ApiRequestError(t("DevHub returned an unexpected response."), "bad_response", response.status);
 }
 
 const id = encodeURIComponent;
@@ -123,6 +130,16 @@ export const pair = (code: string, signal?: AbortSignal) =>
 export const logout = (signal?: AbortSignal) => request<SessionState>("POST", "/logout", { signal });
 
 export const listRoots = (signal?: AbortSignal) => request<Root[]>("GET", "/roots", { signal });
+export const addRoot = (path: string, signal?: AbortSignal) => request<Root>("POST", "/roots", { body: { path }, signal });
+export const listDirectories = (path: string | undefined, signal?: AbortSignal) =>
+  request<DirectoryListing>("GET", `/directories${path ? `?path=${id(path)}` : ""}`, { signal });
+export const getVersions = (signal?: AbortSignal) => request<VersionReport | null>("GET", "/versions", { signal });
+export const checkVersions = (signal?: AbortSignal) => request<VersionReport>("POST", "/versions/check", { signal });
+export const listStacks = (signal?: AbortSignal) => request<StackDefinition[]>("GET", "/stacks", { signal });
+export const previewCreation = (input: CreateInput | CreateDraft, signal?: AbortSignal) =>
+  request<CreatePlan>("POST", "/creations/preview", { body: input, signal });
+export const createNewProject = (input: CreateInput, signal?: AbortSignal) =>
+  request<{ project: PublicProject; operation: Operation; url: string }>("POST", "/creations", { body: input, signal });
 export const listPresets = (signal?: AbortSignal) => request<Preset[]>("GET", "/presets", { signal });
 export const discover = (path: string, signal?: AbortSignal) =>
   request<PublicDetection[]>("POST", "/discovery", { body: { path }, signal });
@@ -133,6 +150,8 @@ export const createProject = (planId: string, signal?: AbortSignal) =>
 export const listProjects = (signal?: AbortSignal) => request<PublicProject[]>("GET", "/projects", { signal });
 export const getProjectStatus = (projectId: string, signal?: AbortSignal) =>
   request<ProjectStatus>("GET", `/projects/${id(projectId)}/status`, { signal });
+export const listProjectOperations = (projectId: string, signal?: AbortSignal) =>
+  request<Operation[]>("GET", `/projects/${id(projectId)}/operations`, { signal });
 
 export function submitOperation(projectId: string, action: Action, componentIds: string[], idempotencyKey: string, signal?: AbortSignal) {
   return request<Operation>("POST", `/projects/${id(projectId)}/operations`, {
@@ -173,7 +192,7 @@ export async function waitForOperation(initial: Operation, signal: AbortSignal, 
   let transientFailures = 0;
   while (!isTerminal(operation)) {
     if (Date.now() >= deadline) {
-      throw new ApiRequestError("The operation is still running. Refresh the project status to check its outcome.", "poll_timeout", 0);
+      throw new ApiRequestError(t("The operation is still running. Refresh the project status to check its outcome."), "poll_timeout", 0);
     }
     await sleep(delay, signal);
     try {
@@ -253,7 +272,7 @@ export async function streamLogs(projectId: string, options: LogStreamOptions): 
   if (options.cursor !== undefined) headers["Last-Event-ID"] = String(options.cursor);
   const suffix = query.size > 0 ? `?${query}` : "";
   const response = await send("GET", `/projects/${id(projectId)}/logs${suffix}`, { signal: options.signal, headers }, "text/event-stream");
-  if (!response.body) throw new ApiRequestError("The log stream returned no body.", "bad_response", response.status);
+  if (!response.body) throw new ApiRequestError(t("The log stream returned no body."), "bad_response", response.status);
   options.onOpen?.();
   await readEventStream(response.body, (event, data) => dispatchEvent(event, data, options));
 }
@@ -273,7 +292,7 @@ export interface ContainerLogStreamOptions {
 export async function streamContainerLogs(containerId: string, options: ContainerLogStreamOptions): Promise<void> {
   const suffix = options.since ? `?${new URLSearchParams({ since: options.since })}` : "";
   const response = await send("GET", `/containers/${id(containerId)}/logs${suffix}`, { signal: options.signal }, "text/event-stream");
-  if (!response.body) throw new ApiRequestError("The log stream returned no body.", "bad_response", response.status);
+  if (!response.body) throw new ApiRequestError(t("The log stream returned no body."), "bad_response", response.status);
   options.onOpen?.();
   await readEventStream(response.body, (event, data) => {
     const payload = parseJson(data) as Record<string, unknown> | undefined;
@@ -312,7 +331,7 @@ async function readEventStream(body: ReadableStream<Uint8Array>, onEvent: (event
       }
       if (chunk.done) break;
       buffer += decoder.decode(chunk.value, { stream: true });
-      if (buffer.length > MAX_SSE_BUFFER_CHARS) throw new ApiRequestError("The log stream sent an oversized event.", "bad_response", 0);
+      if (buffer.length > MAX_SSE_BUFFER_CHARS) throw new ApiRequestError(t("The log stream sent an oversized event."), "bad_response", 0);
       const lines = buffer.split(/\r\n|\r|\n/);
       buffer = lines.pop() ?? "";
       lines.forEach(handleLine);

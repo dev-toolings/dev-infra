@@ -6,7 +6,7 @@ setup() {
   export DOCKER_CALLS="$BATS_TEST_TMPDIR/docker.calls"
   export MOCK_CONFIG="$BATS_TEST_TMPDIR/config.json"
   mkdir -p "$DEVHUB_DIR/data/scripts" "$BATS_TEST_TMPDIR/bin"
-  cp "$REPO_DIR/data/scripts/healthcheck.sh" "$DEVHUB_DIR/data/scripts/"
+  cp "$REPO_DIR/data/scripts/healthcheck.sh" "$REPO_DIR/data/scripts/reconnect-project-networks.sh" "$DEVHUB_DIR/data/scripts/"
   touch "$DEVHUB_DIR/compose.yml" "$DEVHUB_DIR/.env" "$DOCKER_CALLS"
   export PATH="$BATS_TEST_TMPDIR/bin:$PATH"
   cat > "$MOCK_CONFIG" <<'JSON'
@@ -34,6 +34,7 @@ case "$1" in
     cat "$MOCK_CONFIG"
     ;;
   network)
+    [ "$2" != ls ] || exit 0
     [ "$2" = inspect ] || exit 99
     [ "${NETWORK_MISSING:-0}" = 0 ] || exit 1
     echo 'dev-shared-net (driver=bridge)'
@@ -52,7 +53,13 @@ case "$1" in
       esac
     fi
     ;;
-  ps) echo infra-postgres ;;
+  ps)
+    case "$*" in
+      *devhub.service-instance*) [ -z "${INSTANCE:-}" ] || echo "$INSTANCE" ;;
+      *) echo infra-postgres ;;
+    esac
+    ;;
+  start|stop) [ "${INSTANCE_FAIL:-0}" = 0 ] || exit 1 ;;
   exec) echo 1 ;;
   *) exit 99 ;;
 esac
@@ -151,6 +158,18 @@ SH
     grep -Fx "compose --env-file $DEVHUB_DIR/.env -f $DEVHUB_DIR/compose.yml $suffix" "$DOCKER_CALLS"
     ! grep -Eq -- '--project-name|--remove-orphans|--volumes|down -v|prune' "$DOCKER_CALLS"
   done
+}
+
+@test "up and down include service instances, and a failing instance does not stop the reconnect" {
+  export INSTANCE=infra-postgres-17
+  run "$REPO_DIR/bin/devhub" down
+  [ "$status" -eq 0 ]
+  grep -Fx 'stop infra-postgres-17' "$DOCKER_CALLS"
+  export INSTANCE_FAIL=1
+  run "$REPO_DIR/bin/devhub" up
+  [ "$status" -eq 0 ]
+  grep -Fx 'start infra-postgres-17' "$DOCKER_CALLS"
+  grep -Fx 'network ls --filter label=devhub.infra --format {{.Name}}' "$DOCKER_CALLS"
 }
 
 @test "db create runs psql as the configured POSTGRES_USER" {

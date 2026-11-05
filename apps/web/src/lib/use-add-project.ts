@@ -1,5 +1,5 @@
 import * as React from "react";
-import type { PublicDetection, PublicProject, PublicSetupPlan, SetupInput } from "../../../../src/contracts";
+import type { PublicDetection, PublicProject, PublicSetupPlan, Root, SetupInput } from "../../../../src/contracts";
 import { createProject, discover, errorMessage, isAbortError, listPresets, listRoots, previewProject } from "./api";
 import type { Lifetime } from "./use-lifetime";
 import { useResource } from "./use-resource";
@@ -54,6 +54,7 @@ export function useAddProject(lifetime: Lifetime, onCreated: (project: PublicPro
     open: open && loaded,
     requestOpen: () => setOpen(true),
     onOpenChange: setOpen,
+    onRootApproved: (root: Root) => roots.update((current = []) => current.some((item) => item.id === root.id) ? current : [...current, root]),
     roots: roots.data ?? [],
     presets: presets.data ?? [],
     detections,

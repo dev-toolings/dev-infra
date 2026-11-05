@@ -4,6 +4,7 @@ set -euo pipefail
 services=(
   infra-postgres
   infra-mysql
+  infra-mariadb
   infra-redis
   infra-meilisearch
   infra-mailpit

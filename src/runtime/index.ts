@@ -3,10 +3,11 @@ import { chmodSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { parseDocument } from "yaml";
-import { assertSharedDataUntouched, type ComposeModel } from "./mounts";
+import { assertSharedDataUntouched, managedEntry, type ComposeModel } from "./mounts";
 import { approvedOverride } from "../security/override";
 import { envFileKeys, guardFollower } from "../guard";
 import { followLines } from "./executor";
+import { projectNetwork } from "../services";
 import { DevHubError, type CatalogPort, type Component, type ContainerInfo, type Executor, type LogEntry, type Project, type RuntimePort, type ComponentStatus, type ContainerLogLine, type FollowHandle, type Follower } from "../contracts";
 
 type Options = { run: Executor; follow?: Follower; stateDir: string; assertAllowedPath: CatalogPort["assertAllowedPath"]; fetch?: (input: string, init?: BunFetchRequestInit) => Promise<Response>; resolveExecutable?: (command: string) => string | null };
@@ -126,10 +127,23 @@ export class Runtime implements RuntimePort {
     const items = parseJsonLines(result.stdout);
     if (!items.length || !items.every((x) => { const host = (x.Endpoints as Record<string, unknown> | undefined)?.docker && ((x.Endpoints as Record<string, Record<string, unknown>>).docker.Host); return typeof host === "string" && /^unix:\/\//.test(host) && host.length > 7 && host.slice(7).startsWith("/"); })) throw err("Docker context must use a local Unix socket", "unsafe_runtime", 403);
   }
+  private managedFile(project: Project): string { return join(this.stateDir, "imports", project.id, "compose.yml"); }
+  /** A managed project gets its own network: only the shared services it needs join it, so projects cannot reach each other. */
+  private async connectInfra(project: Project, component: Component): Promise<void> {
+    const { managed } = component.compose!;
+    const network = projectNetwork(project.id, managed!.infra);
+    if ((await this.run(["docker", "network", "inspect", network], READ)).code !== 0) {
+      if ((await this.run(["docker", "network", "create", "--label", `devhub.infra=${managed!.infra.join(",")}`, network], TIME)).code !== 0) throw err("Project network creation failed", "runtime_start", 502);
+    }
+    for (const service of managed!.infra) {
+      const result = await this.run(["docker", "network", "connect", network, service], TIME);
+      if (result.code !== 0 && !/already exists/.test(result.stderr)) throw err(`Could not reach ${service}; run devhub up`, "runtime_start", 502);
+    }
+  }
   private composeBase(project: Project, component: Component, cwd: string): string[] {
     const cfg = component.compose; if (!cfg || !cfg.files.length || !cfg.services.length) throw err("Compose component requires files and explicit services");
     slug(cfg.projectName, "Compose project name");
-    const files = cfg.files.map((file) => { const path = this.assertAllowedPath(resolve(cwd, file), true); if (!within(canonical(path), canonical(project.root))) throw err("Compose file must stay inside project root", "unsafe_path", 403); const st = lstatSync(path); if (!st.isFile() || st.isSymbolicLink()) throw err("Compose file must be a regular file"); return canonical(path); });
+    const files = cfg.managed ? [this.managedFile(project)] : cfg.files.map((file) => { const path = this.assertAllowedPath(resolve(cwd, file), true); if (!within(canonical(path), canonical(project.root))) throw err("Compose file must stay inside project root", "unsafe_path", 403); const st = lstatSync(path); if (!st.isFile() || st.isSymbolicLink()) throw err("Compose file must be a regular file"); return canonical(path); });
     for (const profile of cfg.profiles) slug(profile, "Compose profile"); for (const service of cfg.services) slug(service, "Compose service");
     checkComposeEnv(component, cwd, canonical(project.root));
     const envFiles = (component.envFiles ?? []).map((file) => canonical(resolve(cwd, file)));
@@ -138,6 +152,7 @@ export class Runtime implements RuntimePort {
   private preflightCompose(project: Project, component: Component, cwd: string): void {
     const root = canonical(project.root); let files = 0, bytes = 0; const visited = new Set<string>(), active = new Set<string>();
     checkComposeEnv(component, cwd, root);
+    if (component.compose?.managed) return;
     const visit = (path: string, depth: number) => {
       if (depth > 8) throw err("Compose include depth exceeds 8", "unsafe_compose", 403);
       const resolved = canonical(path); if (!within(resolved, root)) throw err("Compose references must stay inside project root", "unsafe_path", 403);
@@ -204,7 +219,7 @@ export class Runtime implements RuntimePort {
       if (String(l["com.docker.compose.project"] ?? "") !== component.compose!.projectName) throw err("Compose found an unmatched container for this project identity", "runtime_ownership", 403);
       const wd = l["com.docker.compose.project.working_dir"], config = l["com.docker.compose.project.config_files"];
       const scope = { stateDir: this.stateDir, projectId: project.id, componentId: component.id, service: String(l["com.docker.compose.service"]) };
-      if (!wd || !config || canonical(wd) !== cwd || config.split(",").some((f) => !approvedOverride(scope, f) && !component.compose!.files.some((known) => canonical(resolve(cwd, known)) === canonical(f, false)))) throw err("Compose container ownership labels do not match", "runtime_ownership", 403);
+      if (!wd || !config || canonical(wd) !== cwd || config.split(",").some((f) => !approvedOverride(scope, f) && !(component.compose!.managed ? [this.managedFile(project)] : component.compose!.files.map((known) => canonical(resolve(cwd, known)))).includes(canonical(f, false)))) throw err("Compose container ownership labels do not match", "runtime_ownership", 403);
     }
     return selected;
   }
@@ -219,7 +234,7 @@ export class Runtime implements RuntimePort {
     if (!write) return { name, path, owner };
     mkdirSync(dir, { recursive: true, mode: 0o700 }); chmodSync(dir, 0o700);
     const ownerMarker = `# DevHub-Owner=${owner}`;
-    const lines = [ownerMarker, "[Unit]", `Description=${component.name.replace(/[\0\r\n]/g, " ").replace(/%/g, "%%")}`, "[Service]", "Type=exec", `WorkingDirectory=${unitPath(cwd)}`, `ExecStart=${args.map(escapeUnit).join(" ")}`, "KillMode=control-group", "Restart=on-failure", "RestartSec=3s", "StartLimitIntervalSec=60s", "StartLimitBurst=3"];
+    const lines = [ownerMarker, "[Unit]", `Description=${component.name.replace(/[\0\r\n]/g, " ").replace(/%/g, "%%")}`, "StartLimitIntervalSec=60s", "StartLimitBurst=3", "[Service]", "Type=exec", `WorkingDirectory=${unitPath(cwd)}`, `ExecStart=${args.map(escapeUnit).join(" ")}`, "KillMode=control-group", "Restart=on-failure", "RestartSec=3s"];
     for (const ef of component.envFiles ?? []) { const file = resolve(cwd, ef); envFileCheck(file, canonical(project.root)); lines.push(`EnvironmentFile=${unitPath(canonical(file))}`); }
     if (component.limits?.memoryMb) lines.push(`MemoryMax=${component.limits.memoryMb}M`);
     if (component.limits?.tasks) lines.push(`TasksMax=${component.limits.tasks}`);
@@ -258,8 +273,9 @@ export class Runtime implements RuntimePort {
       if (config.code !== 0) throw err("Compose configuration validation failed", "runtime_config", 400);
       const model = outputJson(config.stdout) as ComposeModel;
       if (!model.services || component.compose!.services.some((s) => !model.services![s])) throw err("Selected service is absent from the Compose model");
-      assertSharedDataUntouched(model, component.compose!.services, this.stateDir);
-      const up = await this.run([...base, "up", "-d", "--no-deps", ...component.compose!.services], { timeoutMs: 900_000, maxOutputBytes: 8 * 1024 * 1024 });
+      assertSharedDataUntouched(model, component.compose!.services, this.stateDir, component.compose!.managed ? managedEntry(this.stateDir, project.id) : undefined);
+      if (component.compose!.managed) await this.connectInfra(project, component);
+      const up = await this.run([...base, "up", "-d", "--no-deps", ...(component.compose!.managed ? ["--build"] : []), ...component.compose!.services], { timeoutMs: 900_000, maxOutputBytes: 8 * 1024 * 1024 });
       if (up.code !== 0) throw err("Compose start failed", "runtime_start", 502);
       return;
     }
@@ -298,7 +314,7 @@ export class Runtime implements RuntimePort {
       running = component.compose!.services.every((service) => replicas.some((r) => labels(r)["com.docker.compose.service"] === service && state(r) === "running"));
       // Health is "" without a healthcheck; replicas holds every container of the selected services.
       if (running && replicas.some((r) => state(r) !== "running" || health(r) === "unhealthy")) { blocked = "unhealthy"; detail = "A selected container is unhealthy or not running"; }
-      else if (running && replicas.some((r) => health(r) === "starting")) { blocked = "starting"; detail = "A selected container healthcheck is still starting"; }
+      else if (running && replicas.some((r) => health(r) === "starting" || (component.compose!.managed && health(r) !== "healthy"))) { blocked = "starting"; detail = "A selected container healthcheck is still starting"; }
     } else if (component.kind === "native") {
       assertLocalBus(); const unit = await this.nativeUnit(project, component, cwd, false);
       if (!(await this.unitOwned(unit))) return { componentId: component.id, state: "stopped", ready: false };
@@ -348,6 +364,8 @@ export class Runtime implements RuntimePort {
     for (const line of result.stdout.split(/\r?\n/).filter(Boolean)) {
       if (component.kind === "native") {
         const row = outputJson(line) as Record<string, string>;
+        // The unit filter also returns what the service manager says about it: only the app's output is a project log.
+        if (row.SYSLOG_IDENTIFIER === "systemd") continue;
         const cursor = row.__CURSOR ?? ""; const msg = row.MESSAGE ?? "";
         entries.push({ seq: ++this.seq, time: new Date(Number(row.__REALTIME_TIMESTAMP ?? 0) / 1000).toISOString(), projectId: project.id, componentId: component.id, stream: "stdout", message: msg, sourceId: cursor || `${row.__REALTIME_TIMESTAMP}:${row._BOOT_ID}` });
       } else {
@@ -399,7 +417,7 @@ export class Runtime implements RuntimePort {
       const l = config.Labels && typeof config.Labels === "object" ? config.Labels as Record<string, string> : labels(row);
       const projectName = l["com.docker.compose.project"], service = l["com.docker.compose.service"], wd = l["com.docker.compose.project.working_dir"], files = l["com.docker.compose.project.config_files"];
       // Association needs an exact label match on a registered component; everything else stays observed only.
-      const owner = projectName && service && wd && files ? components.find(({ p, c }) => c.compose!.projectName === projectName && c.compose!.services.includes(service) && sameFile(wd, c.cwd) && files.split(",").every((f) => approvedOverride({ stateDir: this.stateDir, projectId: p.id, componentId: c.id, service }, f) || c.compose!.files.some((known) => sameFile(resolve(c.cwd, known), f)))) : undefined;
+      const owner = projectName && service && wd && files ? components.find(({ p, c }) => c.compose!.projectName === projectName && c.compose!.services.includes(service) && sameFile(wd, c.cwd) && files.split(",").every((f) => approvedOverride({ stateDir: this.stateDir, projectId: p.id, componentId: c.id, service }, f) || (c.compose!.managed ? [this.managedFile(p)] : c.compose!.files.map((known) => resolve(c.cwd, known))).some((known) => sameFile(known, f)))) : undefined;
       const health = state.Health && typeof state.Health === "object" ? String((state.Health as Record<string, unknown>).Status ?? "") : undefined;
       return { id, name: String(row.Names ?? row.Name ?? "").replace(/^\//, ""), imageId: String(inspect.Image ?? ""), image: String(row.Image ?? config.Image ?? ""), state: String(state.Status ?? row.State ?? "unknown"),
         ...(health ? { health } : {}), ...(owner ? { projectId: owner.p.id, componentId: owner.c.id } : {}), ...(projectName ? { composeProject: projectName } : {}),

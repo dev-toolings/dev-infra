@@ -8,6 +8,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- New Hono projects start with a complete architecture in both code structures: chained
+  REST routes with a `notes` example to copy, Zod request validation, one JSON error shape,
+  request ids, secure headers, Pino request logs and an exported `AppType` for typed clients.
+  `modules` stays the default, and adds domain, application and infrastructure layers with
+  a repository port. With Drizzle, `notes` is stored in Postgres in both structures.
+- The file preview of a new project shows a Markdown file rendered or as code, with colors
+  that follow the type of each file.
+- The create form starts with the stack, then the name and folder, and its file preview shows
+  from the start, under a stand-in name until the project has one.
+- `AGENTS.md` can be edited in the file preview of a new project, and the
+  Layout section of `AGENTS.md` is now a bullet list in every stack.
+- The `AGENTS.md` of a new project now carries the rules of its framework, runtime, ORM, mode
+  and services: the exact command for the `app` container, what the minimal Symfony and Laravel
+  skeletons lack, and how to share Redis, Meilisearch and RabbitMQ.
+- `bun run check:scaffolds` generates each code option of the catalog, bare and with
+  services, and runs the checks of each new project, and the `update-scaffolds` skill keeps the templates current.
+- Folder picker in the panel: `GET /api/v1/directories` lists the subfolders of the
+  machine running DevHub, so a folder can be browsed and approved from the create and
+  add project forms, locally or through an SSH tunnel. The path stays editable.
+- Project pages in the panel: `/projects` is now a grid of cards with the state of each
+  project, and `/projects/:id` is a page of its own with a breadcrumb and project
+  switcher, one state for the whole project, Start, Stop and Restart for all its
+  components, aligned component rows, and two tabs for live logs and recent operations.
+- `GET /api/v1/projects/:id/operations` returns the 20 newest operations of a project.
+- MariaDB as a shared service (`infra-mariadb`, port 3307).
+- New projects can use MySQL, MariaDB, Meilisearch and RabbitMQ, and choose the version of
+  each service, in the panel or with `--service postgres@17`. Another version runs in its
+  own instance, with its own volume and port, shared by the projects on that version.
+- `devhub versions` and the Versions tab of the Maintenance page report end of life, LTS,
+  CVEs and new releases for every version DevHub pins, from a small Go tool in
+  `tools/versionwatch`. Pinned versions now live in `data/versions.json`.
+- New projects can use Python (FastAPI with uv) and PHP (Symfony 7.4 LTS or Laravel), in Docker
+  or native mode, from the panel and from `devhub new`.
+- New projects include instructions for coding agents: `AGENTS.md`, `.claude`
+  and `.agents`. The creation page lets you read every generated file before creating.
+- New project page redesigned as a workshop: steps on the left, and on the right the
+  Dockerfile, Compose file and variables DevHub will write, updated as you type and with
+  syntax colors. You can choose release lines (LTS, latest, others) and customize the
+  Docker image, or edit the Dockerfile, which now lives at the root of the project.
+- State colors follow the BoardUI status tokens, and `DESIGN.md` lists the light and
+  dark color values. Stopped projects and containers are now yellow, not gray.
+- Control panel in English and French, following the browser, with a switch in the
+  session menu.
+- Project creation: a `/projects/new` page in the panel and `devhub new STACK NAME
+  --root PATH` create a project in Docker or native mode and start it. Node.js with
+  Hono comes first (Bun or Node, modular or standard structure, Drizzle, Postgres,
+  Redis, Mailpit). Parent folders can now be approved from the panel.
+- `devhub import PATH [--apply]`: run a Hono project (bun or npm) with no Compose
+  file in a generated dev container. It installs dependencies in the container,
+  watches for changes, and gives the project its own Postgres role and database,
+  its own Docker network joined only by the shared services it needs, and a free
+  loopback port. Generated files stay in the state directory.
 - Live Docker logs in the container detail panel, now a wide side panel, with
   `?state=` filters on `/containers`; `make dev` and `make pair`.
 - Foundation for the approved local DevHub manager: shared TypeScript contracts,
@@ -20,6 +72,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`devhub serve`, `devhub pair`) and a connected React control panel.
 
 ### Changed
+- Action and refresh failures in the panel now appear as one toast per source in the
+  bottom right corner, instead of banners and a repeated error on each recent operation
+  row. Hover a row to read its error.
 - Control panel restyled on the shared design system: neutral tokens, local
   Inter font, floating collapsible sidebar, page header bar, light/dark/system
   theme in the session menu (which now holds Log out), colored status badges
@@ -29,6 +84,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   readiness and the scan image selector show placeholders while they load, and the
   log view shows a connecting state until the stream opens. `DESIGN.md` now
   documents the control panel design system.
+- Project page: components and operations are compact full-width rows, with
+  state-aware actions and direct links to the logs and the app. The add-project dialog
+  is shorter, with a scrollable list of detected folders.
+- `devhub serve --dev` restarts the API when a source file changes, so the panel
+  and the API stay on the same code.
 - `devhub serve --dev` (and `--dev-origin`) now starts the Vite panel server
   itself, reuses one already answering on the dev origin, and stops it with the
   controller. The Vite proxy follows `--port` through `DEVHUB_API_PORT` instead of
@@ -51,6 +111,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   formerly floating latest images and rotate container logs (3 files of 10 MiB).
 - Resolve UI and diagnostic ports from Compose; return failure from diagnostics
   for missing or unhealthy services without creating the network.
+
+### Fixed
+- The check of new PHP projects no longer fails on publishing rules: they are private
+  projects, so it runs `composer validate --no-check-publish`.
+- Native units put `StartLimitIntervalSec` and `StartLimitBurst` in `[Unit]`: systemd
+  ignored the interval and logged a warning at each status check, which showed up as
+  project logs. A project stops logging it at its next start.
 
 ## [0.0.3] - 2026-07-18
 

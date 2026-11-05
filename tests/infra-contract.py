@@ -25,12 +25,14 @@ def render(profile, source=None):
 
 
 source = main_source()
-expected = {"postgres", "mysql", "redis", "meilisearch", "mailpit", "adminer", "dozzle", "rabbitmq"}
+expected = {"postgres", "mysql", "mariadb", "redis", "meilisearch", "mailpit", "adminer", "dozzle", "rabbitmq"}
+added_since_baseline = {"mariadb"}
 for profile in ("core", "async", "core,async"):
     before, after = render(profile, source), render(profile)
-    assert before["volumes"] == after["volumes"], "Volume identity changed"
+    current_volumes = {name: volume for name, volume in after["volumes"].items() if name != "infra_mariadb_data"}
+    assert before["volumes"] == current_volumes, "Volume identity changed"
     assert before["networks"] == after["networks"], "Network identity changed"
-    assert before["services"].keys() == after["services"].keys(), "Profile membership changed"
+    assert before["services"].keys() == after["services"].keys() - added_since_baseline, "Profile membership changed"
     for name, service in before["services"].items():
         assert name in expected, f"Unexpected shared service: {name}"
         current = after["services"][name]

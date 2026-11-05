@@ -1,3 +1,4 @@
+import { t } from "../../lib/i18n";
 import * as React from "react";
 import { CircleAlert } from "lucide-react";
 import { cn } from "../../lib/utils";
@@ -40,7 +41,7 @@ export interface ErrorStateProps extends React.HTMLAttributes<HTMLElement> {
 }
 
 export const ErrorState = React.forwardRef<HTMLElement, ErrorStateProps>(
-  ({ title = "Unable to load this view", description, action, className, ...props }, ref) => {
+  ({ title = t("Unable to load this view"), description, action, className, ...props }, ref) => {
     const titleId = React.useId();
     const descriptionId = React.useId();
     return (

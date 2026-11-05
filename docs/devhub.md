@@ -42,6 +42,121 @@ one local project. A trusted local JSON configuration can be registered with
 registered project root. Removing a project unregisters it and does not remove
 its files or stop its services.
 
+## Create a project
+
+Create a project from the panel page `/projects/new`, or from the CLI. Both use the
+same catalog of stacks and options. The stacks are `node`, `python` and `php`. A preview
+shows what will change first: the page updates it as you fill the form.
+
+```sh
+devhub new node shop --root ~/code                      # preview, changes nothing
+devhub new node shop --root ~/code --apply              # Docker, Bun, modular structure
+devhub new node shop --root ~/code --mode native --option runtime=node,orm=drizzle \
+  --service redis,mailpit --apply
+devhub new python api --root ~/code --option pattern=standard --service postgres --apply
+devhub new php site --root ~/code --option framework=laravel --apply
+```
+
+`--service` takes `postgres`, `mysql`, `mariadb`, `redis`, `meilisearch`, `rabbitmq` and
+`mailpit`, with an optional version: `--service postgres@17,redis`. Without one, the
+project uses the shared container. Another version runs in its own instance
+(`infra-postgres-17`), started on demand, with its own volume and a free port from 15000;
+its Compose file stays in the state directory, under `services/`. Projects on the same
+version share that instance.
+
+The project gets its connection in its environment: `DATABASE_URL`, `MYSQL_URL`,
+`MARIADB_URL`, `REDIS_URL`, `RABBITMQ_URL`, `MEILISEARCH_URL`, `MEILISEARCH_API_KEY` and
+`SMTP_HOST`. PostgreSQL, MySQL and MariaDB get a private database and user. The generated
+code has a client only for PostgreSQL, Redis and Mailpit.
+
+`--root` must be an approved folder (`devhub root add`, or the folder picker of the
+page). The project is created in a new folder named after it.
+
+Every project includes `AGENTS.md`, read by Codex, Grok and Claude Code, with the rules of
+its framework, runtime, mode and services,
+`.claude/settings.json` and a `project-checks` skill in `.claude/skills` and `.agents/skills`.
+
+The page shows every file before creation: click one in the tree to read it. It also
+customizes the Docker image: base image, system packages, PHP extensions, or
+the whole Dockerfile. New Docker projects keep their Dockerfile at their root, and it runs
+on this machine when the image builds. What confines the container stays in a Compose
+file DevHub manages: non-root user, no capabilities, ports on this machine only.
+
+| Stack | Option | Values (default first) |
+|---|---|---|
+| `node` | `framework` | `hono` |
+| `node` | `runtime` | `bun`, `node` (npm) |
+| `node` | `pattern` | `modules` (`domain`, `application`, `infrastructure`), `standard` (`routes`, `schemas`, `services`, `middleware`). Both ship a `notes` REST example, Zod validation, JSON errors and request logs. With Drizzle, `notes` uses Postgres, after `db:generate` and `db:migrate` |
+| `node` | `orm` | `none`, `drizzle` (selects Postgres) |
+| `node` | `nodeVersion` | `24`, `26` (Docker, with `runtime=node`) |
+| `python` | `framework` | `fastapi` |
+| `python` | `pattern` | `modules`, `standard` |
+| `python` | `pythonVersion` | `3.14`, `3.13` (Docker) |
+| `php` | `framework` | `symfony`, `laravel` |
+| `php` | `phpVersion` | `8.5`, `8.4` (Docker) |
+| `php` | `symfonyVersion` | `7.4` (LTS), `8.1` |
+
+Services are `postgres`, `redis` and `mailpit`. Every project has a `/health` route and
+exact dependency versions. Node projects use strict TypeScript, Zod for configuration and
+Biome. Python projects use uv, Ruff and pytest. PHP projects use Composer and start from a
+minimal API, not the full framework skeleton.
+
+Native mode needs the stack's tools on this machine: `uv` for Python, `php` and `composer`
+for PHP. Docker mode needs neither. Choosing a service provisions it and sets its
+environment variables. Python adds its Postgres and Redis clients, PHP adds Predis: the
+rest of the client code is yours to write.
+
+| Mode | Runs in | Generated environment |
+|---|---|---|
+| `docker` | The isolated container described under import | `$STATE/imports/<id>/app.env` |
+| `native` | A user systemd service, with no isolation from your session | `.env` in the project, mode 600, ignored by Git |
+
+Both modes get a dedicated port and, with Postgres, a private database and role.
+Native mode needs Linux and the runtime on your machine.
+
+## Import a Hono project
+
+`devhub import` runs a Hono project that has no Compose file, in dev mode, in one
+step. The project must sit inside an approved root.
+
+```sh
+devhub root add ~/code --label workspaces
+devhub import ~/code/api             # preview, changes nothing
+devhub import ~/code/api --apply     # provision, register and start
+devhub project logs api
+```
+
+The preview shows the image, install and dev commands, URL, database and the
+variables you still have to fill in. With `--apply`, DevHub:
+
+- writes `compose.yml`, `app.env` and the image files under
+  `$STATE/imports/<id>/`, never in the repository (`app.env` holds the secrets,
+  mode 600; edit it to fill in the listed variables, then restart the project);
+- reads `.env.example` for defaults and never reads your `.env` (the mounted
+  `.env` stays visible to the app, generated variables take priority);
+- creates a Postgres database and role `dh_<id>` when the project uses Postgres;
+  only that role can connect to that database;
+- starts the app as your user, with no Linux capability, with only the project
+  mounted and without the Docker socket;
+- keeps `node_modules` in a volume, leaving an empty `node_modules` folder in the
+  project (a host `node_modules` stays on disk but is hidden from the container),
+  and installs again only when `package.json` or the lockfile
+  changes.
+
+Each imported project gets its own network, `devhub-<id>-<hash>`, and only the shared services
+it uses join that network: imported projects cannot reach each other. Docker
+connects those `infra-*` containers to the network on every project start and on
+`devhub up`.
+
+Limits: bun and npm projects only (pnpm and yarn are refused), local paths only,
+no `wrangler` or `vite` dev script, and no Compose file in the project (use
+`project add`). RabbitMQ and Meilisearch
+are not provisioned. Redis gets a `REDIS_PREFIX`, which is a convention and not an
+access control, as the Redis default user stays open. The Postgres admin login
+stays reachable from the project network: if `.env` keeps the default password,
+an imported project can use it. `project remove` leaves the
+containers, network, database and generated files in place.
+
 ## Operate projects
 
 ```sh
@@ -99,6 +214,50 @@ it on `http://localhost:8040`.
 
 The control panel is not exposed on the network. Pairing codes and credentials
 must not be copied into shell history or shared logs.
+
+To reach a panel running on another machine, forward its port over SSH and keep the
+same local port, because any other `Host` is refused:
+
+```sh
+ssh -L 8040:127.0.0.1:8040 you@server
+```
+
+The folder picker of the panel lists the folders of the machine running DevHub, never
+those of the machine running the browser, so it works the same in both cases. A
+paired session can browse folder names on the whole disk, except protected DevHub
+data. Dot folders and symbolic links are not listed: type their path instead. The
+disk root cannot be approved.
+
+The manager runs on Linux, which includes WSL2 (Windows drives are under `/mnt/c`).
+It does not start on macOS or native Windows yet: the catalog reads `/proc`, the state
+checks need `process.getuid`, and `bin/devhub` needs Bash.
+
+## Check pinned versions
+
+`devhub versions` checks every version DevHub pins (`data/versions.json` and the images
+of `compose.yml`) and exits 1 when one is past its end of life, has a known advisory, or
+could not be checked.
+The panel shows the same report under Maintenance, Versions. It needs Go on this machine.
+
+```sh
+devhub versions          # versions to look at
+devhub versions --json   # the full report
+```
+
+| Source | Used for |
+|---|---|
+| endoflife.date | end of support and LTS, for runtimes, services, Symfony and Laravel |
+| OSV.dev | CVEs and advisories of npm, PyPI and Packagist packages |
+| npm, PyPI, Packagist | latest release of each package |
+
+Only package names and versions leave the machine. This checks what DevHub pins, not the
+dependencies of your projects, and advisories cover packages only: to find CVEs inside a
+Docker image, use the image scans of the same page. A source that fails shows as Unknown,
+never as up to date. To move a version, edit `data/versions.json`.
+
+`bun run check:scaffolds [node|python|php]` generates each code option of the catalog, bare
+and with services, and runs the checks of each new project. The `update-scaffolds` skill gives agents the whole
+procedure, from pins to official practice.
 
 ## Existing infrastructure commands
 

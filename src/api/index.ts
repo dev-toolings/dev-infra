@@ -7,7 +7,7 @@ import { ensureStateDir } from "../state";
 import { publicChange, publicProject, publicSetupPlan } from "../public";
 import { resolveSelection } from "../operations/graph";
 import { logEvent, redactLogLine, redactText } from "../operations/logger";
-import { DevHubError, type AppServices, type ContainerLogLine, type FollowHandle, type RemediationInput } from "../contracts";
+import { DevHubError, type AppServices, type ContainerLogLine, type CreateInput, type DockerCustom, type FollowHandle, type RemediationInput } from "../contracts";
 
 const PREFIX = "/api/v1";
 const DB_NAME = "api-auth.sqlite";
@@ -24,6 +24,7 @@ const CONTAINER_LOG_MAX_QUEUED = 64;
 // Redaction is quadratic on a huge unbroken token, so its CPU time is budgeted like the lines are.
 const CONTAINER_LOG_REDACT_MS_PER_SECOND = 200;
 const SESSION_CHECK_MS = 30_000;
+const RECENT_OPERATIONS = 20;
 // Bun closes a connection idle for 10 s by default, and a quiet container sends nothing.
 const CONTAINER_LOG_HEARTBEAT_MS = 5_000;
 const CONTAINER_ID = /^[a-f0-9]{12,64}$/;
@@ -282,7 +283,48 @@ export function createApp(services: AppServices, options: ApiOptions): Hono<ApiE
   });
 
   app.get(`${PREFIX}/roots`, (c) => json(services.catalog.listRoots().map(({ id: rootId, path, label }) => ({ id: rootId, path, label }))));
+  app.post(`${PREFIX}/roots`, async (c) => {
+    const body = await parseBody(c); if (body instanceof Response) return body;
+    if (!exactKeys(body, ["path"]) || !boundedString(body.path, 4096)) return fail("invalid_body", "A folder path is required.", 400);
+    const { id: rootId, path, label } = services.catalog.addRoot(body.path);
+    return json({ id: rootId, path, label }, 201);
+  });
+  app.get(`${PREFIX}/directories`, async (c) => {
+    const path = c.req.query("path");
+    if (path !== undefined && !boundedString(path, 4096)) return fail("invalid_query", "Invalid folder path.", 400);
+    return json(await services.catalog.listDirectories(path));
+  });
   app.get(`${PREFIX}/presets`, (c) => json(services.discovery.presets()));
+  app.get(`${PREFIX}/stacks`, () => json(services.create.stacks()));
+  const dockerCustom = (value: unknown) => {
+    if (value === undefined) return true;
+    if (!value || typeof value !== "object" || Array.isArray(value) || !exactKeys(value as RecordValue, ["image", "packages", "extensions", "dockerfile"])) return false;
+    const { image, packages, extensions, dockerfile } = value as DockerCustom;
+    const names = (items: unknown) => items === undefined || (Array.isArray(items) && items.length <= 64 && items.every((item) => boundedString(item, 64)));
+    return (image === undefined || boundedString(image, 256)) && names(packages) && names(extensions) && (dockerfile === undefined || typeof dockerfile === "string");
+  };
+  /** These names become paths in the new project, so no other key gets through. Their size is bounded by the request body. */
+  const instructionFiles = (value: unknown) => value === undefined || (!!value && typeof value === "object" && !Array.isArray(value) && exactKeys(value as RecordValue, ["AGENTS.md"]) && Object.values(value).every((item) => typeof item === "string"));
+  const createInput = (body: RecordValue): CreateInput | undefined => {
+    const { stack, name, rootId, mode, options, services: selected, versions, docker, instructions, git } = body;
+    const strings = (value: unknown) => !!value && typeof value === "object" && !Array.isArray(value) && Object.values(value).every((item) => boundedString(item, 64));
+    if (!exactKeys(body, ["stack", "name", "rootId", "mode", "options", "services", "versions", "docker", "instructions", "git"]) || !boundedString(stack, 64) || !boundedString(name, 128) || !boundedString(rootId, 4096)
+      || (mode !== "docker" && mode !== "native") || !strings(options) || (versions !== undefined && !strings(versions)) || !dockerCustom(docker) || !instructionFiles(instructions) || !Array.isArray(selected) || !selected.every((item) => boundedString(item, 64)) || typeof git !== "boolean") return undefined;
+    return { stack, name, rootId, mode, options: options as Record<string, string>, services: selected as string[], ...(versions ? { versions: versions as Record<string, string> } : {}), ...(docker ? { docker: docker as DockerCustom } : {}), ...(instructions ? { instructions: instructions as Record<string, string> } : {}), git };
+  };
+  app.post(`${PREFIX}/creations/preview`, async (c) => {
+    const body = await parseBody(c); if (body instanceof Response) return body;
+    // A form with no name yet still shows the files of its choices, under a stand-in name.
+    const draft = body.name === undefined;
+    const input = createInput(draft ? { rootId: "none", ...body, name: "my-project" } : body); if (!input) return fail("invalid_body", "Invalid project creation request.", 400);
+    return json(await services.create.plan(input, draft));
+  });
+  app.post(`${PREFIX}/creations`, async (c) => {
+    const body = await parseBody(c); if (body instanceof Response) return body;
+    const input = createInput(body); if (!input) return fail("invalid_body", "Invalid project creation request.", 400);
+    const { project, operation, url } = await services.create.apply(await services.create.plan(input), false);
+    return json({ project: publicProject(project), operation: publicOperation(operation), url }, 201);
+  });
   app.post(`${PREFIX}/discovery`, async (c) => {
     const body = await parseBody(c); if (body instanceof Response) return body;
     if (!exactKeys(body, ["path", "depth"]) || !boundedString(body.path, 4096) || (body.depth !== undefined && (!Number.isInteger(body.depth) || Number(body.depth) < 0 || Number(body.depth) > 8))) return fail("invalid_body", "Invalid discovery request.", 400);
@@ -312,6 +354,10 @@ export function createApp(services: AppServices, options: ApiOptions): Hono<ApiE
   app.get(`${PREFIX}/projects/:id/status`, async (c) => {
     if (!id(c.req.param("id"))) return fail("invalid_id", "Invalid project ID.", 400);
     return json(publicStatus(await services.operations.status(c.req.param("id"))));
+  });
+  app.get(`${PREFIX}/projects/:id/operations`, (c) => {
+    const projectId = c.req.param("id"); if (!id(projectId)) return fail("invalid_id", "Invalid project ID.", 400);
+    return json(services.operations.listOperations(projectId).slice(-RECENT_OPERATIONS).map(publicOperation));
   });
   app.post(`${PREFIX}/projects/:id/operations`, async (c) => {
     const projectId = c.req.param("id"), body = await parseBody(c);
@@ -345,6 +391,7 @@ export function createApp(services: AppServices, options: ApiOptions): Hono<ApiE
           if (!sessionAlive(c.req.raw)) return finish();
           try {
             const entries = await services.operations.logs(projectId, { componentId, cursor, limit: Math.min(limit, 100) });
+            if (closed) return; // The client left during the read.
             let output = "";
             const batch = entries.slice(0, Math.min(limit, 100));
             const first = batch.map(event).find((item) => item && item.id > cursor);
@@ -355,7 +402,7 @@ export function createApp(services: AppServices, options: ApiOptions): Hono<ApiE
               if (output.length > 60_000) break;
             }
             if (output) controller.enqueue(encoder.encode(output));
-          } catch { controller.enqueue(encoder.encode("event: error\ndata: {\"error\":{\"code\":\"stream_error\",\"message\":\"Log stream failed.\"}}\n\n")); return finish(); }
+          } catch { if (closed) return; controller.enqueue(encoder.encode("event: error\ndata: {\"error\":{\"code\":\"stream_error\",\"message\":\"Log stream failed.\"}}\n\n")); return finish(); }
           // Each poll reads every component source (docker logs, journalctl): keep it at seconds, not milliseconds.
           pollTimer = setTimeout(pump, LOG_POLL_MS);
         };
@@ -423,6 +470,8 @@ export function createApp(services: AppServices, options: ApiOptions): Hono<ApiE
     if (!exactKeys(body, ["imageId"]) || !boundedString(body.imageId, 512)) return fail("invalid_body", "Invalid scan request.", 400);
     return json(publicScan(await services.maintenance.scan(body.imageId as string)));
   });
+  app.get(`${PREFIX}/versions`, () => json(services.versions.latest() ?? null));
+  app.post(`${PREFIX}/versions/check`, async () => json(await services.versions.check()));
   app.get(`${PREFIX}/scans`, (c) => json(services.maintenance.listScans().map(publicScan)));
   app.get(`${PREFIX}/scans/:id`, (c) => id(c.req.param("id")) ? json(publicScan(services.maintenance.getScan(c.req.param("id")))) : fail("invalid_id", "Invalid scan ID.", 400));
   app.get(`${PREFIX}/remediation`, (c) => json(services.maintenance.listChanges().map(publicChange)));

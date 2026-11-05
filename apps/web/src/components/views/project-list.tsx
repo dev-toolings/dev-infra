@@ -1,74 +1,66 @@
-import { FolderGit2, Plus } from "lucide-react";
-import type { PublicProject } from "../../../../../src/contracts";
-import { cn } from "../../lib/utils";
-import { Button } from "../ui/button";
+import { t } from "../../lib/i18n";
+import type { ReactNode } from "react";
+import { FolderGit2 } from "lucide-react";
+import type { ProjectStatus, PublicProject } from "../../../../../src/contracts";
+import { plainClick, routePath } from "../../lib/router";
 import { EmptyState, ErrorState } from "../ui/state";
 import { ProjectListSkeleton } from "./skeletons";
-import { ViewHeading, formatDateTime } from "./shared";
+import { ProjectMark, StateBadge, formatDateTime, projectState, safeHttpUrl } from "./shared";
 
 export interface ProjectListProps {
   projects: PublicProject[];
-  selectedProjectId?: string;
+  /** One entry per project; a project whose status could not be read has none. */
+  statuses?: (ProjectStatus | undefined)[];
+  statusLoading?: boolean;
   loading?: boolean;
   error?: string;
-  /** Single column, for use in a narrow sidebar next to the project detail. */
-  compact?: boolean;
+  /** Shown in the empty state; the page header holds them otherwise. */
+  actions?: ReactNode;
   onSelect: (projectId: string) => void | Promise<void>;
-  onAddProject?: () => void | Promise<void>;
 }
 
-export function ProjectList({ projects, selectedProjectId, loading = false, error, compact = false, onSelect, onAddProject }: ProjectListProps) {
+export function ProjectList({ projects, statuses, statusLoading = false, loading = false, error, actions, onSelect }: ProjectListProps) {
   return (
-    <section className="space-y-4" aria-labelledby="projects-heading">
-      <ViewHeading
-        title="Projects"
-        titleId="projects-heading"
-        description="Choose a registered project to inspect its components and recent operations."
-        action={onAddProject && projects.length > 0 ? (
-          <Button type="button" onClick={onAddProject}>
-            <Plus aria-hidden="true" />
-            Add project
-          </Button>
-        ) : undefined}
-      />
+    <section aria-label={t("Projects")}>
       {error ? <ErrorState description={error} /> : loading ? <ProjectListSkeleton /> : null}
 
       {!error && !loading && projects.length === 0 ? (
         <EmptyState
-          title="No projects registered"
-          description="Add an existing project folder to see its components and status here."
+          title={t("No projects registered")}
+          description={t("Create a project, or add an existing folder, to see its components and status here.")}
           icon={<FolderGit2 aria-hidden="true" className="size-5" />}
-          action={onAddProject ? <Button type="button" onClick={onAddProject}><Plus aria-hidden="true" />Add project</Button> : undefined}
+          action={actions}
         />
       ) : null}
 
       {!error && !loading && projects.length > 0 ? (
-        <ul className={cn("grid min-w-0 grid-cols-1 gap-3", !compact && "xl:grid-cols-2")}>
+        <ul className="grid min-w-0 grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3 min-[110rem]:grid-cols-4">
           {projects.map((project) => {
-            const selected = project.id === selectedProjectId;
+            const address = project.components.map((component) => safeHttpUrl(component.url)).find(Boolean)?.replace(/^https?:\/\//, "").replace(/\/$/, "");
+            const status = statuses?.find((item) => item?.projectId === project.id);
             return (
               <li key={project.id} className="min-w-0">
-                <button
-                  type="button"
-                  aria-pressed={selected}
-                  onClick={() => onSelect(project.id)}
-                  className={cn(
-                    "flex min-h-28 w-full min-w-0 flex-col items-start gap-2 rounded-lg border bg-card p-4 text-left shadow-xs transition-colors hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
-                    selected ? "border-foreground/25 bg-muted" : "border-border",
-                  )}
+                <a
+                  href={routePath({ view: "projects", projectId: project.id })}
+                  onClick={(event) => plainClick(event, () => onSelect(project.id))}
+                  className="flex h-full min-w-0 flex-col gap-3 rounded-xl border bg-card p-4 shadow-xs outline-none transition-colors hover:bg-muted/60 focus-visible:ring-[3px] focus-visible:ring-ring/50"
                 >
-                  <span className="flex w-full min-w-0 items-start justify-between gap-3">
-                    <span className="flex min-w-0 items-center gap-2.5">
-                      <FolderGit2 aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
-                      <span className="truncate font-medium">{project.name}</span>
+                  <span className="flex min-w-0 items-center justify-between gap-3">
+                    <span className="flex min-w-0 items-center gap-3">
+                      <ProjectMark name={project.name} />
+                      <span className="min-w-0">
+                        <span className="block truncate font-medium">{project.name}</span>
+                        {address ? <span className="block truncate font-mono text-xs text-muted-foreground">{address}</span> : null}
+                      </span>
                     </span>
-                    <span className="shrink-0 text-xs text-muted-foreground">
-                      {project.components.length} {project.components.length === 1 ? "component" : "components"}
-                    </span>
+                    {project.components.length > 0 ? <StateBadge state={projectState(project, status)} loading={statusLoading} /> : null}
                   </span>
-                  <code className="block w-full break-all text-xs leading-5 text-muted-foreground">{project.root}</code>
-                  <span className="text-xs text-muted-foreground">Added {formatDateTime(project.createdAt)}</span>
-                </button>
+                  <code className="block w-full truncate text-xs leading-5 text-muted-foreground" title={project.root}>{project.root}</code>
+                  <span className="mt-auto flex flex-wrap items-center justify-between gap-x-3 text-xs text-muted-foreground">
+                    <span>{project.components.length === 1 ? t("1 component") : t("{count} components", { count: project.components.length })}</span>
+                    <span>{t("Added {date}", { date: formatDateTime(project.createdAt) })}</span>
+                  </span>
+                </a>
               </li>
             );
           })}

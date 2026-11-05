@@ -5,7 +5,7 @@ import { DevHubError } from "../contracts";
 
 /** Subset of `docker compose config --format json` used by the mount policy. */
 export type ComposeModel = {
-  services?: Record<string, { volumes?: Array<string | { type?: string; source?: string }>; env_file?: unknown } | undefined>;
+  services?: Record<string, { volumes?: Array<string | { type?: string; source?: string; read_only?: boolean }>; env_file?: unknown } | undefined>;
   volumes?: Record<string, { name?: string; external?: boolean; driver_opts?: Record<string, unknown> } | null>;
 };
 
@@ -24,7 +24,7 @@ function canonicalHostPath(path: string): string {
   }
 }
 export function sharedVolumeName(name: string): boolean {
-  return /^(?:dev-infra|devhub|devhub-infra)_/.test(name) || /^infra_[a-z0-9]+_data$/.test(name) || /_infra_[a-z0-9]+_data$/.test(name);
+  return /^(?:dev-infra|devhub|devhub-infra)_/.test(name) || /(?:^|_)infra_(?:postgres|mysql|mariadb|redis|meili|mailpit|rabbitmq)(?:_[a-z0-9_]+)?_data$/.test(name);
 }
 export function protectedHostPaths(stateDir: string): string[] {
   // Docker storage roots back every named volume, including the shared infra volumes, so they are protected as a whole.
@@ -37,7 +37,10 @@ export function protectedHostPaths(stateDir: string): string[] {
  * mounted into project containers, whether by bind mount, symlink alias, external volume or a
  * local-driver volume whose device points at a protected host path.
  */
-export function assertSharedDataUntouched(model: ComposeModel, services: string[], stateDir: string): void {
+/** The start script of a managed stack: the one DevHub file a container may see, and only read-only. */
+export const managedEntry = (stateDir: string, projectId: string) => join(stateDir, "imports", projectId, "build", "entry.sh");
+
+export function assertSharedDataUntouched(model: ComposeModel, services: string[], stateDir: string, entry?: string): void {
   const protectedPaths = protectedHostPaths(stateDir);
   const hostPathProtected = (path: string) => { const real = canonicalHostPath(path); return protectedPaths.some((p) => within(real, p) || within(p, real)); };
   for (const [key, volume] of Object.entries(model.volumes ?? {})) {
@@ -50,6 +53,7 @@ export function assertSharedDataUntouched(model: ComposeModel, services: string[
     const source = typeof mount === "string" ? mount.split(":")[0]! : typeof mount?.source === "string" ? mount.source : "";
     const type = typeof mount === "string" ? (source.startsWith("/") || source.startsWith(".") ? "bind" : "volume") : mount?.type;
     if (type === "volume" && source && sharedVolumeName(model.volumes?.[source]?.name ?? source)) throw refuse("Project Compose files cannot use shared DevHub volumes");
-    if (type === "bind" && isAbsolute(source) && hostPathProtected(source)) throw refuse("Project Compose files cannot mount the Docker socket or DevHub data");
+    const readOnly = typeof mount === "string" ? mount.endsWith(":ro") : mount?.read_only === true;
+    if (type === "bind" && isAbsolute(source) && !(source === entry && readOnly) && hostPathProtected(source)) throw refuse("Project Compose files cannot mount the Docker socket or DevHub data");
   }
 }

@@ -1,6 +1,8 @@
+import { t } from "./lib/i18n";
 import * as React from "react";
 import { errorMessage, getSession, isAbortError, isUnauthorized, logout, pair, setUnauthorizedListener } from "./lib/api";
 import { Button } from "./components/ui/button";
+import { ErrorToastProvider } from "./components/error-toast";
 import { ErrorState } from "./components/ui/state";
 import { PairingForm, ShellSkeleton } from "./components/views";
 import { Workspace } from "./workspace";
@@ -72,7 +74,7 @@ export function App() {
       setPhase("unauthenticated");
     } catch (error) {
       if (isUnauthorized(error)) return setPhase("unauthenticated");
-      setNotice(`Sign out could not be confirmed. ${errorMessage(error)}`);
+      setNotice(t("Sign out could not be confirmed. {detail}", { detail: errorMessage(error) }));
       setPhase("unavailable");
     }
   }
@@ -84,17 +86,17 @@ export function App() {
   }
 
   if (phase === "unauthenticated") return <PairingForm busy={pairing} error={pairError} onPair={handlePair} />;
-  if (phase === "ready") return <Workspace key={epoch} onLogout={handleLogout} />;
+  if (phase === "ready") return <ErrorToastProvider><Workspace key={epoch} onLogout={handleLogout} /></ErrorToastProvider>;
   if (phase === "unavailable") {
     return (
       <Centered>
         <ErrorState
-          title="DevHub is not available"
-          description={notice ?? "The local manager did not respond."}
-          action={<Button type="button" onClick={retry}>Try again</Button>}
+          title={t("DevHub is not available")}
+          description={notice ?? t("The local manager did not respond.")}
+          action={<Button type="button" onClick={retry}>{t("Try again")}</Button>}
         />
       </Centered>
     );
   }
-  return <ShellSkeleton label={phase === "signingOut" ? "Signing out" : "Connecting to DevHub"} />;
+  return <ShellSkeleton label={phase === "signingOut" ? t("Signing out") : t("Connecting to DevHub")} />;
 }

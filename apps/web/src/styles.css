@@ -46,3 +46,51 @@ body {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* Markdown preview: Tailwind's reset removes the spacing and list markers it needs. */
+.markdown-view > * + * { margin-top: 0.75rem; }
+.markdown-view > :is(h1, h2, h3) + * { margin-top: 0.5rem; }
+.markdown-view > :is(h2, h3) { margin-top: 1.5rem; }
+.markdown-view :is(h1, h2, h3) { font-weight: 600; }
+.markdown-view h1 { font-size: 1.25rem; }
+.markdown-view h2 { font-size: 1rem; }
+.markdown-view :is(ul, ol) { padding-left: 1.25rem; }
+.markdown-view ul { list-style: disc; }
+.markdown-view ol { list-style: decimal; }
+.markdown-view li + li { margin-top: 0.25rem; }
+.markdown-view a { text-decoration: underline; }
+.markdown-view blockquote { border-left: 2px solid var(--border); padding-left: 0.75rem; color: var(--muted-foreground); }
+.markdown-view :not(pre) > code { border-radius: 0.25rem; background: var(--muted); padding: 0.1rem 0.3rem; font-family: var(--font-mono); font-size: 0.85em; }
+
+/* Generated files: the one place where color reads as syntax, not state. It reuses the status palette. */
+.code-block,
+.code-block code { white-space: pre-wrap; overflow-wrap: anywhere; }
+.code-block .token.keyword,
+.code-block .token.function,
+.code-block .token.atrule,
+.code-block .token.key,
+.code-block .token.property,
+.code-block .token.table,
+.code-block .token.title,
+.code-block .token.delimiter { color: var(--status-info); }
+.code-block .token.string,
+.code-block .token.attr-value,
+.code-block .token.regex,
+.code-block .token.code-block { color: var(--status-up); }
+.code-block .token.number,
+.code-block .token.parameter,
+.code-block .token.argument-name,
+.code-block .token.boolean,
+.code-block .token.variable,
+.code-block .token.constant,
+.code-block .token.builtin,
+.code-block .token.class-name,
+.code-block .token.package { color: var(--status-degraded); }
+.code-block .token.comment,
+.code-block .token.punctuation,
+.code-block .token.code-language { color: var(--muted-foreground); }
+.code-block .token.decorator,
+.code-block .token.attribute { color: var(--status-down); }
+.code-block .token.title,
+.code-block .token.bold { font-weight: 600; }
+.code-block .token.italic { font-style: italic; }

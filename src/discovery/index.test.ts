@@ -11,6 +11,7 @@ afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: tru
 
 class MemoryCatalog implements CatalogPort {
   roots: Root[] = [];
+  listDirectories(): never { throw new Error("not used"); }
   projects = new Map<string, Project>();
   records = new Map<string, unknown>();
   failCreate = false;

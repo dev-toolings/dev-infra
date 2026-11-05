@@ -1,3 +1,4 @@
+import { t } from "../../lib/i18n";
 import * as React from "react";
 import { KeyRound, LoaderCircle } from "lucide-react";
 import { LogoMark } from "../brand/logo";
@@ -30,14 +31,14 @@ export function PairingForm({ busy, error, onPair }: PairingFormProps) {
         <CardHeader className="gap-4">
           <LogoMark className="size-10 [&_svg]:size-6" />
           <div className="space-y-1.5">
-            <CardTitle className="text-base">Connect to DevHub</CardTitle>
-            <CardDescription>Enter the one-time pairing code shown by the local DevHub command.</CardDescription>
+            <CardTitle className="text-base">{t("Connect to DevHub")}</CardTitle>
+            <CardDescription>{t("Enter the one-time pairing code shown by the local DevHub command.")}</CardDescription>
           </div>
         </CardHeader>
         <CardContent>
           <form className="space-y-4" onSubmit={handleSubmit}>
             <div className="space-y-2">
-              <Label htmlFor="pairing-code">Pairing code</Label>
+              <Label htmlFor="pairing-code">{t("Pairing code")}</Label>
               <Input
                 id="pairing-code"
                 type="password"
@@ -54,7 +55,7 @@ export function PairingForm({ busy, error, onPair }: PairingFormProps) {
             </div>
             <Button type="submit" className="w-full" disabled={!canSubmit}>
               {busy ? <LoaderCircle aria-hidden="true" className="animate-spin" /> : <KeyRound aria-hidden="true" />}
-              {busy ? "Connecting" : "Pair this browser"}
+              {busy ? t("Connecting") : t("Pair this browser")}
             </Button>
           </form>
         </CardContent>

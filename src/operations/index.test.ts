@@ -13,6 +13,7 @@ const project: Project = {
 
 class MemoryCatalog implements CatalogPort {
   projects = [structuredClone(project)];
+  listDirectories(): never { throw new Error("not used"); }
   operations = new Map<string, Operation>();
   keys = new Map<string, string>();
   records = new Map<string, unknown>();
@@ -156,4 +157,13 @@ test("snapshot mismatch rejects and exposes only the fixed diagnostic", async ()
   expect(JSON.stringify(catalog.patches)).not.toContain(token);
   expect(JSON.stringify(messages)).not.toContain(token);
   expect(JSON.stringify(caught)).not.toContain(token);
+});
+
+test("listing operations first recovers those a dead process left running", () => {
+  const catalog = new MemoryCatalog();
+  const operations = new Operations({ catalog, runtime: runtime([]) });
+  let recovered = 0;
+  catalog.recoverOperations = () => { recovered += 1; };
+  operations.listOperations("sample");
+  expect(recovered).toBe(1);
 });

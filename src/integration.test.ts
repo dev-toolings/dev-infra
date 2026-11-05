@@ -11,6 +11,9 @@ import { Runtime } from "./runtime/index";
 import { Operations } from "./operations/index";
 import { createApp } from "./api/index";
 import { Maintenance } from "./security/index";
+import { Imports } from "./imports/index";
+import { Creator } from "./create/index";
+import { Versions } from "./versions";
 import type { AppServices, ExecResult } from "./contracts";
 
 const base = mkdtempSync(join(tmpdir(), "devhub-integration-"));
@@ -48,7 +51,7 @@ async function fakeExecutor(argv: string[]): Promise<ExecResult> {
     return argv.some((arg) => arg.includes("ActiveState")) ? ok("ActiveState=active\nSubState=running\n") : ok(started ? `LoadState=loaded\nFragmentPath=${unitPath}\nDropInPaths=\n` : "LoadState=not-found\nFragmentPath=\nDropInPaths=\n");
   }
   if (argv[0] === "systemctl") return ok();
-  if (argv[0] === "journalctl") return ok(`${JSON.stringify({ __CURSOR: "s=1", __REALTIME_TIMESTAMP: "1793300000000000", MESSAGE: "vite ready" })}\n`);
+  if (argv[0] === "journalctl") return ok(`${JSON.stringify({ __CURSOR: "s=1", __REALTIME_TIMESTAMP: "1793300000000000", MESSAGE: "vite ready" })}\n${JSON.stringify({ __CURSOR: "s=2", __REALTIME_TIMESTAMP: "1793300000000001", SYSLOG_IDENTIFIER: "systemd", MESSAGE: "Unknown key in section" })}\n`);
   return { code: 127, stdout: "", stderr: `unexpected ${argv[0]}` };
 }
 
@@ -60,7 +63,7 @@ beforeAll(() => {
   writeFileSync(join(backend, "compose.yml"), "services:\n  php:\n    image: php:8.3-fpm\n");
   writeFileSync(join(backend, ".env"), "APP_SECRET=do-not-leak\nCOMPOSE_PROJECT_NAME=shop\n");
   writeFileSync(join(frontend, "package.json"), JSON.stringify({ scripts: { dev: "vite" }, devDependencies: { vite: "^7.0.0" } }));
-  const modules = { Catalog, Discovery, Runtime, Operations, Maintenance } as unknown as ManagerModules;
+  const modules = { Catalog, Discovery, Runtime, Operations, Maintenance, Imports, Creator, Versions } as unknown as ManagerModules;
   services = composeServices(modules, fakeExecutor, state, resolve(import.meta.dir, ".."));
   services.catalog.addRoot(root, "Projects");
 });
@@ -97,6 +100,7 @@ test("registers an existing Symfony backend and Vite frontend in place, then run
 
   const logs = await services.operations.logs(project.id);
   expect(logs.map((entry) => entry.message).join("\n")).toContain("vite ready");
+  expect(logs.map((entry) => entry.message).join("\n")).not.toContain("Unknown key");
   expect(logs.map((entry) => entry.message).join("\n")).not.toContain("hunter2secret");
 
   const inventory = await services.operations.inventory();

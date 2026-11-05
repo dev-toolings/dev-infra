@@ -21,6 +21,14 @@ status and merged logs, an authenticated loopback API and a React control panel,
 plus image scanning and verified image-reference remediation. See
 [docs/devhub.md](docs/devhub.md) for the full workflow.
 
+`devhub new node shop --root ~/code --apply`, or the panel page `/projects/new`, creates
+a project in Docker or native mode and starts it. See
+[docs/devhub.md](docs/devhub.md#create-a-project).
+
+`devhub import PATH --apply` runs a Hono project with no Compose file in an isolated
+dev container, with its own database, network and port. See
+[docs/devhub.md](docs/devhub.md#import-a-hono-project).
+
 The project manager keeps existing repositories where they are. You approve
 workspace folders, register a project and describe its components. A project can
 combine a Docker backend with a native frontend, or use an existing Compose
@@ -82,12 +90,17 @@ duplication.
 |---|---|---|---|---|
 | PostgreSQL 16 | `infra-postgres` | `5432` | - | core |
 | MySQL 8 | `infra-mysql` | `3306` | - | core |
+| MariaDB 12 | `infra-mariadb` | `3307` | - | core |
 | Redis 7 | `infra-redis` | `6379` | - | core |
 | Meilisearch | `infra-meilisearch` | `7700` | [localhost:7700](http://localhost:7700) | core |
 | Mailpit | `infra-mailpit` | `1025` / `8025` | [localhost:8025](http://localhost:8025) | core |
 | Adminer | `infra-adminer` | `9080` | [localhost:9080](http://localhost:9080) | core |
 | Dozzle | `infra-dozzle` | `8888` | [localhost:8888](http://localhost:8888) | core |
 | RabbitMQ 4 | `infra-rabbitmq` | `5672` / `15672` | [localhost:15672](http://localhost:15672) | async |
+
+A project can ask for another version of a service. It gets its own instance, created on
+demand and shared by the projects on that version: `infra-postgres-17`, with its own volume
+and a free loopback port. `devhub up`, `down` and `ps` include these instances.
 
 ## Profiles
 
@@ -178,6 +191,8 @@ devhub db create myapp  # create a PostgreSQL database + role
 | `devhub doctor` | Diagnostics: health, network, ports |
 | `devhub help` | Show help |
 | `devhub root add\|list\|remove` | Approve workspace folders for the project manager |
+| `devhub new <stack> <name> --root <path>` | Create a project and start it |
+| `devhub import <path> [--apply]` | Run a Hono project in an isolated dev container |
 | `devhub project discover\|add\|list\|show\|remove` | Detect and register projects in place |
 | `devhub project start\|stop\|restart\|check\|status\|logs <id>` | Project lifecycle, status and merged logs |
 | `devhub maintenance inventory\|scan\|scans\|changes\|preview\|apply\|validate\|activate` | Docker inventory, image scans and remediation |
@@ -208,6 +223,7 @@ Default connection strings:
 ```text
 PostgreSQL  postgres://test:test@localhost:5432/devhub
 MySQL       mysql://test:test@localhost:3306/trading
+MariaDB     mysql://root:root@localhost:3307
 Redis       redis://localhost:6379
 Meilisearch http://localhost:7700
 Mailpit     smtp://localhost:1025
@@ -246,6 +262,8 @@ Ports and service credentials are configurable; `MEILI_IMAGE` overrides the sear
 POSTGRES_PORT=5432
 MYSQL_PORT=3306
 MYSQL_ROOT_PASSWORD=root
+MARIADB_PORT=3307
+MARIADB_ROOT_PASSWORD=root
 REDIS_PORT=6379
 MEILI_PORT=7700
 MAILPIT_UI_PORT=8025
@@ -273,7 +291,7 @@ RabbitMQ uses hostname `infra-rabbitmq`, node `rabbit@infra-rabbitmq` and the
 existing `/var/lib/rabbitmq` volume. Keep that identity when recreating a container;
 changing it can select an empty node directory. No temporary override is needed.
 
-All eight services use `json-file` logs with at most three files of 10 MiB each.
+All nine services use `json-file` logs with at most three files of 10 MiB each.
 Mailpit, Adminer and Dozzle are pinned to the versions and image digests observed
 on this host, without an upgrade. These settings apply on a later container
 recreation, not to containers already running.

@@ -50,6 +50,9 @@ export function classifyManifests(packageJson?: unknown, composerJson?: unknown)
     labels.push("laravel");
   }
   if (packageManifest) labels.push("node");
+  if (packageManifest && hasAnyDependency(packageManifest, ["dependencies", "devDependencies"], "hono")) {
+    labels.push("hono");
+  }
   if (packageManifest && hasAnyDependency(packageManifest, ["dependencies", "devDependencies"], "react")) {
     labels.push("react");
   }

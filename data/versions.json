@@ -1,0 +1,64 @@
+{
+  "npm": {
+    "hono": "4.13.16",
+    "zod": "4.6.7",
+    "@hono/zod-validator": "0.9.1",
+    "pino": "10.4.0",
+    "pino-pretty": "13.2.0",
+    "@hono/node-server": "2.1.6",
+    "typescript": "7.0.2",
+    "@biomejs/biome": "2.6.4",
+    "@types/bun": "1.4.4",
+    "@types/node": "26.6.6",
+    "postgres": "3.4.9",
+    "drizzle-orm": "0.45.4",
+    "drizzle-kit": "0.31.11",
+    "ioredis": "5.11.1",
+    "nodemailer": "10.3.1",
+    "@types/nodemailer": "8.0.2"
+  },
+  "PyPI": {
+    "fastapi": "0.162.0",
+    "uvicorn": "0.54.0",
+    "psycopg": "3.3.8",
+    "redis": "8.1.0",
+    "pytest": "9.2.0",
+    "httpx": "0.28.1",
+    "ruff": "0.17.3"
+  },
+  "Packagist": {
+    "laravel/framework": "13.40.0",
+    "predis/predis": "3.7.1"
+  },
+  "images": {
+    "bun": "oven/bun:1.4.4-slim",
+    "composer": "composer:2.9.5",
+    "phpExtensions": "mlocati/php-extension-installer:2"
+  },
+  "lines": {
+    "node": {
+      "24": "node:24-bookworm-slim",
+      "26": "node:26-bookworm-slim"
+    },
+    "python": {
+      "3.14": "ghcr.io/astral-sh/uv:python3.14-bookworm-slim",
+      "3.13": "ghcr.io/astral-sh/uv:python3.13-bookworm-slim"
+    },
+    "php": {
+      "8.5": "php:8.5-cli-bookworm",
+      "8.4": "php:8.4-cli-bookworm"
+    },
+    "symfony": {
+      "7.4": {
+        "symfony/framework-bundle": "7.4.23",
+        "symfony/runtime": "7.4.23",
+        "symfony/string": "7.4.22"
+      },
+      "8.1": {
+        "symfony/framework-bundle": "8.1.11",
+        "symfony/runtime": "8.1.11",
+        "symfony/string": "8.1.10"
+      }
+    }
+  }
+}
