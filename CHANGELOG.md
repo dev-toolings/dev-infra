@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The `AGENTS.md` of a new project now carries the rules of its framework, runtime, ORM, mode
   and services: the exact command for the `app` container, what the minimal Symfony and Laravel
   skeletons lack, and how to share Redis, Meilisearch and RabbitMQ.
+- New projects include an `add-feature` skill with the steps of their stack and code structure.
 - `bun run check:scaffolds` generates each code option of the catalog, bare and with
   services, and runs the checks of each new project, and the `update-scaffolds` skill keeps the templates current.
 - Folder picker in the panel: `GET /api/v1/directories` lists the subfolders of the

@@ -24,6 +24,8 @@ version and still teach an outdated pattern.
 
 Options and their defaults live in `src/create/catalog.ts`, agent instructions in
 `src/create/agents.ts`, checks and install commands in `recipe()` of `src/create/index.ts`.
+`check:scaffolds` does not run the steps of `AGENT_FEATURE`: after a major version, run them
+on a generated project.
 
 ## Steps
 

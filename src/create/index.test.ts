@@ -237,7 +237,7 @@ test("AGENTS.md carries the rules of the framework, the runtime, the mode and th
   const docker = await agents({ stack: "node", name: "bunapp", mode: "docker", options: { runtime: "bun", orm: "drizzle" }, services: ["postgres", "redis"] });
   expect(docker).toContain("docker compose -p devhub-bunapp exec app <command>");
   expect(docker).toContain("`bun run db:generate`, then `bun run db:migrate`: never `drizzle-kit push`");
-  expect(docker).toContain("start every key with `REDIS_PREFIX`");
+  expect(docker).toContain("keep every key under `REDIS_PREFIX`");
   expect(docker).not.toContain("erasable TypeScript");
   const native = await agents({ stack: "node", name: "npmapp", mode: "native", options: { runtime: "node" } });
   expect(native).toContain("erasable TypeScript");
@@ -246,6 +246,18 @@ test("AGENTS.md carries the rules of the framework, the runtime, the mode and th
   expect(await agents({ stack: "python", name: "api" })).toContain("`uv add`");
   expect(await agents({ stack: "php", name: "sf", options: { framework: "symfony" } })).toContain("no `bin/console`");
   expect(await agents({ stack: "php", name: "lv", options: { framework: "laravel" } })).toContain("no `/api` prefix");
+});
+
+test("the add-feature skill follows the stack, the code structure and the mode", async () => {
+  const { creator } = fixture();
+  const skill = async (values: Partial<CreateInput>) => (await creator.plan(input(values))).contents[".claude/skills/add-feature/SKILL.md"]!;
+  expect(await skill({ options: { pattern: "modules" } })).toContain("`src/modules/notes`");
+  expect(await skill({ options: { pattern: "standard", runtime: "node", orm: "drizzle" }, services: ["postgres"] })).toContain("`npm run db:generate`");
+  expect(await skill({ stack: "python", name: "api", options: { pattern: "standard" } })).toContain("`app/routes/<name>.py`");
+  expect(await skill({ stack: "php", name: "sf", options: { framework: "symfony" } })).toContain("load('App\\\\', __DIR__.'/')");
+  expect(await skill({ stack: "php", name: "lv", options: { framework: "laravel" } })).toContain("php artisan make:controller");
+  expect(await skill({ mode: "docker" })).toContain("in the `app` container");
+  expect(await skill({ mode: "native" })).not.toContain("in the `app` container");
 });
 
 test("the preview hides generated secrets", async () => {
@@ -262,10 +274,13 @@ test("every stack ships agent instructions, and the plan shows what will be writ
     expect(plan.contents["CLAUDE.md"]).toBeUndefined();
     expect(plan.contents["AGENTS.md"]).toContain(`devhub project start ${stack}`);
     expect(plan.contents[".agents/skills/project-checks/SKILL.md"]).toBe(plan.contents[".claude/skills/project-checks/SKILL.md"]!);
+    expect(plan.contents[".agents/skills/add-feature/SKILL.md"]).toBe(plan.contents[".claude/skills/add-feature/SKILL.md"]!);
+    expect(plan.contents[".claude/skills/add-feature/SKILL.md"]).toContain("name: add-feature");
+    expect(plan.contents["AGENTS.md"]).toContain("use the `add-feature` skill");
     expect(Object.keys(plan.contents).sort()).toEqual(plan.files);
     expect(plan.contents[".gitignore"]).toContain(".claude/settings.local.json");
     expect(plan.contents).not.toHaveProperty([".env"]);
   }
   await creator.apply(await creator.plan(input({ stack: "python" })), false);
-  expect(readFileSync(join(root, "shop/.claude/settings.json"), "utf8")).toContain("Bash(uv run pytest:*)");
+  expect(readFileSync(join(root, "shop/.claude/settings.json"), "utf8")).toContain("Bash(docker compose -p devhub-shop exec app uv run pytest:*)");
 });

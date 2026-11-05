@@ -8,7 +8,7 @@ import { redactText } from "../operations/logger";
 import versions from "../../data/versions.json";
 import { assertProjectAvailable, databaseName, DEFAULT_CONTAINER_PORT, FIRST_PORT, renderDockerfile } from "../imports";
 import { STACKS } from "./catalog";
-import { AGENT_RULES, agentFiles } from "./agents";
+import { AGENT_FEATURE, AGENT_RULES, agentFiles } from "./agents";
 import { nodeFiles } from "./node";
 import { phpFiles } from "./php";
 import { pythonFiles } from "./python";
@@ -31,13 +31,13 @@ const IMAGE = /^[a-z0-9][a-z0-9._/:@-]{0,200}$/, PACKAGE = /^[a-z0-9][a-z0-9+.-]
 /** What each stack generates and runs. */
 export function recipe(stack: string, id: string, mode: CreateMode, port: number, options: Record<string, string>, services: string[]): Recipe {
   const docker = mode === "docker";
-  const agents = (label: string, checks: string[], layout: string[], rules: string[]) => agentFiles({ name: id, stack: label, checks, layout, rules, services, docker });
+  const agents = (label: string, checks: string[], layout: string[], rules: string[], feature: string[]) => agentFiles({ name: id, stack: label, checks, layout, rules, feature, services, docker });
   const host = docker ? "0.0.0.0" : "127.0.0.1", listen = docker ? DEFAULT_CONTAINER_PORT : port;
   if (stack === "python") {
     const checks = ["uv run ruff check .", "uv run pytest"];
     return { toolchain: "uv", checks, image: lineImage(versions.lines.python, options.pythonVersion), tools: ["uv"], files: {
       ...pythonFiles({ name: id, pattern: options.pattern!, services }),
-      ...agents("FastAPI", checks, [options.pattern === "modules" ? "`app/modules/<name>`: one folder per feature." : "`app/routes`: the routes.", "`app/main.py`: wires them together."], AGENT_RULES.fastapi),
+      ...agents("FastAPI", checks, [options.pattern === "modules" ? "`app/modules/<name>`: one folder per feature." : "`app/routes`: the routes.", "`app/main.py`: wires them together."], AGENT_RULES.fastapi, AGENT_FEATURE.fastapi(options.pattern!)),
     }, install: "uv sync", dev: `uv run uvicorn app.main:app --host ${host} --port ${listen} --reload`, env: {} };
   }
   if (stack === "php") {
@@ -45,7 +45,7 @@ export function recipe(stack: string, id: string, mode: CreateMode, port: number
     return {
       toolchain: "composer", checks, image: lineImage(versions.lines.php, options.phpVersion), tools: ["php", "composer"], files: {
         ...phpFiles({ name: id, framework: options.framework!, symfonyVersion: options.symfonyVersion, services }),
-        ...agents(laravel ? "Laravel" : "Symfony", checks, laravel ? ["`routes/api.php`: the routes.", "`bootstrap/app.php`: configures the app."] : ["`src/Controller`: the controllers.", "`src/Kernel.php`: configures the app."], laravel ? AGENT_RULES.laravel : AGENT_RULES.symfony),
+        ...agents(laravel ? "Laravel" : "Symfony", checks, laravel ? ["`routes/api.php`: the routes.", "`bootstrap/app.php`: configures the app."] : ["`src/Controller`: the controllers.", "`src/Kernel.php`: configures the app."], laravel ? AGENT_RULES.laravel : AGENT_RULES.symfony, laravel ? AGENT_FEATURE.laravel : AGENT_FEATURE.symfony),
       }, install: "composer install", dev: `php -S ${host}:${listen} -t public public/index.php`,
       env: laravel ? { APP_ENV: "local", APP_DEBUG: "true", ...(services.includes("redis") ? { REDIS_CLIENT: "predis" } : {}) } : { APP_ENV: "dev", APP_DEBUG: "1", APP_SECRET: randomBytes(16).toString("hex") },
     };
@@ -73,7 +73,7 @@ export function recipe(stack: string, id: string, mode: CreateMode, port: number
           "To add a resource: copy `notes`, mount its routes in `src/app.ts`, add its store to `AppDeps`, and pass it in `src/index.ts` and the tests.",
         ]),
         ...(options.orm === "drizzle" ? [`The table of \`notes\` needs \`${tool} run db:generate\`, then \`${tool} run db:migrate\`.`] : []),
-      ], [...AGENT_RULES.hono, ...(bun ? AGENT_RULES.bun : AGENT_RULES.node), ...(options.orm === "drizzle" ? AGENT_RULES.drizzle(tool) : [])]),
+      ], [...AGENT_RULES.hono, ...(bun ? AGENT_RULES.bun : AGENT_RULES.node), ...(options.orm === "drizzle" ? AGENT_RULES.drizzle(tool) : [])], AGENT_FEATURE.hono(options.pattern!, tool, options.orm === "drizzle")),
     },
     install: bun ? "bun install" : "npm install",
     dev: docker ? `${bun ? "bun" : "npm"} run dev` : bun ? "bun run --hot src/index.ts" : "node --watch src/index.ts",

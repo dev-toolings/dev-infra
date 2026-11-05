@@ -74,7 +74,8 @@ page). The project is created in a new folder named after it.
 
 Every project includes `AGENTS.md`, read by Codex, Grok and Claude Code, with the rules of
 its framework, runtime, mode and services,
-`.claude/settings.json` and a `project-checks` skill in `.claude/skills` and `.agents/skills`.
+`.claude/settings.json`, and the `project-checks` and `add-feature` skills in `.claude/skills`
+and `.agents/skills`.
 
 The page shows every file before creation: click one in the tree to read it. It also
 customizes the Docker image: base image, system packages, PHP extensions, or
