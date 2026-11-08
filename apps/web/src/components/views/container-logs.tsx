@@ -59,17 +59,20 @@ function JsonTokens({ text }: { text: string }) {
 }
 
 // Memoized so a new batch renders only its own rows, not the 1,000 already on screen.
-export const LogRow = React.memo(function LogRow({ entry, source }: { entry: Pick<ContainerLogEntry, "time" | "stream" | "message">; source?: string }) {
+export const LogRow = React.memo(function LogRow({ entry, source, showStderr = false }: { entry: Pick<ContainerLogEntry, "time" | "stream" | "message">; source?: string; showStderr?: boolean }) {
   const [expanded, setExpanded] = React.useState(false);
   const json = React.useMemo(() => parseJson(entry.message), [entry.message]);
   const level = json && field(json, ["level_name", "level", "severity"]);
   const summary = json && field(json, ["message", "msg"]);
+  // On a phone, the extra columns would leave the message a third of the row: it takes its own line.
+  const message = source || showStderr ? "max-sm:basis-full" : "";
   return (
-    <li title={entry.stream} className="flex min-w-0 gap-2 px-3 py-px font-mono text-xs leading-5 hover:bg-log-foreground/5">
+    <li title={entry.stream} className="flex min-w-0 flex-wrap gap-x-2 px-3 py-px font-mono text-xs leading-5 hover:bg-log-foreground/5">
       <time dateTime={entry.time} className="tabular shrink-0 text-log-muted">{clock(entry.time)}</time>
-      {source ? <span className="w-16 shrink-0 truncate text-log-muted">{source}</span> : null}
+      {source ? <span title={source} className="w-16 shrink-0 truncate text-log-muted sm:w-28">{source}</span> : null}
+      {showStderr ? <span className="w-12 shrink-0 text-red-400">{entry.stream === "stderr" ? entry.stream : null}</span> : null}
       {json ? (
-        <div className="min-w-0 flex-1">
+        <div className={`min-w-0 flex-1 ${message}`}>
           <button
             type="button"
             aria-expanded={expanded}
@@ -83,7 +86,7 @@ export const LogRow = React.memo(function LogRow({ entry, source }: { entry: Pic
           {expanded ? <pre className="m-0 mt-1 mb-2 min-w-0 whitespace-pre-wrap break-words pl-5 text-log-foreground"><JsonTokens text={pretty(json, entry.message)} /></pre> : null}
         </div>
       ) : (
-        <span className="min-w-0 flex-1 whitespace-pre-wrap break-words pl-5 text-log-foreground">
+        <span className={`min-w-0 flex-1 whitespace-pre-wrap break-words pl-5 text-log-foreground ${message}`}>
           {parseAnsi(entry.message).map((segment, index) => <span key={index} style={segment.style}>{segment.text}</span>)}
         </span>
       )}

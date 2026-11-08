@@ -17,7 +17,10 @@ export function useStickToBottom(hasContent: boolean) {
     if (scroller.current) scroller.current.style.overflowAnchor = next ? "none" : "auto";
   }, []);
   const toBottom = () => {
-    if (scroller.current) scroller.current.scrollTop = scroller.current.scrollHeight;
+    if (scroller.current) {
+      scroller.current.scrollTop = scroller.current.scrollHeight;
+      scroller.current.focus({ preventScroll: true }); // The button that called this disappears with `stuck`.
+    }
     follow(true);
   };
   const onScroll = (event: React.UIEvent<HTMLDivElement>) => {
@@ -30,12 +33,12 @@ export function useStickToBottom(hasContent: boolean) {
   React.useEffect(() => {
     const box = scroller.current;
     if (!box || !list.current) return;
-    box.style.overflowAnchor = following.current ? "none" : "auto";
+    follow(true); // A list that just appeared has no reader yet, even if the previous one had.
     const observer = new ResizeObserver(() => { if (following.current) box.scrollTop = box.scrollHeight; });
     observer.observe(list.current);
     observer.observe(box);
     return () => observer.disconnect();
-  }, [hasContent]);
+  }, [hasContent, follow]);
 
   return { scroller, list, stuck, onScroll, toBottom };
 }

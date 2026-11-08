@@ -1,13 +1,14 @@
-import { locale, t } from "../../lib/i18n";
-import { Pause, Play, Trash2 } from "lucide-react";
-import type { ComponentKind, LogEntry, PublicComponent } from "../../../../../src/contracts";
+import { t } from "../../lib/i18n";
+import { ArrowDown, Pause, Play, Trash2 } from "lucide-react";
+import type { LogEntry, PublicComponent } from "../../../../../src/contracts";
+import { MAX_LOG_ENTRIES } from "../../lib/use-log-stream";
+import { useStickToBottom } from "../../lib/use-stick-to-bottom";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { EmptyState, ErrorState } from "../ui/state";
+import { LogRow } from "./container-logs";
 import { LogsSkeleton } from "./skeletons";
-import { Label } from "../ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
-import { ViewHeading } from "./shared";
 
 type LogComponent = Pick<PublicComponent, "id" | "name" | "kind">;
 
@@ -21,18 +22,6 @@ export interface LogsViewProps {
   onComponentFilterChange: (componentId: string | undefined) => void | Promise<void>;
   onPausedChange: (paused: boolean) => void | Promise<void>;
   onClear: () => void | Promise<void>;
-}
-
-function formatLogTime(value: string): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat(locale, { hour: "2-digit", minute: "2-digit", second: "2-digit" }).format(date);
-}
-
-function sourceLabel(kind?: ComponentKind): string {
-  if (kind === "native") return t("Native");
-  if (kind === "compose") return t("Docker / Compose");
-  return t("Source unknown");
 }
 
 export function LogsView({
@@ -50,38 +39,22 @@ export function LogsView({
   const options = components.length > 0
     ? components
     : Array.from(seenIds, (id) => ({ id, name: id, kind: undefined }));
-  const componentById = new Map(options.map((component) => [component.id, component]));
-  const filteredEntries = componentFilter ? entries.filter((entry) => entry.componentId === componentFilter) : entries;
-  const newestEntries = filteredEntries.slice(-1000);
+  const names = new Map(options.map((component) => [component.id, component.name]));
+  const visibleEntries = componentFilter ? entries.filter((entry) => entry.componentId === componentFilter) : entries;
   const selectValue = componentFilter ? `component:${componentFilter}` : "all";
+  const several = options.length > 1;
+  const showEntries = !error && !loading && visibleEntries.length > 0;
+  const { scroller, list, stuck, onScroll, toBottom } = useStickToBottom(showEntries);
 
   return (
-    <section className="min-w-0 space-y-4" aria-labelledby="logs-heading">
-      <ViewHeading
-        title={t("Project logs")}
-        titleId="logs-heading"
-        description={t("Merged native and Docker output for the selected project. This view keeps at most the newest 1,000 entries.")}
-        action={(
-          <>
-            <Button type="button" variant="outline" aria-pressed={paused} onClick={() => onPausedChange(!paused)}>
-              {paused ? <Play aria-hidden="true" /> : <Pause aria-hidden="true" />}
-              {paused ? t("Resume updates") : t("Pause updates")}
-            </Button>
-            <Button type="button" variant="outline" disabled={entries.length === 0} onClick={onClear}>
-              <Trash2 aria-hidden="true" />
-              {t("Clear view")}
-            </Button>
-          </>
-        )}
-      />
-      <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-        <div className="w-full max-w-sm space-y-2">
-          <Label htmlFor="log-component-filter">{t("Component")}</Label>
+    <section className="flex min-w-0 flex-1 flex-col gap-3" aria-label={t("Project logs")}>
+      <div className="flex min-w-0 flex-wrap items-center gap-2">
+        {several || componentFilter ? (
           <Select
             value={selectValue}
             onValueChange={(value) => onComponentFilterChange(value === "all" ? undefined : value.slice("component:".length))}
           >
-            <SelectTrigger id="log-component-filter" aria-label={t("Filter logs by component")}>
+            <SelectTrigger className="sm:w-56" aria-label={t("Filter logs by component")}>
               <SelectValue placeholder={t("All components")} />
             </SelectTrigger>
             <SelectContent>
@@ -91,43 +64,60 @@ export function LogsView({
               ))}
             </SelectContent>
           </Select>
-        </div>
-        <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-          <Badge variant={paused ? "secondary" : "outline"}>{paused ? t("Paused") : t("Following")}</Badge>
-          <span>{newestEntries.length === 1 ? t("1 entry") : t("{count} entries", { count: newestEntries.length })}</span>
-          {filteredEntries.length > newestEntries.length ? <span>{t("Showing newest 1,000 of {count}", { count: filteredEntries.length })}</span> : null}
+        ) : null}
+        {error || loading ? null : (
+          <>
+            <Badge variant={paused ? "degraded" : "outline"}>{paused ? t("Paused") : t("Following")}</Badge>
+            <span className="tabular text-xs text-muted-foreground">
+              {visibleEntries.length === 1 ? t("1 entry") : t("{count} entries", { count: visibleEntries.length })}
+            </span>
+          </>
+        )}
+        {entries.length >= MAX_LOG_ENTRIES ? <span className="text-xs text-muted-foreground">{t("Older entries are dropped past 1,000")}</span> : null}
+        <div className="ml-auto flex shrink-0 items-center gap-2">
+          <Button type="button" variant="outline" aria-pressed={paused} onClick={() => onPausedChange(!paused)}>
+            {paused ? <Play aria-hidden="true" /> : <Pause aria-hidden="true" />}
+            {paused ? t("Resume updates") : t("Pause updates")}
+          </Button>
+          <Button type="button" variant="outline" disabled={entries.length === 0} onClick={onClear}>
+            <Trash2 aria-hidden="true" />
+            {t("Clear view")}
+          </Button>
         </div>
       </div>
 
-      {error ? <ErrorState description={error} /> : loading ? <LogsSkeleton /> : null}
-      {!error && !loading && newestEntries.length === 0 ? (
-        <EmptyState title={t("No log entries")} description={t("No entries are available for the current project and component filter.")} />
+      {error ? <ErrorState description={error} className="min-h-96 flex-1" /> : loading ? <LogsSkeleton /> : null}
+      {!error && !loading && visibleEntries.length === 0 ? (
+        paused && entries.length === 0
+          ? <EmptyState title={t("Updates are paused")} description={t("Resume updates to load the logs of this project.")} className="min-h-96 flex-1" />
+          : <EmptyState title={t("No log entries")} description={t("No entries are available for the current project and component filter.")} className="min-h-96 flex-1" />
       ) : null}
 
-      {!error && !loading && newestEntries.length > 0 ? (
-        <ol
-          role="log"
-          aria-label={t("Recent project log entries")}
-          aria-live="off"
-          className="max-h-[min(68dvh,48rem)] min-w-0 overflow-y-auto overflow-x-hidden rounded-lg border border-log-panel bg-log-panel px-3 text-log-foreground sm:px-4"
-        >
-          {newestEntries.map((entry, index) => {
-            const component = componentById.get(entry.componentId);
-            return (
-              <li key={`${entry.seq}:${entry.sourceId ?? "source"}:${index}`} className="min-w-0 border-b border-log-foreground/10 py-2.5 last:border-b-0">
-                <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-log-muted">
-                  <time dateTime={entry.time}>{formatLogTime(entry.time)}</time>
-                  <Badge variant={entry.stream === "stderr" ? "destructive" : "muted"} className="px-2 py-0.5 text-[11px]">
-                    {entry.stream}
-                  </Badge>
-                  <span className="break-all text-log-foreground">{component?.name ?? entry.componentId}</span>
-                  <span>{sourceLabel(component?.kind)}</span>
-                </div>
-                <pre className="m-0 mt-1 min-w-0 whitespace-pre-wrap break-words font-mono text-xs leading-5 text-log-foreground">{entry.message}</pre>
-              </li>
-            );
-          })}
-        </ol>
+      {showEntries ? (
+        <div className="relative flex min-h-96 min-w-0 flex-1 flex-col">
+          <div
+            ref={scroller}
+            tabIndex={0}
+            onScroll={onScroll}
+            className="min-h-0 min-w-0 flex-1 basis-0 overflow-y-auto overflow-x-hidden rounded-xl border bg-log-panel py-2 outline-none [scrollbar-color:var(--log-muted)_transparent] [scrollbar-width:thin] focus-visible:ring-[3px] focus-visible:ring-ring/50"
+          >
+            <ol ref={list} role="log" aria-label={t("Recent project log entries")} aria-live="off" className="min-w-0">
+              {visibleEntries.map((entry) => (
+                <LogRow
+                  key={entry.seq}
+                  entry={entry}
+                  source={several && !componentFilter ? names.get(entry.componentId) ?? entry.componentId : undefined}
+                  showStderr
+                />
+              ))}
+            </ol>
+          </div>
+          {!stuck ? (
+            <Button type="button" variant="secondary" size="sm" className="absolute right-4 bottom-3 shadow-sm" onClick={toBottom}>
+              {t("Jump to latest")} <ArrowDown aria-hidden="true" />
+            </Button>
+          ) : null}
+        </div>
       ) : null}
     </section>
   );

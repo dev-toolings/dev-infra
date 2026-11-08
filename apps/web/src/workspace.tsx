@@ -210,7 +210,7 @@ export function Workspace({ onLogout }: WorkspaceProps) {
       ) : null}
 
       {view === "logs" ? (
-        <div className="min-w-0 space-y-4">
+        <div className="flex min-w-0 flex-1 flex-col gap-4">
           {picker}
           {selected ? (
             <>

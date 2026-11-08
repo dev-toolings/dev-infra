@@ -148,17 +148,13 @@ export function ContainersSkeleton() {
 
 const logMessageWidths = ["w-3/4", "w-1/2", "w-5/6", "w-2/3", "w-2/5", "w-4/5"];
 
-export function LogsSkeleton({ lines = 8 }: { lines?: number }) {
+export function LogsSkeleton({ lines = 48 }: { lines?: number }) {
   return (
-    <Busy label={t("Connecting to the log stream")} className="rounded-lg border border-log-panel bg-log-panel px-3 sm:px-4">
+    <Busy label={t("Connecting to the log stream")} outerClassName="flex min-h-96 flex-1 flex-col" className="flex-1 basis-0 overflow-hidden rounded-xl border bg-log-panel py-2">
       <Repeat count={lines}>
         {(index) => (
-          <div key={index} className="space-y-2 border-b border-log-foreground/10 py-2.5 last:border-b-0">
-            <div className="flex items-center gap-2">
-              <Skeleton className="h-3 w-16 bg-log-foreground/10" />
-              <Skeleton className="h-4 w-12 bg-log-foreground/10" />
-              <Skeleton className="h-3 w-20 bg-log-foreground/10" />
-            </div>
+          <div key={index} className="flex h-[22px] items-center gap-2 px-3">
+            <Skeleton className="h-3 w-14 shrink-0 bg-log-foreground/10" />
             <Skeleton className={cn("h-3 bg-log-foreground/10", logMessageWidths[index % logMessageWidths.length])} />
           </div>
         )}

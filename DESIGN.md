@@ -110,6 +110,10 @@ Surfaces and text:
   switcher, then come the project header, Components, and two tabs, Logs and Recent
   operations. The Logs tab fills the height left in the viewport.
 - Containers: two columns from `xl`.
+- Logs: `/logs/:id` is one toolbar (component filter from two components, state, count,
+  Pause, Clear) above a log surface that fills the height left and follows the newest line.
+  Rows are `LogRow`, one line each: time, component when several are shown, a fixed `stderr`
+  column so a first error shifts nothing, then the message, on its own line on a phone.
 - Mobile: the sidebar becomes a sheet behind the header trigger. No horizontal overflow.
 
 ### Language

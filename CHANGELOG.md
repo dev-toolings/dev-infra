@@ -104,6 +104,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - The new project page has three steps: the Docker settings moved beside the Dockerfile, in
   one place. Base image, packages, extensions and "Edit the file" are all edited there.
+- The Logs page fills the screen with one line per entry, follows the newest line until you
+  scroll up, and shows colors and JSON like the other log views. Its heading, labels and
+  per-entry badges are gone: `stderr` stays marked and the component shows when several run.
 - New Symfony and Laravel projects test with Pest in place of PHPUnit, and Symfony projects
   add `phpstan-symfony` to PHPStan. Their `AGENTS.md` now states the PSR, PHPDoc, PHPStan and
   Pest rules.
