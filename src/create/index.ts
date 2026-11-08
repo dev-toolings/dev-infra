@@ -6,10 +6,11 @@ import { DevHubError, type CatalogPort, type CreateInput, type CreateMode, type 
 import { gitRun } from "../git";
 import { redactText } from "../operations/logger";
 import versions from "../../data/versions.json";
-import { assertProjectAvailable, databaseName, DEFAULT_CONTAINER_PORT, FIRST_PORT, renderDockerfile } from "../imports";
+import { assertProjectAvailable, databaseName, DEFAULT_CONTAINER_PORT, FIRST_PORT, renderDockerfile, type ProdStage } from "../imports";
 import { STACKS } from "./catalog";
 import { AGENT_FEATURE, AGENT_RULES, agentFiles } from "./agents";
 import { fillEnv, frameworkEnv } from "./env";
+import { makefile } from "./makefile";
 import { nodeFiles } from "./node";
 import { phpFiles } from "./php";
 import { pythonFiles } from "./python";
@@ -24,9 +25,14 @@ function mysqlName(id: string): string {
   const name = databaseName(id);
   return name.length <= MYSQL_USER_LIMIT ? name : `${name.slice(0, MYSQL_USER_LIMIT - 9)}_${createHash("sha256").update(id).digest("hex").slice(0, 8)}`;
 }
-type Recipe = { files: Record<string, string>; install: string; /** What a new project must pass. */ checks: string[]; dev: string; env: Record<string, string>; toolchain: Toolchain; image: string; /** Needed on this machine in native mode. */ tools?: string[]; /** PHP extensions the code needs in its image. */ extensions?: string[]; /** PHP extensions needed on this machine in native mode. */ hostExtensions?: string[]; /** Where the values of this machine go, when it is not `.env`. */ envFile?: string; /** From DevHub names to the ones the framework reads. */ translateEnv?: (env: Record<string, string>) => Record<string, string> };
+type Recipe = { files: Record<string, string>; install: string; /** What a new project must pass. */ checks: string[]; dev: string; env: Record<string, string>; prod: ProdStage; toolchain: Toolchain; image: string; /** Needed on this machine in native mode. */ tools?: string[]; /** PHP extensions the code needs in its image. */ extensions?: string[]; /** PHP extensions needed on this machine in native mode. */ hostExtensions?: string[]; /** Where the values of this machine go, when it is not `.env`. */ envFile?: string; /** From DevHub names to the ones the framework reads. */ translateEnv?: (env: Record<string, string>) => Record<string, string> };
 const lineImage = (line: Record<string, string>, version: string | undefined) => line[version ?? ""] ?? Object.values(line)[0]!;
-const DOCKER_IGNORE = [".git", ".env*", "!.env.example", "*.key", "*.pem", ".venv", "__pycache__", "dist", "node_modules", "storage", "vendor", "var", ""].join("\n");
+// `bootstrap/cache` lists the dev packages of the last local install: an image without them would not boot.
+const DOCKER_IGNORE = [".git", ".env*", "!.env.example", "*.key", "*.pem", ".venv", "__pycache__", "bootstrap/cache/*.php", "dist", "node_modules", "storage", "vendor", "var", ""].join("\n");
+/** A stack whose local values live apart commits its `.env`, and the app needs it in the image. */
+const dockerIgnore = ({ envFile }: Recipe) => envFile ? `${DOCKER_IGNORE}!.env\n` : DOCKER_IGNORE;
+const SERVE = ["--host=0.0.0.0", `--port=${DEFAULT_CONTAINER_PORT}`];
+const hidden = (key: string) => /SECRET|PASSWORD|_KEY$/.test(key);
 const IMAGE = /^[a-z0-9][a-z0-9._/:@-]{0,200}$/, PACKAGE = /^[a-z0-9][a-z0-9+.-]{0,63}$/, EXTENSION = /^[a-z0-9_]{1,40}$/;
 
 /** What each stack generates and runs. */
@@ -39,6 +45,10 @@ export function recipe(stack: string, id: string, mode: CreateMode, port: number
     const modules = options.pattern === "modules", sqlalchemy = options.orm === "sqlalchemy";
     return { toolchain: "uv", checks, image: lineImage(versions.lines.python, options.pythonVersion), tools: ["uv"], files: {
       ...pythonFiles({ name: id, pattern: options.pattern!, orm: options.orm!, services }),
+      Makefile: makefile({ id, docker, install: "uv sync",
+        tools: [{ name: "format", about: "Format the code", command: "uv run ruff format ." }],
+        checks: [{ name: "lint", about: "Lint the code", command: "uv run ruff check ." }, { name: "format-check", about: "Check the format", command: "uv run ruff format --check ." }, { name: "typecheck", about: "Check the types", command: "uv run mypy" }, { name: "test", about: "Run the tests", command: "uv run pytest" }],
+        ...(sqlalchemy ? { database: [{ name: "migrate", about: "Apply the migrations", command: "uv run alembic upgrade head" }] } : {}) }),
       ...agents("FastAPI", checks, [
         ...(modules ? [
           "`app/modules/<name>`: one folder per feature, which shows only its `__init__.py`.",
@@ -57,7 +67,8 @@ export function recipe(stack: string, id: string, mode: CreateMode, port: number
         "`app/main.py`: wires the real dependencies.",
         ...(sqlalchemy ? ["The table of `notes` needs `uv run alembic upgrade head`."] : []),
       ], [...AGENT_RULES.fastapi, ...(sqlalchemy ? AGENT_RULES.sqlalchemy : [])], AGENT_FEATURE.fastapi(options.pattern!, sqlalchemy)),
-    }, install: "uv sync", dev: `uv run uvicorn app.main:app --host ${host} --port ${listen} --reload --no-access-log`, env: { APP_ENV: "development" } };
+    }, install: "uv sync", dev: `uv run uvicorn app.main:app --host ${host} --port ${listen} --reload --no-access-log`, env: { APP_ENV: "development" },
+      prod: { env: { APP_ENV: "production" }, setup: [], command: [".venv/bin/uvicorn", "app.main:app", ...SERVE, "--no-access-log"] } };
   }
   if (stack === "php") {
     const laravel = options.framework === "laravel", modules = options.pattern === "modules";
@@ -84,6 +95,9 @@ export function recipe(stack: string, id: string, mode: CreateMode, port: number
       toolchain: "composer", checks, image: lineImage(versions.lines.php, options.phpVersion), tools: ["php", "composer"], ...(laravel ? { extensions: ["pcntl"] } : {}),
       hostExtensions: services.includes("postgres") ? ["pdo_pgsql"] : [],
       ...(laravel ? {} : { envFile: ".env.local" }), translateEnv: (env) => frameworkEnv(options.framework!, env), files: {
+        Makefile: makefile({ id, docker, install: "composer install",
+          checks: [{ name: "validate", about: "Validate composer.json", command: "composer validate --no-check-publish" }, { name: "lint", about: "Check the code style", command: "composer lint" }, { name: "analyse", about: "Run the static analysis", command: "composer analyse" }, { name: "test", about: "Run the tests", command: "composer test" }],
+          ...(orm === "doctrine" ? { database: [{ name: "migrate", about: "Apply the migrations", command: "php bin/console doctrine:migrations:migrate --no-interaction" }] } : orm === "eloquent" ? { database: [{ name: "migrate", about: "Apply the migrations", command: "php artisan migrate" }] } : {}) }),
         ...phpFiles({ name: id, framework: options.framework!, pattern: options.pattern!, symfonyVersion: options.symfonyVersion, orm: orm!, apiPlatform, services, docker }),
         ...agents(laravel ? "Laravel" : "Symfony", checks, [
           ...layout,
@@ -91,6 +105,11 @@ export function recipe(stack: string, id: string, mode: CreateMode, port: number
         ], [...AGENT_RULES.php, ...(laravel ? AGENT_RULES.laravel : AGENT_RULES.symfony), ...(apiPlatform ? AGENT_RULES.apiPlatform : []), ...(docker ? (laravel ? AGENT_RULES.octane : AGENT_RULES.frankenphp) : [])], laravel ? AGENT_FEATURE.laravel(modules, orm === "eloquent") : AGENT_FEATURE.symfony(modules, orm === "doctrine", apiPlatform)),
       }, install: "composer install",
       dev: !docker ? `php -S ${host}:${listen} -t public public/index.php` : laravel ? `php artisan octane:frankenphp --host=${host} --port=${listen} --watch --log-level=WARN` : "frankenphp run --config Caddyfile",
+      prod: laravel
+        // `.dockerignore` keeps `storage` out of the image, and the app needs its folders.
+        ? { env: { APP_ENV: "production", APP_DEBUG: "false" }, setup: ["RUN mkdir -p storage/app storage/logs storage/framework/cache storage/framework/sessions storage/framework/views"], command: ["php", "artisan", "octane:frankenphp", ...SERVE, "--log-level=WARN"] }
+        // Composer runs without scripts here, and the docs of API Platform need their assets.
+        : { env: { APP_ENV: "prod", APP_DEBUG: "0", PORT: String(DEFAULT_CONTAINER_PORT) }, setup: apiPlatform ? ["RUN php bin/console assets:install public --no-interaction"] : [], command: ["frankenphp", "run", "--config", "Caddyfile"] },
       env: laravel
         ? { APP_ENV: "local", APP_DEBUG: "true", APP_KEY: `base64:${randomBytes(32).toString("base64")}`, APP_URL: `http://127.0.0.1:${port}`, ...(services.includes("redis") ? { REDIS_CLIENT: "predis" } : {}) }
         : { APP_ENV: "dev", APP_DEBUG: "1", APP_SECRET: randomBytes(16).toString("hex"), DEFAULT_URI: `http://127.0.0.1:${port}` },
@@ -102,6 +121,9 @@ export function recipe(stack: string, id: string, mode: CreateMode, port: number
     toolchain: tool, checks, image: bun ? versions.images.bun : lineImage(versions.lines.node, options.nodeVersion),
     files: {
       ...nodeFiles({ name: id, runtime: options.runtime!, pattern: options.pattern!, orm: options.orm!, services }),
+      Makefile: makefile({ id, docker, install: `${tool} install`,
+        checks: [{ name: "typecheck", about: "Check the types", command: `${tool} run typecheck` }, { name: "lint", about: "Lint the code", command: `${tool} run lint` }, { name: "test", about: "Run the tests", command: `${tool} test` }],
+        ...(options.orm === "drizzle" ? { database: [{ name: "db-generate", about: "Generate a migration", command: `${tool} run db:generate` }, { name: "migrate", about: "Apply the migrations", command: `${tool} run db:migrate` }] } : {}) }),
       ...agents("Hono", checks, [
         ...(options.pattern === "modules" ? [
           "`src/modules/<name>`: one folder per feature, which shows only its `index.ts`.",
@@ -124,13 +146,39 @@ export function recipe(stack: string, id: string, mode: CreateMode, port: number
     install: bun ? "bun install" : "npm install",
     dev: docker ? `${bun ? "bun" : "npm"} run dev` : bun ? "bun run --hot src/index.ts" : "node --watch src/index.ts",
     env: { NODE_ENV: "development" },
+    prod: { env: { NODE_ENV: "production", HOST: "0.0.0.0", PORT: String(DEFAULT_CONTAINER_PORT) }, setup: [], command: [bun ? "bun" : "node", "src/index.ts"] },
   };
 }
 
 const fail = (message: string, code = "invalid", status = 400): never => { throw new DevHubError(message, code, status); };
 
 /** Fields end up in a Dockerfile, so each one has to be a plain name. A whole file is the user's own text. */
-function dockerfileFor({ toolchain, image, extensions: needed = [] }: Recipe, custom: DockerCustom = {}): string {
+/** The two values a user can reach through the panel, kept to what a Dockerfile line or an env file can hold. */
+const ARG_VALUE = /^[A-Za-z0-9_.+:/@ -]{0,256}$/, ENV_NAME = /^[A-Z][A-Z0-9_]{0,63}$/, ENV_VALUE = /^[^\s#"'`$\\]{0,1024}$/;
+/** Provisioning writes these last, so a value typed in the panel would never reach the app. */
+const MANAGED_ENV = /^(HOST|PORT|DATABASE_URL|DB_URL|DB_CONNECTION|REDIS_(URL|PREFIX|HOST|PORT)|SMTP_(HOST|PORT)|MAILER_DSN|MAIL_(MAILER|HOST|PORT)|MYSQL_URL|MARIADB_URL|RABBITMQ_URL|MEILISEARCH_\w+|DEVHUB_\w+)$/;
+const quoted = (value: string) => /^\S+$/.test(value) ? value : `"${value}"`;
+function withArgs(dockerfile: string, args: Record<string, string>): string {
+  return Object.entries(args).reduce((text, [name, value]) => {
+    const line = new RegExp(`^ARG ${name}=.*$`, "m");
+    if (!/^[A-Z][A-Z0-9_]*$/.test(name) || name.startsWith("DEVHUB_") || !line.test(text)) fail(`Unknown build variable: ${name}`);
+    if (!ARG_VALUE.test(value) || (value === "" && name !== "SYSTEM_PACKAGES")) fail(`Invalid value for ${name}`);
+    return text.replace(line, () => `ARG ${name}=${quoted(value)}`);
+  }, dockerfile);
+}
+function checkEnv(env: Record<string, string>) {
+  for (const [key, value] of Object.entries(env)) {
+    if (!ENV_NAME.test(key)) fail(`Invalid variable name: ${key}`);
+    if (MANAGED_ENV.test(key)) fail(`DevHub sets ${key}`);
+    if (hidden(key)) fail(`${key} looks like a secret: add it to app.env after creation`);
+    // The value lands unquoted in an env file, which Laravel and Compose each read their own way.
+    if (!ENV_VALUE.test(value)) fail(`The value of ${key} cannot hold spaces, quotes, # or $: add it to app.env after creation`);
+  }
+}
+/** A whole Dockerfile may have no `dev` stage, and then Compose builds it as it is. */
+const buildTarget = (dockerfile: string) => /^\s*FROM\s.+\sAS\s+dev\s*$/im.test(dockerfile) ? { buildTarget: "dev" } : {};
+
+function dockerfileFor({ toolchain, image, extensions: needed = [], prod }: Recipe, custom: DockerCustom = {}): string {
   if (custom.dockerfile !== undefined) {
     if (custom.dockerfile.length > 48_000 || !/^\s*FROM\s/im.test(custom.dockerfile)) fail("The Dockerfile needs a FROM line and at most 48 KB");
     return custom.dockerfile;
@@ -144,7 +192,10 @@ function dockerfileFor({ toolchain, image, extensions: needed = [] }: Recipe, cu
   if (extensions.length > 0 && toolchain !== "composer") fail("Extensions apply to PHP projects only");
   const extension = extensions.find((item) => !EXTENSION.test(item));
   if (extension !== undefined) fail(`Invalid extension: ${extension}`);
-  return renderDockerfile(toolchain, custom.image ?? image, packages, [...needed, ...extensions]);
+  const args = custom.args ?? {};
+  // The row replaces the whole line, and a framework cannot run without the extensions it needs.
+  const merged = args.PHP_EXTENSIONS === undefined ? args : { ...args, PHP_EXTENSIONS: [...new Set([...needed, ...args.PHP_EXTENSIONS.split(/\s+/).filter(Boolean)])].join(" ") };
+  return withArgs(renderDockerfile(toolchain, custom.image ?? image, packages, [...needed, ...extensions], prod), merged);
 }
 
 export class Creator implements CreatePort {
@@ -192,6 +243,8 @@ export class Creator implements CreatePort {
     let port = await discovery.freePort(FIRST_PORT);
     while (this.pending.has(port)) port = await discovery.freePort(port + 1);
     const built = recipe(stack.id, id, input.mode, port, options, services);
+    checkEnv(input.docker?.env ?? {});
+    built.env = { ...built.env, ...input.docker?.env };
     const { files, install, dev, tools = [], hostExtensions = [], toolchain, image, env, translateEnv = (values) => values } = built;
     if (input.mode === "native") {
       for (const tool of tools) {
@@ -205,16 +258,17 @@ export class Creator implements CreatePort {
     }
     const url = `http://127.0.0.1:${port}`;
     const dockerfile = input.mode === "docker" ? dockerfileFor(built, input.docker) : undefined;
-    const contents = { ...files, ...input.instructions, ...(dockerfile ? { Dockerfile: dockerfile, ".dockerignore": DOCKER_IGNORE } : {}) };
+    const contents = { ...files, ...input.instructions, ...(dockerfile ? { Dockerfile: dockerfile, ".dockerignore": dockerIgnore(built) } : {}) };
     const scaffold = dockerfile ? this.options.imports.scaffold({ root: path, name, id, toolchain, image, url, install, dev, services, env }) : undefined;
-    const hidden = (key: string) => /SECRET|PASSWORD|_KEY$/.test(key);
+    const shown = scaffold ? translateEnv({ ...scaffold.env, ...(services.includes("postgres") ? { DATABASE_URL: "<generated>" } : {}) }) : {};
     return {
       input: { ...input, name, options, services, versions },
       id, path, url,
       files: Object.keys(contents).sort(), contents, generatedInstructions: { "AGENTS.md": files["AGENTS.md"]! }, install, dev,
       ...(dockerfile && scaffold ? { docker: {
-        dockerfile, compose: this.options.imports.compose({ ...scaffold, infra: services.map((service) => serviceContainer(service, versions[service]!)) }),
-        env: Object.fromEntries(Object.entries(translateEnv({ ...scaffold.env, ...(services.includes("postgres") ? { DATABASE_URL: "<generated>" } : {}) })).map(([key, value]) => [key, hidden(key) ? "<generated>" : value])),
+        dockerfile, image, compose: this.options.imports.compose({ ...scaffold, ...buildTarget(dockerfile), infra: services.map((service) => serviceContainer(service, versions[service]!)) }),
+        env: Object.fromEntries(Object.entries(shown).map(([key, value]) => [key, hidden(key) ? "<generated>" : value])),
+        locked: Object.keys(shown).filter((key) => hidden(key) || !(key in env)),
       } } : {}),
       ...(services.includes("postgres") ? { database: databaseName(id) } : {}),
       isolation: input.mode === "docker"
@@ -241,10 +295,11 @@ export class Creator implements CreatePort {
     const { input, id, path } = plan;
     const { imports } = this.options;
     const built = recipe(input.stack, id, input.mode, Number(new URL(plan.url).port), input.options, input.services);
+    built.env = { ...built.env, ...input.docker?.env };
     const { files, toolchain, image, env } = built;
     mkdirSync(path);
     try {
-      const own = plan.docker ? { Dockerfile: plan.docker.dockerfile, ".dockerignore": DOCKER_IGNORE } : {};
+      const own = plan.docker ? { Dockerfile: plan.docker.dockerfile, ".dockerignore": dockerIgnore(built) } : {};
       for (const [file, content] of Object.entries({ ...files, ...input.instructions, ...own })) {
         mkdirSync(dirname(join(path, file)), { recursive: true });
         writeFileSync(join(path, file), content);
@@ -258,7 +313,8 @@ export class Creator implements CreatePort {
       // Laravel expects a `.env` next to its example. In Docker, the real environment wins over it.
       if (input.stack === "php" && !built.envFile) writeFileSync(join(path, ".env"), fillEnv(files[".env.example"]!, env), { mode: 0o600 });
       if (toolchain === "uv" || toolchain === "composer") return await imports.prepare({ ...this.linked(imports.scaffold({ root: path, name: input.name, id, toolchain, image, url: plan.url, install: plan.install, dev: plan.dev, services: input.services, env }), plan, links), ...(built.translateEnv ? { translateEnv: built.translateEnv } : {}) });
-      return await imports.prepare(this.linked({ ...await imports.plan({ path, name: input.name, id, toolchain, fresh: true }), image, ownDockerfile: true }, plan, links));
+      const imported = await imports.plan({ path, name: input.name, id, toolchain, fresh: true });
+      return await imports.prepare(this.linked({ ...imported, env: { ...imported.env, ...input.docker?.env }, image, ownDockerfile: true }, plan, links));
     } catch (error) {
       rmSync(path, { recursive: true, force: true });
       throw error;
@@ -308,7 +364,7 @@ export class Creator implements CreatePort {
 
   private linked(imported: ImportPlan, plan: CreatePlan, { infra, env, postgres }: Links): ImportPlan {
     return {
-      ...imported, url: plan.url, infra, linkedEnv: env,
+      ...imported, ...buildTarget(plan.docker!.dockerfile), url: plan.url, infra, linkedEnv: env,
       ...(postgres ? { databaseHost: postgres.container, ...(postgres.admin ? { databaseAdmin: postgres.admin } : {}) } : {}),
       project: { ...imported.project, components: imported.project.components.map((component) => ({ ...component, url: plan.url, compose: { ...component.compose!, managed: { infra } } })) },
     };

@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:f
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DevHubError, type CatalogPort, type CreateInput, type DiscoveryPort, type Executor, type ImportPlan, type ImportPort, type OperationsPort, type Project, type ProjectInput, type SharedServicesPort } from "../contracts";
-import { Creator } from "./index";
+import { Creator, recipe } from "./index";
 import { nodeFiles } from "./node";
 import { phpFiles } from "./php";
 import { pythonFiles } from "./python";
@@ -23,7 +23,7 @@ function fixture({ installCode = 0, missingTool = "" } = {}) {
   const discovery = { freePort: async () => 4100 } as unknown as DiscoveryPort;
   const imports = {
     scaffold: (input: unknown) => ({ ...(input as object), project: { components: [] } }),
-    compose: () => "services: {}\n",
+    compose: (plan: ImportPlan) => plan.buildTarget ? `target: ${plan.buildTarget}\n` : "services: {}\n",
     plan: async (input: unknown) => { imported.push(input); return { url: "http://127.0.0.1:4100", project: { id: "shop", name: "Shop", root, components: [{ id: "app" }] } }; },
     prepare: async (plan: ImportPlan) => { prepared.push(plan); return { id: "shop" } as Project; },
   } as unknown as ImportPort;
@@ -175,10 +175,59 @@ test("two long project names keep separate MySQL databases within the name limit
   for (const name of names) expect(name.length).toBeLessThanOrEqual(32);
 });
 
+test("the panel changes the ARG lines and the container variables, not what DevHub sets", async () => {
+  const { creator } = fixture();
+  const plan = await creator.plan(input({ stack: "php", docker: { args: { PHP_VERSION: "8.5", SYSTEM_PACKAGES: "git curl" }, env: { APP_DEBUG: "0", FEATURE_FLAG: "on" } } }));
+  expect(plan.docker!.dockerfile).toContain("ARG PHP_VERSION=8.5\n");
+  expect(plan.docker!.dockerfile).toContain('ARG SYSTEM_PACKAGES="git curl"\n');
+  expect(plan.docker!.env).toMatchObject({ APP_DEBUG: "0", FEATURE_FLAG: "on" });
+  expect(plan.docker!.locked).toContain("APP_SECRET");
+  expect(plan.docker!.locked).not.toContain("FEATURE_FLAG");
+  await expect(creator.plan(input({ docker: { args: { NOPE: "1" } } }))).rejects.toThrow("Unknown build variable");
+  await expect(creator.plan(input({ docker: { args: { DEVHUB_UID: "0" } } }))).rejects.toThrow("Unknown build variable");
+  await expect(creator.plan(input({ stack: "php", docker: { args: { PHP_VERSION: "8.5\nRUN id" } } }))).rejects.toThrow("Invalid value");
+  await expect(creator.plan(input({ docker: { env: { PORT: "1" } } }))).rejects.toThrow("DevHub sets PORT");
+  await expect(creator.plan(input({ docker: { env: { DATABASE_URL: "x" } } }))).rejects.toThrow("DevHub sets DATABASE_URL");
+  await expect(creator.plan(input({ docker: { env: { LABEL: "My App" } } }))).rejects.toThrow("cannot hold spaces");
+  await expect(creator.plan(input({ docker: { env: { STRIPE_SECRET: "x" } } }))).rejects.toThrow("looks like a secret");
+});
+
+test("the Dockerfile has one base for dev and prod, and dev is the stage Compose runs", async () => {
+  const { creator } = fixture();
+  const plan = await creator.plan(input({ stack: "php" }));
+  expect(plan.docker!.dockerfile).toContain(" AS base\n");
+  expect(plan.docker!.dockerfile).toContain("FROM base AS dev\n");
+  expect(plan.docker!.dockerfile).toContain("FROM base AS prod\n");
+  expect(plan.docker!.dockerfile).toContain('CMD ["frankenphp","run","--config","Caddyfile"]\n');
+  expect(plan.docker!.compose).toContain("target: dev");
+  const custom = await creator.plan(input({ docker: { dockerfile: "FROM alpine\n" } }));
+  expect(custom.docker!.compose).not.toContain("target:");
+  // Symfony reads its committed `.env`, and a Laravel `.env` holds the local secrets.
+  expect(plan.contents[".dockerignore"]).toEndWith("!.env\n");
+  const laravel = await creator.plan(input({ stack: "php", options: { framework: "laravel" } }));
+  expect(laravel.contents[".dockerignore"]).not.toContain("!.env\n");
+  expect(laravel.contents[".dockerignore"]).toContain("bootstrap/cache/*.php");
+});
+
+test("every stack gets a Makefile that runs its checks where the project runs", async () => {
+  const { creator } = fixture();
+  for (const stack of ["node", "python", "php"]) {
+    const plan = await creator.plan(input({ stack }));
+    const built = recipe(stack, "shop", "docker", 4100, plan.input.options, []);
+    expect(plan.contents.Makefile).toContain("EXEC ?= docker compose -p devhub-$(PROJECT) exec app\n");
+    for (const check of built.checks) expect(plan.contents.Makefile).toContain(`\t$(EXEC) ${check}\n`);
+  }
+  const native = await creator.plan(input({ mode: "native" }));
+  expect(native.contents.Makefile).not.toContain("docker");
+});
+
 test("the chosen release lines reach the image and the dependencies, and only where they apply", async () => {
   const { root, creator } = fixture();
   const plan = await creator.plan(input({ stack: "php", options: { phpVersion: "8.4", symfonyVersion: "8.1" } }));
-  expect(plan.docker!.dockerfile).toContain("FROM dunglas/frankenphp:1.13-php8.4-trixie");
+  expect(plan.docker!.dockerfile).toContain("ARG PHP_VERSION=8.4\n");
+  expect(plan.docker!.dockerfile).toContain('ARG SYSTEM_PACKAGES=""\n');
+  expect(plan.docker!.dockerfile).toContain("FROM dunglas/frankenphp:${FRANKENPHP_VERSION}-php${PHP_VERSION}-${DEBIAN_RELEASE} AS base\n");
+  expect(plan.docker!.image).toBe("dunglas/frankenphp:1.13-php8.4-trixie");
   await creator.apply(plan, false);
   expect(readFileSync(join(root, "shop/Dockerfile"), "utf8")).toBe(plan.docker!.dockerfile);
   expect(JSON.parse(readFileSync(join(root, "shop/composer.json"), "utf8")).require["symfony/runtime"]).toStartWith("8.1.");
@@ -189,9 +238,12 @@ test("the chosen release lines reach the image and the dependencies, and only wh
 test("Docker fields become plain image lines, and anything else is refused", async () => {
   const { creator } = fixture();
   const custom = await creator.plan(input({ stack: "php", docker: { image: "dunglas/frankenphp:1.13-php8.5-bookworm", packages: ["imagemagick"], extensions: ["intl"] } }));
-  expect(custom.docker!.dockerfile).toContain("FROM dunglas/frankenphp:1.13-php8.5-bookworm");
-  expect(custom.docker!.dockerfile).toContain("--no-install-recommends imagemagick");
-  expect(custom.docker!.dockerfile).toContain("install-php-extensions pdo_pgsql intl");
+  expect(custom.docker!.dockerfile).toContain("ARG PHP_VERSION=8.5\nARG DEBIAN_RELEASE=bookworm\n");
+  expect(custom.docker!.dockerfile).toContain('ARG SYSTEM_PACKAGES="imagemagick"\n');
+  expect(custom.docker!.dockerfile).toContain('ARG PHP_EXTENSIONS="pdo_pgsql intl"\n');
+  const other = await creator.plan(input({ docker: { image: "registry.local/node:24" } }));
+  expect(other.docker!.dockerfile).toContain("ARG BASE_IMAGE=registry.local/node:24\n");
+  expect(other.docker!.dockerfile).toContain("FROM ${BASE_IMAGE} AS base\n");
   await expect(creator.plan(input({ stack: "php", docker: { image: "php:8.5-cli" } }))).rejects.toThrow("run on FrankenPHP");
   await expect(creator.plan(input({ stack: "php", docker: { image: "dunglas/frankenphp:1.13-php8.5-alpine" } }))).rejects.toThrow("run on FrankenPHP");
   await expect(creator.plan(input({ stack: "php", docker: { packages: ["git && curl evil"] } }))).rejects.toThrow("Invalid system package");
@@ -304,12 +356,18 @@ test("PHP in Docker runs on FrankenPHP, and the native mode keeps the PHP server
   expect(symfony.docker!.dockerfile).toContain("/app /home/devhub /config /data");
   const laravel = await creator.plan(input({ stack: "php", options: { framework: "laravel" } }));
   expect(laravel.dev).toBe("php artisan octane:frankenphp --host=0.0.0.0 --port=3000 --watch --log-level=WARN");
-  expect(laravel.docker!.dockerfile).toContain("install-php-extensions pdo_pgsql pcntl");
+  expect(laravel.docker!.dockerfile).toContain('ARG PHP_EXTENSIONS="pdo_pgsql pcntl"\n');
   expect(JSON.parse(laravel.contents["composer.json"]!).require).toHaveProperty(["laravel/octane"]);
   const native = await creator.plan(input({ stack: "php", mode: "native", options: { framework: "laravel" } }));
   expect(native.dev).toStartWith("php -S ");
   expect(JSON.parse(native.contents["composer.json"]!).require).not.toHaveProperty(["laravel/octane"]);
   expect((await creator.plan(input({ stack: "php", mode: "native" }))).contents).not.toHaveProperty(["Caddyfile"]);
+});
+
+test("the PHP_EXTENSIONS row adds to the extensions a framework needs, and cannot drop them", async () => {
+  const { creator } = fixture();
+  const plan = await creator.plan(input({ stack: "php", options: { framework: "laravel" }, docker: { args: { PHP_EXTENSIONS: "pdo_pgsql intl" } } }));
+  expect(plan.docker!.dockerfile).toContain('ARG PHP_EXTENSIONS="pcntl pdo_pgsql intl"\n');
 });
 
 test("a native PHP project needs its extensions on this machine", async () => {

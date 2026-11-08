@@ -298,10 +298,11 @@ export function createApp(services: AppServices, options: ApiOptions): Hono<ApiE
   app.get(`${PREFIX}/stacks`, () => json(services.create.stacks()));
   const dockerCustom = (value: unknown) => {
     if (value === undefined) return true;
-    if (!value || typeof value !== "object" || Array.isArray(value) || !exactKeys(value as RecordValue, ["image", "packages", "extensions", "dockerfile"])) return false;
-    const { image, packages, extensions, dockerfile } = value as DockerCustom;
+    if (!value || typeof value !== "object" || Array.isArray(value) || !exactKeys(value as RecordValue, ["image", "packages", "extensions", "dockerfile", "args", "env"])) return false;
+    const { image, packages, extensions, dockerfile, args, env } = value as DockerCustom;
+    const variables = (items: unknown) => items === undefined || (!!items && typeof items === "object" && !Array.isArray(items) && Object.values(items).every((item) => typeof item === "string" && item.length <= 1024));
     const names = (items: unknown) => items === undefined || (Array.isArray(items) && items.length <= 64 && items.every((item) => boundedString(item, 64)));
-    return (image === undefined || boundedString(image, 256)) && names(packages) && names(extensions) && (dockerfile === undefined || typeof dockerfile === "string");
+    return (image === undefined || boundedString(image, 256)) && names(packages) && names(extensions) && (dockerfile === undefined || typeof dockerfile === "string") && variables(args) && variables(env);
   };
   /** These names become paths in the new project, so no other key gets through. Their size is bounded by the request body. */
   const instructionFiles = (value: unknown) => value === undefined || (!!value && typeof value === "object" && !Array.isArray(value) && exactKeys(value as RecordValue, ["AGENTS.md"]) && Object.values(value).every((item) => typeof item === "string"));

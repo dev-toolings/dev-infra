@@ -19,12 +19,13 @@ export const databaseName = (id: string) => `dh_${id.replace(/-/g, "_")}`;
 const ENTRY_FILES = ["src/index.ts", "src/index.tsx", "src/index.js", "src/server.ts", "src/server.js", "src/app.ts", "index.ts", "index.js", "server.ts", "server.js"];
 /** Commands come only from this table: nothing read from the project reaches the generated shell script. */
 const fetchProbe = (binary: string) => (port: number) => [binary, "-e", `fetch('http://127.0.0.1:${port}/').then(()=>process.exit(0),()=>process.exit(1))`];
-const NODE_LAYOUT = { setup: [], manifest: "package.json", deps: "node_modules", writable: [] };
+const NODE_LAYOUT = { before: [], setup: [], dev: [], built: [], manifest: "package.json", deps: "node_modules", writable: [] };
 const TOOLCHAINS = {
-  bun: { ...NODE_LAYOUT, image: versions.images.bun, probe: fetchProbe("bun"), run: "bun run", locked: "bun install --frozen-lockfile", unlocked: "bun install --no-save", fresh: "bun install" },
-  npm: { ...NODE_LAYOUT, image: versions.lines.node["24"], probe: fetchProbe("node"), run: "npm run", locked: "npm ci", unlocked: "npm install --no-package-lock", fresh: "npm install" },
+  bun: { ...NODE_LAYOUT, image: versions.images.bun, probe: fetchProbe("bun"), prod: ["COPY package.json bun.lock ./", "RUN bun install --frozen-lockfile --production"], run: "bun run", locked: "bun install --frozen-lockfile", unlocked: "bun install --no-save", fresh: "bun install" },
+  npm: { ...NODE_LAYOUT, image: versions.lines.node["24"], probe: fetchProbe("node"), prod: ["COPY package.json package-lock.json ./", "RUN npm ci --omit=dev"], run: "npm run", locked: "npm ci", unlocked: "npm install --no-package-lock", fresh: "npm install" },
   uv: {
-    manifest: "pyproject.toml", deps: ".venv", writable: [],
+    before: [], dev: [], built: [], manifest: "pyproject.toml", deps: ".venv", writable: [],
+    prod: ["COPY pyproject.toml uv.lock ./", "RUN uv sync --frozen --no-dev --no-install-project"],
     // The cache and the environment sit on different filesystems, where uv cannot hardlink.
     setup: ["ENV UV_LINK_MODE=copy"],
     lock: "uv.lock",
@@ -33,31 +34,84 @@ const TOOLCHAINS = {
   composer: {
     // Caddy keeps its state in these two folders of the FrankenPHP image.
     manifest: "composer.json", deps: "vendor", writable: ["/config", "/data"],
+    // `COPY --from` takes no variable, so the versioned image needs a stage of its own.
+    before: [`ARG COMPOSER_VERSION=${versions.images.composer.split(":")[1]}`, "FROM composer:${COMPOSER_VERSION} AS composer"],
     setup: [
-      `COPY --from=${versions.images.composer} /usr/bin/composer /usr/local/bin/composer`,
+      "COPY --from=composer /usr/bin/composer /usr/local/bin/composer",
       "RUN apt-get update && apt-get install -y --no-install-recommends git unzip && rm -rf /var/lib/apt/lists/*",
       // The image gives the binary a capability to bind port 80. Under `cap_drop: ALL` the kernel then refuses to run it.
       "RUN setcap -r /usr/local/bin/frankenphp",
-      'RUN cp "$PHP_INI_DIR/php.ini-development" "$PHP_INI_DIR/php.ini"',
     ],
+    dev: ['RUN cp "$PHP_INI_DIR/php.ini-development" "$PHP_INI_DIR/php.ini"'],
+    prod: [
+      'RUN cp "$PHP_INI_DIR/php.ini-production" "$PHP_INI_DIR/php.ini"',
+      // Run as root without this, Composer disables its plugins, and symfony/runtime writes its autoloader through one.
+      "ENV COMPOSER_ALLOW_SUPERUSER=1",
+      "COPY composer.json composer.lock ./",
+      "RUN composer install --no-dev --no-scripts --no-autoloader --prefer-dist --no-interaction",
+    ],
+    built: ["RUN composer dump-autoload --optimize --no-dev --no-scripts"],
     lock: "composer.lock",
     probe: (port: number) => ["php", "-r", `exit(@file_get_contents('http://127.0.0.1:${port}/', false, stream_context_create(['http' => ['ignore_errors' => true]])) === false ? 1 : 0);`],
   },
 } as const;
+/** What a framework adds to the prod stage. An imported project has none: its build context holds no code. */
+export type ProdStage = { env: Record<string, string>; setup: string[]; command: string[] };
+/** The images whose tag DevHub knows how to split. Any other stays whole in `BASE_IMAGE`. */
+const IMAGE_TEMPLATES = [
+  "dunglas/frankenphp:${FRANKENPHP_VERSION}-php${PHP_VERSION}-${DEBIAN_RELEASE}",
+  "ghcr.io/astral-sh/uv:python${PYTHON_VERSION}-${DEBIAN_RELEASE}-slim",
+  "node:${NODE_VERSION}-${DEBIAN_RELEASE}-slim",
+  "oven/bun:${BUN_VERSION}-slim",
+];
+/** FROM only reads a variable declared above it. */
+function imageArgs(image: string): { args: string[]; from: string } {
+  for (const template of IMAGE_TEMPLATES) {
+    const found = new RegExp(`^${template.replace(/[./]/g, "\\$&").replace(/\$\{\w+\}/g, "([^-:@]+)")}$`).exec(image);
+    if (found) return { args: [...template.matchAll(/\$\{(\w+)\}/g)].map((name, index) => `ARG ${name[1]}=${found[index + 1]}`), from: template };
+  }
+  return { args: [`ARG BASE_IMAGE=${image}`], from: "${BASE_IMAGE}" };
+}
 /** The image only. What confines the container stays in the Compose file, out of reach of an edited Dockerfile. */
-export function renderDockerfile(tool: Toolchain, image: string, packages: string[] = [], extensions: string[] = []): string {
+export function renderDockerfile(tool: Toolchain, image: string, packages: string[] = [], extensions: string[] = [], prod?: ProdStage): string {
   const chain = TOOLCHAINS[tool];
+  const { args, from } = imageArgs(image);
   return [
-    `FROM ${image}`,
+    "# Versions: change them here or in the DevHub panel, then rebuild.",
+    ...args,
+    ...chain.before,
+    "",
+    "# base: what dev, preprod and prod share, so all three run on the same system.",
+    `FROM ${from} AS base`,
     ...chain.setup,
-    ...(packages.length ? [`RUN apt-get update && apt-get install -y --no-install-recommends ${packages.join(" ")} && rm -rf /var/lib/apt/lists/*`] : []),
-    ...(tool === "composer" ? [`RUN install-php-extensions ${[...new Set(["pdo_pgsql", ...extensions])].join(" ")}`] : []),
+    `ARG SYSTEM_PACKAGES="${packages.join(" ")}"`,
+    'RUN if [ -n "$SYSTEM_PACKAGES" ]; then apt-get update && apt-get install -y --no-install-recommends $SYSTEM_PACKAGES && rm -rf /var/lib/apt/lists/*; fi',
+    ...(tool === "composer" ? [`ARG PHP_EXTENSIONS="${[...new Set(["pdo_pgsql", ...extensions])].join(" ")}"`, "RUN install-php-extensions $PHP_EXTENSIONS"] : []),
+    "WORKDIR /app",
+    "",
+    "# dev: DevHub mounts the project on /app, then installs and starts it as your user.",
+    "FROM base AS dev",
+    ...chain.dev,
     "ARG DEVHUB_UID=1000",
     "ARG DEVHUB_GID=1000",
     // A named volume starts with the ownership of its image directory, which keeps the app non-root without any capability.
     `RUN mkdir -p /app/${chain.deps} /home/devhub && chown -R $DEVHUB_UID:$DEVHUB_GID ${["/app", "/home/devhub", ...chain.writable].join(" ")}`,
-    "WORKDIR /app",
     "",
+    ...(prod ? [
+      "# prod: the same base with the code inside. Preprod runs this image too: only the variables differ.",
+      "# Build it with: docker build --target prod .",
+      "FROM base AS prod",
+      ...Object.entries(prod.env).map(([key, value]) => `ENV ${key}=${value}`),
+      ...chain.prod,
+      "COPY . .",
+      ...chain.built,
+      ...prod.setup,
+      `RUN chown -R 1000:1000 ${["/app", ...chain.writable].join(" ")}`,
+      "USER 1000:1000",
+      `EXPOSE ${DEFAULT_CONTAINER_PORT}`,
+      `CMD ${JSON.stringify(prod.command)}`,
+      "",
+    ] : []),
   ].join("\n");
 }
 const serviceEnv = (id: string, redis: boolean, mail: boolean) => ({
@@ -188,7 +242,7 @@ export class Imports implements ImportPort {
     const volume = chain.deps.replace(".", "");
     return stringify({
       services: { app: {
-        build: { context: plan.ownDockerfile ? root : build, args: { DEVHUB_UID: String(uid), DEVHUB_GID: String(gid) } },
+        build: { context: plan.ownDockerfile ? root : build, ...(plan.buildTarget ? { target: plan.buildTarget } : {}), args: { DEVHUB_UID: String(uid), DEVHUB_GID: String(gid) } },
         // An entrypoint, not a command: an ENTRYPOINT in a custom Dockerfile would otherwise swallow it.
         init: true, user: `${uid}:${gid}`, working_dir: "/app", entrypoint: ["sh", "/devhub/entry.sh"],
         env_file: [join(dir, "app.env")], environment: { HOME: "/home/devhub" },
@@ -231,7 +285,8 @@ export class Imports implements ImportPort {
       "set -eu",
       `stamp=${chain.deps}/.devhub-install`,
       // The first install writes the lockfile of a new project, so it may not exist yet.
-      `hash=$(cat ${chain.manifest} ${plan.lockfile ?? ""} 2>/dev/null | sha256sum)`,
+      // The dependencies outlive a rebuild in their volume: a new runtime version in the Dockerfile has to reinstall them.
+      `hash=$(cat ${chain.manifest} ${plan.lockfile ?? ""} Dockerfile 2>/dev/null | sha256sum)`,
       'if [ "$(cat "$stamp" 2>/dev/null || true)" != "$hash" ]; then',
       `  ${plan.install}`,
       '  printf %s "$hash" > "$stamp"',

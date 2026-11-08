@@ -16,6 +16,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `devhub mcp`: an MCP server on stdio, so coding agents create, run and inspect their worktree.
 - The `proxy` profile runs Caddy (`infra-caddy`): every project answers on
   `http://<project>.localhost`, a worktree on `http://<branch>.<project>.localhost`.
+- The Dockerfile of a new project declares what can change as `ARG`: versions of the image
+  (PHP, Node, Python, Bun, FrankenPHP, Composer), Debian release, system packages and PHP
+  extensions. The panel edits them beside the Dockerfile, with the container variables.
+- New projects get a colored `Makefile` by section: project, dependencies, database, image and
+  checks, run in the container or on this machine.
+- That Dockerfile has `base`, `dev` and `prod` stages: DevHub runs `dev`, and preprod and prod
+  use the `prod` image, built on the same base.
 - New FastAPI projects start with the same base as Hono projects: a `notes` example to copy,
   one JSON error shape, request ids, readable request logs, `/health` with its dependencies,
   tests, type checks and lint, in both code structures, with optional SQLAlchemy and Alembic.
@@ -93,6 +100,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`devhub serve`, `devhub pair`) and a connected React control panel.
 
 ### Changed
+- The new project page has three steps: the Docker settings moved beside the Dockerfile, in
+  one place. Base image, packages, extensions and "Edit the file" are all edited there.
 - New Symfony and Laravel projects test with Pest in place of PHPUnit, and Symfony projects
   add `phpstan-symfony` to PHPStan. Their `AGENTS.md` now states the PSR, PHPDoc, PHPStan and
   Pest rules.

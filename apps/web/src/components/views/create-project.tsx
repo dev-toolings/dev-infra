@@ -38,11 +38,10 @@ export interface CreateProjectViewProps {
   onCreated: (project: PublicProject, operation: Operation) => void;
 }
 
-type Step = "project" | "services" | "docker" | "create";
+type Step = "project" | "services" | "create";
 const STEPS: { id: Step; label: string }[] = [
   { id: "project", label: t("Stack and project") },
   { id: "services", label: t("Services") },
-  { id: "docker", label: t("Docker") },
   { id: "create", label: t("Create") },
 ];
 
@@ -102,44 +101,28 @@ function PlanState({ error, onRetry }: { error?: string; onRetry: () => void }) 
   );
 }
 
-/** Names typed one at a time: each becomes a removable chip. */
-function NameList({ id, label, items, disabled, onChange }: { id: string; label: string; items: string[]; disabled?: boolean; onChange: (items: string[]) => void }) {
-  const [draft, setDraft] = React.useState("");
-  const add = () => {
-    const next = draft.trim();
-    if (next && !items.includes(next)) onChange([...items, next]);
-    setDraft("");
-  };
+const argLine = (text: string, name: string, value: string) => text.replace(new RegExp(`^ARG\\s+${name}=.*$`, "m"), () => `ARG ${name}=${/^\S+$/.test(value) ? value : `"${value}"`}`);
+
+function VariableRow({ name, value, disabled, onChange, onRemove }: { name: string; value: string; disabled?: boolean; onChange: (value: string) => void; onRemove?: () => void }) {
+  const id = `variable-${name}`;
   return (
-    <div className="space-y-1.5">
-      <Label htmlFor={id}>{label}</Label>
-      <div className="flex gap-2">
-        <Input
-          id={id}
-          className="font-mono"
-          value={draft}
-          disabled={disabled}
-          autoComplete="off"
-          onChange={(event) => setDraft(event.target.value)}
-          onBlur={add}
-          onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); add(); } }}
-        />
-        <Button type="button" variant="outline" disabled={disabled || !draft.trim()} onClick={add}>{t("Add")}</Button>
-      </div>
-      {items.length > 0 ? (
-        <ul className="flex flex-wrap gap-1.5">
-          {items.map((item) => (
-            <li key={item}>
-              <Badge variant="outline" className="font-mono">
-                {item}
-                <button type="button" aria-label={t("Remove {name}", { name: item })} disabled={disabled} className="ml-1 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => onChange(items.filter((other) => other !== item))}>
-                  <X aria-hidden="true" className="size-3" />
-                </button>
-              </Badge>
-            </li>
-          ))}
-        </ul>
-      ) : null}
+    <div className="grid grid-cols-[minmax(0,2fr)_minmax(0,3fr)_1.75rem] items-center gap-2">
+      <Label htmlFor={id} title={name} className="block truncate font-mono text-xs font-normal">{name}</Label>
+      <Input id={id} className="h-7 px-2 font-mono text-xs" spellCheck={false} autoComplete="off" value={value} disabled={disabled} onChange={(event) => onChange(event.target.value)} />
+      {onRemove ? <Button type="button" variant="ghost" className="size-7 p-0" aria-label={t("Remove {name}", { name })} onClick={onRemove}><X className="size-3.5" aria-hidden /></Button> : null}
+    </div>
+  );
+}
+
+function AddVariable({ onAdd }: { onAdd: (name: string, value: string) => void }) {
+  const [name, setName] = React.useState("");
+  const [value, setValue] = React.useState("");
+  const add = () => { onAdd(name, value); setName(""); setValue(""); };
+  return (
+    <div className="grid grid-cols-[minmax(0,2fr)_minmax(0,3fr)_auto] items-center gap-2">
+      <Input aria-label={t("Variable name")} placeholder={t("Variable name")} className="h-7 px-2 font-mono text-xs" spellCheck={false} autoComplete="off" value={name} onChange={(event) => setName(event.target.value.toUpperCase())} />
+      <Input aria-label={t("Value of the new variable")} className="h-7 px-2 font-mono text-xs" spellCheck={false} autoComplete="off" value={value} onChange={(event) => setValue(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && name) add(); }} />
+      <Button type="button" variant="outline" className="h-7 px-2 text-xs" disabled={!name} onClick={add}>{t("Add")}</Button>
     </div>
   );
 }
@@ -241,13 +224,14 @@ export function CreateProjectView({ lifetime, onCancel, onCreated }: CreateProje
   const [git, setGit] = React.useState(true);
   const [step, setStep] = React.useState<Step>("project");
   const [image, setImage] = React.useState("");
-  const [packages, setPackages] = React.useState<string[]>([]);
-  const [extensions, setExtensions] = React.useState<string[]>([]);
   const [dockerfile, setDockerfile] = React.useState<string>();
+  const [args, setArgs] = React.useState<Record<string, string>>({});
+  const [env, setEnv] = React.useState<Record<string, string>>({});
   const [instructions, setInstructions] = React.useState<Record<string, string>>({});
   /** Held here because the files view unmounts with its tab and with a change of mode. */
   const [selectedFile, setSelectedFile] = React.useState<string>();
   const [fileView, setFileView] = React.useState("preview");
+  const [previewTab, setPreviewTab] = React.useState("dockerfile");
   const [preview, setPreview] = React.useState<{ key: string; plan?: CreatePlan; error?: string }>();
   const [attempt, setAttempt] = React.useState(0);
   const [busy, setBusy] = React.useState(false);
@@ -267,8 +251,9 @@ export function CreateProjectView({ lifetime, onCancel, onCreated }: CreateProje
   }
   /** Some choices bring a service with them: the form shows it on, and the server applies the same rule. */
   const required = (stack?.options ?? []).flatMap((option) => option.choices.find((choice) => choice.value === options[option.id])?.services ?? []);
-  const fields: DockerCustom = { ...(image.trim() ? { image: image.trim() } : {}), ...(packages.length ? { packages } : {}), ...(extensions.length ? { extensions } : {}) };
-  const custom: DockerCustom | undefined = mode !== "docker" ? undefined : dockerfile !== undefined ? { dockerfile } : Object.keys(fields).length ? fields : undefined;
+  const fields: DockerCustom = { ...(image.trim() ? { image: image.trim() } : {}), ...(Object.keys(args).length ? { args } : {}) };
+  const envField: DockerCustom = Object.keys(env).length ? { env } : {};
+  const custom: DockerCustom | undefined = mode !== "docker" ? undefined : dockerfile !== undefined ? { dockerfile, ...envField } : Object.keys(fields).length + Object.keys(envField).length ? { ...fields, ...envField } : undefined;
   const form = stack ? { stack: stack.id, mode, options, services, versions, ...(custom ? { docker: custom } : {}), ...(Object.keys(instructions).length ? { instructions } : {}), git } : undefined;
   const input: CreateInput | undefined = form && root && name.trim() ? { ...form, name: name.trim(), rootId: root.id } : undefined;
 
@@ -281,7 +266,15 @@ export function CreateProjectView({ lifetime, onCancel, onCreated }: CreateProje
   const lastPlan = React.useRef<CreatePlan>(undefined);
   if (current?.plan) lastPlan.current = current.plan;
   const shownPlan = lastPlan.current;
-  const shownDocker = mode === "docker" ? shownPlan?.docker : undefined;
+  /** Apart from the plan: back from native mode, a value the server refuses must stay on screen to be fixed. */
+  const lastDocker = React.useRef<CreatePlan["docker"]>(undefined);
+  if (current?.plan?.docker) lastDocker.current = current.plan.docker;
+  const shownDocker = mode === "docker" ? lastDocker.current : undefined;
+
+  /** A choice in the form rewrites its own ARG lines, so a value typed for the former one would hide it. */
+  const imageChoice = JSON.stringify([activeOptions.filter((option) => option.kind === "version" && option.docker).map((option) => options[option.id]), image]);
+  const keepArgs = (keep: (name: string) => boolean) => setArgs((all) => Object.fromEntries(Object.entries(all).filter(([name]) => keep(name))));
+  React.useEffect(() => keepArgs((name) => ["SYSTEM_PACKAGES", "PHP_EXTENSIONS", "COMPOSER_VERSION"].includes(name)), [imageChoice]);
 
   /** The summary is always the server's plan for the exact form, so creation follows a preview without a separate step. */
   React.useEffect(() => {
@@ -298,6 +291,17 @@ export function CreateProjectView({ lifetime, onCancel, onCreated }: CreateProje
   /** A plan only counts for the form it was made from, so creation stays disabled until the new one arrives. */
   function changed<T>(apply: (value: T) => void) {
     return (value: T) => { apply(value); setError(undefined); };
+  }
+
+  /** In an edited file the text is the truth, so the line changes there. Otherwise the server renders it. */
+  function editArg(name: string, value: string) {
+    if (dockerfile === undefined) return changed(setArgs)({ ...args, [name]: value });
+    changed(setDockerfile)(argLine(dockerfile, name, value));
+  }
+
+  function removeEnv(name: string) {
+    const { [name]: _removed, ...others } = env;
+    changed(setEnv)(others);
   }
 
   function editInstructions(file: string, text?: string) {
@@ -319,11 +323,11 @@ export function CreateProjectView({ lifetime, onCancel, onCreated }: CreateProje
   if (stacks.loading || roots.loading || !stack) return <CreateProjectSkeleton />;
 
   const docker = mode === "docker";
-  const steps = STEPS.filter((item) => docker || item.id !== "docker");
-  const position = steps.findIndex((item) => item.id === step);
+  const position = STEPS.findIndex((item) => item.id === step);
   const plainOptions = activeOptions.filter((option) => option.kind !== "version");
   const versionOptions = activeOptions.filter((option) => option.kind === "version");
-  const defaultImage = /^\s*FROM\s+(\S+)/im.exec(plan?.docker?.dockerfile ?? "")?.[1];
+  // DevHub sets the two DEVHUB_ ones itself, from the user that runs the container.
+  const buildArgs = [...(dockerfile ?? shownDocker?.dockerfile ?? "").matchAll(/^ARG\s+(?!DEVHUB_)(\w+)=(.*)$/gm)].map((match) => [match[1]!, match[2]!.replace(/^"(.*)"$/, "$1")] as const);
   /** These files carry the project name and the stack, so the text to edit has to come from a plan of this very project. */
   const editable = shownPlan?.input.name === input?.name && shownPlan?.input.stack === input?.stack;
   const filesView = shownPlan ? <FilesView plan={shownPlan} edits={instructions} editable={editable} busy={busy} selected={selectedFile} view={fileView} onSelect={setSelectedFile} onView={setFileView} onEdit={editInstructions} /> : null;
@@ -334,12 +338,12 @@ export function CreateProjectView({ lifetime, onCancel, onCreated }: CreateProje
       <Card className="scrollbar-soft min-w-0 overflow-hidden xl:min-h-0 xl:overflow-y-auto">
         <nav aria-label={t("Creation steps")} className="border-b px-4 py-3 md:px-5">
           <ol className="flex flex-wrap items-center gap-x-1 gap-y-1">
-            {steps.map((item, index) => (
+            {STEPS.map((item, index) => (
               <li key={item.id}>
                 <button
                   type="button"
                   aria-current={item.id === step ? "step" : undefined}
-                  disabled={index > 0 && !input}
+                  disabled={index > position}
                   onClick={() => setStep(item.id)}
                   className="flex items-center gap-2 rounded-md px-2 py-1 text-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 aria-[current=step]:font-medium aria-[current=step]:text-foreground"
                 >
@@ -369,9 +373,9 @@ export function CreateProjectView({ lifetime, onCancel, onCreated }: CreateProje
                   setServices([]);
                   setVersions({});
                   setImage("");
-                  setPackages([]);
-                  setExtensions([]);
+                  setArgs({});
                   setDockerfile(undefined);
+                  setEnv({});
                 }}
                 className="grid grid-cols-[repeat(auto-fill,minmax(7rem,1fr))] gap-2"
               >
@@ -486,27 +490,6 @@ export function CreateProjectView({ lifetime, onCancel, onCreated }: CreateProje
             </>
           ) : null}
 
-          {step === "docker" ? (
-            <>
-              <div className="space-y-1.5">
-                <Label htmlFor="create-image">{t("Base image")}</Label>
-                <Input id="create-image" className="font-mono" value={image} placeholder={defaultImage} disabled={dockerfile !== undefined} autoComplete="off" onChange={(event) => changed(setImage)(event.target.value)} />
-                <p className="text-xs text-muted-foreground">{t("Leave empty to follow the version you chose.")}</p>
-              </div>
-              <NameList id="create-packages" label={t("System packages")} items={packages} disabled={dockerfile !== undefined} onChange={changed(setPackages)} />
-              {stack.id === "php" ? <NameList id="create-extensions" label={t("PHP extensions")} items={extensions} disabled={dockerfile !== undefined} onChange={changed(setExtensions)} /> : null}
-              <SwitchRow
-                id="create-edit-dockerfile"
-                label={t("Edit the file")}
-                checked={dockerfile !== undefined}
-                disabled={dockerfile === undefined && !shownDocker}
-                onChange={(on) => changed(setDockerfile)(on ? shownDocker?.dockerfile : undefined)}
-              />
-              <p className="text-xs text-muted-foreground">{t("The Dockerfile is saved at the root of the project. It runs on this machine when the image builds.")}</p>
-              {dockerfile !== undefined ? <p className="text-xs text-muted-foreground">{t("Keep the line that creates the folders: the project runs as your user and installs into them.")}</p> : null}
-            </>
-          ) : null}
-
           {step === "create" ? (
             plan ? (
               <div className="space-y-3 text-xs">
@@ -532,9 +515,9 @@ export function CreateProjectView({ lifetime, onCancel, onCreated }: CreateProje
         <div className="flex flex-wrap items-center justify-between gap-2 border-t px-4 py-3 md:px-5">
           <Button type="button" variant="ghost" disabled={busy} onClick={onCancel}>{t("Cancel")}</Button>
           <div className="flex flex-wrap gap-2">
-            {position > 0 ? <Button type="button" variant="outline" disabled={busy} onClick={() => setStep(steps[position - 1]!.id)}>{t("Back")}</Button> : null}
-            {position < steps.length - 1 ? (
-              <Button type="button" disabled={!input} onClick={() => setStep(steps[position + 1]!.id)}>{t("Continue")}</Button>
+            {position > 0 ? <Button type="button" variant="outline" disabled={busy} onClick={() => setStep(STEPS[position - 1]!.id)}>{t("Back")}</Button> : null}
+            {position < STEPS.length - 1 ? (
+              <Button type="button" disabled={!input || previewError !== undefined} onClick={() => setStep(STEPS[position + 1]!.id)}>{t("Continue")}</Button>
             ) : (
               <Button
                 type="button"
@@ -552,25 +535,55 @@ export function CreateProjectView({ lifetime, onCancel, onCreated }: CreateProje
       <aside aria-label={t("Files DevHub will write")} className="min-w-0 xl:min-h-0">
         <Card className="h-full min-w-0 overflow-hidden">
           {shownDocker ? (
-            <Tabs defaultValue="dockerfile" className="flex min-h-0 flex-1 flex-col gap-0">
-              <div className="border-b px-4 py-2 md:px-5">
+            <Tabs value={previewTab} onValueChange={setPreviewTab} className="flex min-h-0 flex-1 flex-col gap-0">
+              <div className="flex min-h-13 flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b px-4 py-2 md:px-5">
                 <TabsList aria-label={t("Files DevHub will write")}>
                   <TabsTrigger value="dockerfile">Dockerfile</TabsTrigger>
                   <TabsTrigger value="files">{t("Files")}</TabsTrigger>
                   <TabsTrigger value="compose">compose.yml</TabsTrigger>
-                  <TabsTrigger value="env">{t("Variables")}</TabsTrigger>
                 </TabsList>
+                {previewTab === "dockerfile" ? (
+                  <SwitchRow
+                    id="create-edit-dockerfile"
+                    label={t("Edit the file")}
+                    checked={dockerfile !== undefined}
+                    // The text to edit has to be the plan of this very form, not the last one that worked.
+                    disabled={dockerfile === undefined && !current?.plan}
+                    onChange={(on) => changed(setDockerfile)(on ? shownDocker.dockerfile : undefined)}
+                  />
+                ) : null}
               </div>
-              <TabsContent value="dockerfile" className="scrollbar-soft min-h-0 flex-1 xl:overflow-auto">
-                {dockerfile !== undefined ? (
-                  <Textarea aria-label="Dockerfile" spellCheck={false} value={dockerfile} onChange={(event) => changed(setDockerfile)(event.target.value)} className="scrollbar-soft h-full min-h-80 resize-none rounded-none border-0 p-4 font-mono text-xs leading-relaxed shadow-none focus-visible:ring-0 md:px-5" />
-                ) : <CodeBlock language="docker">{shownDocker.dockerfile}</CodeBlock>}
+              <TabsContent value="dockerfile" className="grid min-h-0 flex-1 md:grid-cols-[minmax(0,3fr)_minmax(0,2fr)] xl:grid-rows-[minmax(0,1fr)]">
+                <div className="scrollbar-soft min-h-0 xl:overflow-auto">
+                  {dockerfile !== undefined ? (
+                    <Textarea aria-label="Dockerfile" spellCheck={false} value={dockerfile} onChange={(event) => changed(setDockerfile)(event.target.value)} className="scrollbar-soft h-full min-h-80 resize-none rounded-none border-0 p-4 font-mono text-xs leading-relaxed shadow-none focus-visible:ring-0 md:px-5" />
+                  ) : <CodeBlock language="docker">{shownDocker.dockerfile}</CodeBlock>}
+                </div>
+                <section aria-label={t("Variables")} className="scrollbar-soft min-h-0 space-y-4 border-t p-4 md:border-t-0 md:border-l xl:overflow-auto">
+                  <div className="space-y-1.5">
+                    <h3 className="text-xs font-medium text-muted-foreground">{t("When building the image")}</h3>
+                    <div className="grid grid-cols-[minmax(0,2fr)_minmax(0,3fr)_1.75rem] items-center gap-2">
+                      <Label htmlFor="create-image" className="block truncate text-xs font-normal">{t("Base image")}</Label>
+                      <Input id="create-image" className="h-7 px-2 font-mono text-xs" spellCheck={false} autoComplete="off" value={image} placeholder={shownDocker.image} disabled={dockerfile !== undefined} onChange={(event) => changed(setImage)(event.target.value)} />
+                    </div>
+                    {buildArgs.map(([key, value]) => <VariableRow key={key} name={key} value={dockerfile === undefined ? args[key] ?? value : value} onChange={(next) => editArg(key, next)} />)}
+                    <p className="text-xs text-muted-foreground">{t("Leave the image empty to follow the version you chose. Separate several packages with spaces.")}</p>
+                  </div>
+                  <div className="space-y-1.5">
+                    <h3 className="text-xs font-medium text-muted-foreground">{t("In the container")}</h3>
+                    {Object.entries({ ...shownDocker.env, ...env }).map(([key, value]) => (
+                      <VariableRow key={key} name={key} value={value} disabled={shownDocker.locked.includes(key)} onChange={(next) => changed(setEnv)({ ...env, [key]: next })} {...(key in env ? { onRemove: () => removeEnv(key) } : {})} />
+                    ))}
+                    <AddVariable onAdd={(key, value) => changed(setEnv)({ ...env, [key]: value })} />
+                  </div>
+                </section>
               </TabsContent>
               <TabsContent value="files" className="flex min-h-0 flex-1 flex-col">{filesView}</TabsContent>
               <TabsContent value="compose" className="scrollbar-soft min-h-0 flex-1 xl:overflow-auto"><CodeBlock language="yaml">{shownDocker.compose}</CodeBlock></TabsContent>
-              <TabsContent value="env" className="scrollbar-soft min-h-0 flex-1 xl:overflow-auto"><CodeBlock language="properties">{Object.entries(shownDocker.env).map(([key, value]) => `${key}=${value}`).join("\n")}</CodeBlock></TabsContent>
               <div className="space-y-1 border-t px-4 py-2.5 text-xs text-muted-foreground md:px-5">
                 {previewError ? <PlanState error={previewError} onRetry={() => setAttempt((count) => count + 1)} /> : null}
+                <p>{t("The Dockerfile is saved at the root of the project. It runs on this machine when the image builds.")}</p>
+                {dockerfile !== undefined ? <p>{t("Keep the line that creates the folders: the project runs as your user and installs into them.")}</p> : null}
                 <p>{t("Managed by DevHub, not editable: non-root user, no capabilities, ports on this machine only.")}</p>
                 <p>{t("Addresses and passwords of the services are added at creation.")}</p>
               </div>

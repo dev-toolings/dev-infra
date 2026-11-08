@@ -81,7 +81,7 @@ export interface DiscoveryPort {
 export interface ImportInput { path: string; name?: string; id?: string; toolchain?: "bun"|"npm"; /** A new project has no lockfile yet: the first install writes it. */ fresh?: boolean }
 export type Toolchain = "bun"|"npm"|"uv"|"composer";
 export interface ImportPlan {
- project: ProjectInput; toolchain: Toolchain; image: string; /** From DevHub names to the ones the framework reads. */ translateEnv?: (env: Record<string,string>) => Record<string,string>; /** The project keeps its own Dockerfile at its root. */ ownDockerfile?: boolean; install: string; dev: string; lockfile?: string; url: string; containerPort: number;
+ project: ProjectInput; toolchain: Toolchain; image: string; /** From DevHub names to the ones the framework reads. */ translateEnv?: (env: Record<string,string>) => Record<string,string>; /** The project keeps its own Dockerfile at its root. */ ownDockerfile?: boolean; /** The stage to run, when the Dockerfile has several. */ buildTarget?: string; install: string; dev: string; lockfile?: string; url: string; containerPort: number;
  infra: string[]; database?: string; /** Where the database runs, when it is not the shared Postgres. */ databaseHost?: string; databaseAdmin?: string; env: Record<string,string>; /** Replaces what a previous import left in the env file: these services were just provisioned. */ linkedEnv?: Record<string,string>; missing: string[]; warnings: string[];
 }
 export interface ImportResult { project: Project; operation: Operation; url: string; missing: string[] }
@@ -99,8 +99,8 @@ export interface StackOption {
  /** Applies only with this value of another option. */ when?: { option: string; value: string };
 }
 /** What a project changes in its Docker image. A whole `dockerfile` replaces the other fields. */
-export interface DockerCustom { image?: string; packages?: string[]; extensions?: string[]; dockerfile?: string }
-export interface DockerPreview { dockerfile: string; compose: string; env: Record<string,string> }
+export interface DockerCustom { image?: string; packages?: string[]; extensions?: string[]; dockerfile?: string; /** New defaults for the ARG lines of the generated Dockerfile. */ args?: Record<string,string>; /** Added to the variables of the container. */ env?: Record<string,string> }
+export interface DockerPreview { dockerfile: string; /** The image of the chosen version, before any custom one. */ image: string; compose: string; env: Record<string,string>; /** Variables DevHub sets itself: they cannot be edited. */ locked: string[] }
 export interface ServiceOption { id: string; name: string; versions: string[]; /** The version of the shared container: any other one runs in an instance of its own. */ default: string }
 export interface ServiceInstance { container: string; /** Inside the Docker network. */ port: number; hostPort: number; /** Set when the Postgres admin is not the one of the shared container. */ admin?: string }
 export interface SharedServicesPort { ensure(id: string, version: string): Promise<ServiceInstance>; containerEnv(container: string, name: string): Promise<string> }

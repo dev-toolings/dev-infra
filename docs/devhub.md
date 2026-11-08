@@ -77,11 +77,31 @@ its framework, runtime, mode and services,
 `.claude/settings.json`, and the `project-checks` and `add-feature` skills in `.claude/skills`
 and `.agents/skills`.
 
-The page shows every file before creation: click one in the tree to read it. It also
-customizes the Docker image: base image, system packages, PHP extensions, or
-the whole Dockerfile. New Docker projects keep their Dockerfile at their root, and it runs
+The page shows every file before creation: click one in the tree to read it. The
+Dockerfile tab also customizes the Docker image: base image, system packages, PHP extensions,
+or the whole Dockerfile. New Docker projects keep their Dockerfile at their root, and it runs
 on this machine when the image builds. What confines the container stays in a Compose
 file DevHub manages: non-root user, no capabilities, ports on this machine only.
+
+The generated Dockerfile declares what can change as `ARG` at its top or above the line that
+uses it: image versions (`PHP_VERSION`, `NODE_VERSION`, `PYTHON_VERSION`, `BUN_VERSION`,
+`FRANKENPHP_VERSION`, `COMPOSER_VERSION`), `DEBIAN_RELEASE`, `SYSTEM_PACKAGES` and
+`PHP_EXTENSIONS`. An image DevHub cannot split stays whole in `BASE_IMAGE`. The Dockerfile tab
+edits them beside the file, along with the variables of the container and new ones. `HOST`,
+`PORT`, service addresses and secrets stay with DevHub. Add a secret, or a value with spaces,
+quotes, `#` or `$`, to `app.env` after creation.
+To change an `ARG` after creation, edit it in the Dockerfile and rebuild: a changed Dockerfile
+also reinstalls the dependencies.
+
+Every project gets a `Makefile` grouped by section: `make help` lists the targets, `make check`
+runs the checks of the stack. In Docker its commands run in the `app` container, which has to be
+started; `DEVHUB` and `EXEC` can be overridden.
+
+The Dockerfile has three stages. `base` holds what never differs: runtime, system packages, PHP
+extensions. `dev` is what DevHub runs, with the project mounted. `prod` adds the code and the
+production dependencies, and runs as UID 1000: `docker build --target prod .` gives the image
+for preprod and prod, which differ only by their variables. It needs the lockfile that the first
+start writes. A whole Dockerfile without a `dev` stage is built as it is.
 
 | Stack | Option | Values (default first) |
 |---|---|---|
