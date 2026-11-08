@@ -45,6 +45,7 @@ function fixture() {
       logs: async () => [{ seq: 1, time: plan.createdAt, projectId: "shop", componentId: "web", stream: "stdout" as const, message: "ready" }],
       inventory: async () => [], submit: () => { throw new Error("unused"); }, getOperation: () => { throw new Error("unused"); }, listOperations: () => [],
     },
+    worktrees: { list: () => [], get: () => undefined },
     maintenance: {
       scan: async (imageId: string) => ({ id: "scan-1", imageId, state: scanState, scannedAt: plan.createdAt, scanner: "fixture", findings: [] }),
       listScans: () => [], getScan: (id: string) => ({ id, imageId: "sha256:local", state: "succeeded" as const, scannedAt: plan.createdAt, scanner: "fixture", findings: [] }), preview: async () => ({ id: "change-1", projectId: "shop", componentId: "web", file: "Dockerfile", sourceHash: "h", original: "FROM old", proposed: "FROM new", replacement: "new", state: "preview" as const, createdAt: plan.createdAt }),

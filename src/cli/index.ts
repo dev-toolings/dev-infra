@@ -8,6 +8,7 @@ import { parseCliArgs, usage } from "./args";
 import { resolveSelection } from "../operations/graph";
 import { redactOutput, redactText } from "../operations/logger";
 import { projectNetwork } from "../services";
+import { serveMcp } from "../mcp";
 
 export type CliOptions = { stateDir: string; infraDir: string; run: Executor };
 
@@ -203,6 +204,47 @@ export async function runCli(argv: string[], services: AppServices, options: Cli
       if (result.stderr) stderr.write(result.stderr);
       return result.code;
     }
+    if (command.command === "worktree") {
+      const { worktrees } = services;
+      if (command.action === "list") {
+        const items = worktrees.list();
+        write(items, command.json, items.length ? items.map((item) => `${item.id}  ${item.branch}  ${item.path}`).join("\n") : "No worktrees");
+        return 0;
+      }
+      if (command.action === "remove") {
+        const result = await worktrees.remove(command.id, command.force);
+        write(result, command.json, `Removed ${result.removed}; its branch is kept${result.keptVolume ? `\nDependencies volume kept: docker volume rm ${result.keptVolume}` : ""}`);
+        return 0;
+      }
+      const plan = await worktrees.plan(command.project, command.branch, command.expire);
+      if (!command.json) stdout.write([
+        `Worktree preview: ${plan.id}`,
+        `  Branch: ${plan.branch}${plan.newBranch ? " (new, from the current HEAD)" : ""}`,
+        `  Folder: ${plan.path}`,
+        `  URL: ${plan.url}, http://${plan.host} with the proxy profile`,
+        ...(plan.database ? [`  Database: ${plan.database}, a copy of the one of ${plan.parent}`] : []),
+        ...(plan.expiresAt ? [`  Removed after: ${plan.expiresAt}, unless it has uncommitted changes`] : []),
+        "",
+      ].join("\n"));
+      if (!command.apply) { write({ preview: true, plan }, command.json, "Nothing changed. Run again with --apply to create and start."); return 0; }
+      const result = await worktrees.add(plan);
+      const ok = result.operation.state === "succeeded";
+      write({ worktree: result.worktree, project: projectSummary(result.project), operation: result.operation, url: result.url, host: result.host }, command.json,
+        ok ? `Running: ${result.url}` : `Start failed: ${redactText(result.operation.error ?? "unknown error")}\nLogs: devhub project logs ${result.project.id}`);
+      return ok ? 0 : 1;
+    }
+    if (command.command === "exec") {
+      const result = await services.worktrees.exec(command.project, command.shell, (command.timeout ?? 120) * 1000);
+      if (command.json) write(result, true);
+      else { stdout.write(result.stdout); stderr.write(result.stderr); }
+      return result.code;
+    }
+    if (command.command === "proxy") {
+      const result = await services.worktrees.syncProxy();
+      write(result, command.json, [...result.sites.map((site) => `http://${site.host} -> ${site.upstream}`), result.reloaded ? "Caddy reloaded" : "Caddy is not running: devhub up --with proxy"].join("\n"));
+      return 0;
+    }
+    if (command.command === "mcp") return await serveMcp(services);
     if (command.command === "root") {
       if (command.action === "list") write(services.catalog.listRoots(), command.json);
       else if (command.action === "add") write(services.catalog.addRoot(command.path, command.label), command.json, "Root approved");
@@ -219,6 +261,7 @@ export async function runCli(argv: string[], services: AppServices, options: Cli
       }
       const project = services.catalog.getProject(command.id);
       if (command.action === "show") { write(projectSummary(project), command.json); return 0; }
+      if (command.action === "remove" && services.worktrees.get(project.id)) throw new DevHubError(`Remove a worktree with devhub worktree remove ${project.id}: it also drops its database and folder.`);
       if (command.action === "remove") { services.catalog.removeProject(project.id); write({ removed: project.id }, command.json, "Project unregistered; its files and services were left in place"); return 0; }
       if (command.action === "status") { const status = await services.operations.status(project.id); write(status, command.json); return status.components.some((item) => item.state === "unhealthy" || item.state === "unknown") ? 1 : 0; }
       if (command.action === "logs") {

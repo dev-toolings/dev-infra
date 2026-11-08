@@ -22,7 +22,7 @@ VERSION_FILE="$DEVHUB_DIR/VERSION"
 SCRIPTS_DIR="$DEVHUB_DIR/data/scripts"
 NETWORK_NAME="${DEVHUB_NETWORK:-dev-shared-net}"
 DEFAULT_PROFILES=(core async)
-ALL_PROFILES="core,async"
+ALL_PROFILES="core,async,proxy"
 STARTABLE_PROFILES="$ALL_PROFILES"
 POSTGRES_CONTAINER="${POSTGRES_CONTAINER:-infra-postgres}"
 INSTANCE_LABEL="devhub.service-instance"
@@ -264,13 +264,17 @@ Commands:
   new <stack> <name> --root <path>     Create a project, in Docker or native mode
   presets                             List supported project presets
   versions                            Check pinned versions for end of life and CVEs (needs Go)
+  worktree list|add|remove            Run a branch of a Docker project beside it, for a parallel agent
+  exec <project> -- <command>         Run a command in the app container of a Docker project
+  proxy sync                          Give every project a http://<project>.localhost name (profile proxy)
+  mcp                                 MCP server on stdio for coding agents
   serve | pair                        Start the panel API (--dev adds Vite) or create a pairing code
   infra <legacy-command>              Run an existing infrastructure command
   version                             Show the installed DevHub version
   help                                Show this help
 
 Profiles:
-  core, async
+  core, async (started by default), proxy (Caddy: http://<project>.localhost)
 
 EOF
 }
@@ -289,7 +293,7 @@ main() {
   shift || true
 
   case "$cmd" in
-    root|project|import|new|maintenance|security|setup|serve|pair|presets|versions)
+    root|project|import|new|maintenance|security|setup|serve|pair|presets|versions|worktree|exec|proxy|mcp)
       command -v bun >/dev/null 2>&1 || { echo "Bun is required for '$cmd'. Install it for your user with: curl -fsSL https://bun.sh/install | bash" >&2; exit 1; }
       exec bun "$DEVHUB_CHECKOUT_DIR/src/main.ts" "$cmd" "$@"
       ;;

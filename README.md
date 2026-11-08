@@ -97,6 +97,7 @@ duplication.
 | Adminer | `infra-adminer` | `9080` | [localhost:9080](http://localhost:9080) | core |
 | Dozzle | `infra-dozzle` | `8888` | [localhost:8888](http://localhost:8888) | core |
 | RabbitMQ 4 | `infra-rabbitmq` | `5672` / `15672` | [localhost:15672](http://localhost:15672) | async |
+| Caddy 2 | `infra-caddy` | `80` (host network, loopback only) | `http://<project>.localhost` | proxy |
 
 A project can ask for another version of a service. It gets its own instance, created on
 demand and shared by the projects on that version: `infra-postgres-17`, with its own volume
@@ -195,6 +196,10 @@ devhub db create myapp  # create a PostgreSQL database + role
 | `devhub import <path> [--apply]` | Run a Hono project in an isolated dev container |
 | `devhub project discover\|add\|list\|show\|remove` | Detect and register projects in place |
 | `devhub project start\|stop\|restart\|check\|status\|logs <id>` | Project lifecycle, status and merged logs |
+| `devhub worktree list\|add <project> <branch> [--expire HOURS] [--apply]\|remove <id> [--force]` | Run a branch of a Docker project beside it, with its own port and a copy of its database |
+| `devhub exec <project> [--timeout S] -- <command>` | Run a command in the app container of a Docker project |
+| `devhub proxy sync` | Write the Caddy sites of every project and reload Caddy |
+| `devhub mcp` | MCP server on stdio for coding agents: projects, worktrees, logs, exec |
 | `devhub maintenance inventory\|scan\|scans\|changes\|preview\|apply\|validate\|activate` | Docker inventory, image scans and remediation |
 | `devhub serve [--port 8040] [--dev \| --dev-origin URL]` / `devhub pair` | Loopback control panel API and one-time pairing code; `--dev` also starts the Vite panel on 5175 (reused if already running) |
 

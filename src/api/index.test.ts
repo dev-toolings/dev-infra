@@ -18,6 +18,7 @@ function setup(now = () => Date.now()) {
   const calls: unknown[][] = [];
   const operations: Operation[] = [];
   const pendingLogs: { current?: Promise<LogEntry[]> } = {};
+  const variants: Array<{ id: string; parent: string; branch: string }> = [];
   const services = {
     catalog: {
       listRoots: () => [{ id: "root", path: "/tmp/approved", label: "Approved" }],
@@ -38,11 +39,12 @@ function setup(now = () => Date.now()) {
       followContainer: (id: string, since: string | undefined, onLine: (line: ContainerLogLine) => void) => follow.start(id, since, onLine),
     },
     create: { plan: async (input: object, draft?: boolean) => ({ ...input, draft }) },
+    worktrees: { list: () => variants, get: (id: string) => variants.find((item) => item.id === id) },
     maintenance: { scan: async () => { throw new Error("not used"); }, listScans: () => [], getScan: () => { throw new Error("not used"); }, preview: async () => { throw new Error("not used"); }, apply: async () => { throw new Error("not used"); }, validate: async () => { throw new Error("not used"); }, activate: async () => { throw new Error("not used"); }, listChanges: () => [] },
   } as unknown as AppServices;
   const app = createApp(services, { stateDir, pairingCode: code, origins: ["http://127.0.0.1:8040"], hostnames: ["127.0.0.1:8040"], now });
   const request = (path: string, init: RequestInit = {}) => app.request(path, { ...init, headers: { host: "127.0.0.1:8040", ...init.headers as Record<string, string> } });
-  return { app, code, calls, follow, operations, pendingLogs, request, stateDir };
+  return { app, code, calls, follow, operations, pendingLogs, request, stateDir, variants };
 }
 
 async function paired(context: ReturnType<typeof setup>) {
@@ -54,6 +56,16 @@ async function paired(context: ReturnType<typeof setup>) {
 afterEach(() => { for (const path of fixtures.splice(0)) rmSync(path, { recursive: true, force: true }); });
 
 describe("local API authentication", () => {
+  test("marks a worktree with its parent and refuses to only unregister it", async () => {
+    const context = setup();
+    const { auth } = await paired(context);
+    context.variants.push({ id: "sample", parent: "shop", branch: "fix/auth" });
+    expect((await (await context.request("/api/v1/projects", { headers: auth })).json()).data[0].worktree).toEqual({ parent: "shop", branch: "fix/auth" });
+    const response = await context.request("/api/v1/projects/sample", { method: "DELETE", headers: auth, body: "{}" });
+    expect(response.status).toBe(409);
+    expect((await response.json()).error.message).toContain("devhub worktree remove sample");
+  });
+
   test("requires a session on read and mutation routes, then pairs once and revokes on logout", async () => {
     const context = setup();
     const protectedRoutes: Array<[string, string]> = [

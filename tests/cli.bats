@@ -29,7 +29,7 @@ case "$1" in
       "compose --env-file ${EXPECTED_ENV_FILE:-$DEVHUB_DIR/.env} -f $DEVHUB_DIR/compose.yml up -d"|"compose --env-file ${EXPECTED_ENV_FILE:-$DEVHUB_DIR/.env} -f $DEVHUB_DIR/compose.yml down"|"compose --env-file ${EXPECTED_ENV_FILE:-$DEVHUB_DIR/.env} -f $DEVHUB_DIR/compose.yml ps"|"compose --env-file ${EXPECTED_ENV_FILE:-$DEVHUB_DIR/.env} -f $DEVHUB_DIR/compose.yml up -d postgres") exit 0 ;;
     esac
     [ "$*" = "compose --env-file ${EXPECTED_ENV_FILE:-$DEVHUB_DIR/.env} -f $DEVHUB_DIR/compose.yml config --format json" ] || exit 97
-    [ "${COMPOSE_PROFILES:-}" = core,async ] || exit 98
+    [ "${COMPOSE_PROFILES:-}" = core,async,proxy ] || exit 98
     [ "${CONFIG_FAIL:-0}" = 0 ] || exit 1
     cat "$MOCK_CONFIG"
     ;;

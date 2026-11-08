@@ -32,3 +32,6 @@ apps/web/dist/
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal
+
+# Caddy sites written by devhub proxy sync
+/data/caddy/sites/*.caddy

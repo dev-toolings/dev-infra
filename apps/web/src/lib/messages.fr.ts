@@ -25,6 +25,7 @@ export const fr = {
   "Add an existing project": "Ajouter un projet existant",
   "Add existing": "Ajouter un existant",
   "Added {date}": "Ajouté le {date}",
+  "Worktree of {parent}, branch {branch}": "Worktree de {parent}, branche {branch}",
   "After": "Après",
   "All": "Tous",
   "All components": "Tous les composants",

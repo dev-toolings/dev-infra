@@ -5,6 +5,7 @@ import { ensureStateDir } from "./state";
 import { parseCliArgs } from "./cli/args";
 import { guardExecutor } from "./guard";
 import { SharedServices } from "./services/index";
+import { Worktrees } from "./worktrees/index";
 import { terminateChildren } from "./runtime/executor";
 import type { AppServices, CatalogPort, CreatePort, DiscoveryPort, ImportPort, RuntimePort, OperationsPort, MaintenancePort, SharedServicesPort, VersionsPort, Executor } from "./contracts";
 
@@ -42,9 +43,11 @@ export function composeServices(modules: ManagerModules, executor: Executor, sta
   const operations = new modules.Operations({ catalog, runtime });
   const maintenance = new modules.Maintenance({ catalog, runtime, run, stateDir });
   const imports = new modules.Imports({ catalog, discovery, operations, run, stateDir, infraDir });
-  const create = new modules.Creator({ catalog, discovery, imports, operations, services: new SharedServices({ run, discovery, stateDir, infraDir }), run, infraDir });
+  const shared = new SharedServices({ run, discovery, stateDir, infraDir });
+  const create = new modules.Creator({ catalog, discovery, imports, operations, services: shared, run, infraDir });
   const versions = new modules.Versions({ run, stateDir, infraDir });
-  return { catalog, discovery, operations, maintenance, imports, create, versions };
+  const worktrees = new Worktrees({ catalog, discovery, operations, services: shared, run, stateDir, infraDir });
+  return { catalog, discovery, operations, maintenance, imports, create, versions, worktrees };
 }
 export async function services(stateDir = stateDirectory(), reservedPorts = CONTROLLER_PORTS): Promise<AppServices> {
   const [catalogModule, discoveryModule, runtimeModule, operationsModule, securityModule, importsModule, createModule, versionsModule] = await Promise.all(["catalog", "discovery", "runtime", "operations", "security", "imports", "create", "versions"].map(moduleAt));
@@ -202,6 +205,8 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     const distDir = resolve(import.meta.dir, "..", "apps", "web", "dist");
     const checkout = resolve(import.meta.dir, "..");
     listen(controllerFetch(app, distDir), port);
+    // Worktrees left idle for a day are stopped, expired ones removed; Caddy follows the projects created meanwhile.
+    setInterval(() => { void appServices.worktrees.sweep().then(() => appServices.worktrees.syncProxy()).catch((error: unknown) => process.stderr.write(`devhub: worktree sweep failed: ${error instanceof Error ? error.message : "unknown error"}\n`)); }, 15 * 60_000).unref();
     process.stdout.write(serveBanner({ port, devOrigin, devPanel: watchedPanel, panelBuilt: existsSync(join(distDir, "index.html")), checkout }));
     return 0;
   }

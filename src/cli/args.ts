@@ -88,6 +88,12 @@ export type ParsedCommand =
       action: "apply" | "validate" | "activate";
       changeId: string;
     } & JsonOption)
+  | ({ command: "worktree"; action: "list" } & JsonOption)
+  | ({ command: "worktree"; action: "add"; project: string; branch: string; expire?: number; apply: boolean } & JsonOption)
+  | ({ command: "worktree"; action: "remove"; id: string; force: boolean } & JsonOption)
+  | ({ command: "exec"; project: string; timeout?: number; shell: string } & JsonOption)
+  | ({ command: "proxy"; action: "sync" } & JsonOption)
+  | { command: "mcp" }
   | { command: "infra"; args: string[] };
 
 type OptionDefinition =
@@ -126,6 +132,11 @@ const USAGE = [
   "  project remove ID | status ID | start|stop|restart|check ID",
   "      [--component ID,...]... | logs ID [--component ID] [--limit N]",
   "      [--cursor N] [--follow]",
+  "  worktree list | add PROJECT BRANCH [--expire HOURS] [--apply]",
+  "      | remove ID [--force]",
+  "  exec PROJECT [--timeout SECONDS] -- COMMAND...",
+  "  proxy sync",
+  "  mcp      MCP server on stdio, for coding agents",
   "  maintenance inventory | scan IMAGE_ID | scans [SCAN_ID] | changes",
   "  maintenance preview --project ID --component ID --file REL",
   "      --replacement REF [--service NAME] [--stage NAME]",
@@ -550,6 +561,11 @@ function parseMaintenance(command: "maintenance" | "security", action: string, a
   return { command, action: action as "apply" | "validate" | "activate", changeId: changeId!, json: parsed.json };
 }
 
+/** One word is a shell command line; several are quoted one by one, as `docker exec` would pass them. */
+function shellCommand(words: string[]): string {
+  return words.length === 1 ? words[0]! : words.map((word) => /^[A-Za-z0-9_@%+=:,./-]+$/.test(word) ? word : `'${word.replace(/'/g, "'\\''")}'`).join(" ");
+}
+
 export function parseCliArgs(argv: string[]): ParsedCommand {
   if (argv.length === 0) return makeHelp();
 
@@ -594,6 +610,43 @@ export function parseCliArgs(argv: string[]): ParsedCommand {
     const services = picked.map(([service]) => service!);
     const versions = Object.fromEntries(picked.filter(([, version]) => version).map(([service, version]) => [service!, version!]));
     return { command: "new", stack: stack!, name: name!, root, mode, options, services, versions, git: !parsed.flags.has("no-git"), apply: parsed.flags.has("apply"), json: parsed.json };
+  }
+
+  if (command === "worktree") {
+    const [action, ...args] = rest;
+    if (!action || isHelpToken(action)) return makeHelp([command]);
+    ensureKnownAction(command, action, ["list", "add", "remove"]);
+    if (action === "list") { const parsed = collectOptions(args, {}); noPositionals(parsed); return { command, action, json: parsed.json }; }
+    if (action === "add") {
+      const parsed = collectOptions(args, { expire: { kind: "value" }, apply: { kind: "boolean" } });
+      const [project, branch] = exactPositionals(parsed, 2, "a project ID and a branch");
+      return { command, action, project: project!, branch: branch!, expire: optionalInteger(parsed, "expire", 1, 2160), apply: parsed.flags.has("apply"), json: parsed.json };
+    }
+    const parsed = collectOptions(args, { force: { kind: "boolean" } });
+    const [id] = exactPositionals(parsed, 1, "a worktree ID");
+    return { command, action: "remove", id: id!, force: parsed.flags.has("force"), json: parsed.json };
+  }
+
+  if (command === "exec") {
+    const split = rest.indexOf("--");
+    if (split < 0 || split === rest.length - 1) usageError("Usage: devhub exec PROJECT [--timeout SECONDS] -- COMMAND...");
+    const parsed = collectOptions(rest.slice(0, split), { timeout: { kind: "value" } });
+    const [project] = exactPositionals(parsed, 1, "a project ID");
+    return { command, project: project!, timeout: optionalInteger(parsed, "timeout", 1, 3600), shell: shellCommand(rest.slice(split + 1)), json: parsed.json };
+  }
+
+  if (command === "proxy") {
+    const [action, ...args] = rest;
+    if (!action || isHelpToken(action)) return makeHelp([command]);
+    ensureKnownAction(command, action, ["sync"]);
+    const parsed = collectOptions(args, {});
+    noPositionals(parsed);
+    return { command, action: "sync", json: parsed.json };
+  }
+
+  if (command === "mcp") {
+    if (rest.length) usageError("The mcp command takes no arguments.");
+    return { command };
   }
 
   if (command === "serve" || command === "pair") {

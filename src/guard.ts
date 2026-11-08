@@ -139,6 +139,9 @@ function dockerCommandError(argv: string[]): string | undefined {
   const subcommand = rootArgs[0]?.toLowerCase();
   if (root === "prune" || subcommand === "prune") return "Docker prune is not permitted";
   if ((root === "volume" || root === "network") && (subcommand === "rm" || subcommand === "remove")) {
+    // A project network holds no data, and a removed worktree must free its own (devhub-<id>-<hash>).
+    const names = rootArgs.slice(1);
+    if (root === "network" && names.length > 0 && names.every((name) => /^devhub-[a-z0-9][a-z0-9_-]*-[0-9a-f]{8}$/.test(name))) return undefined;
     return `Docker ${root} removal is not permitted`;
   }
 

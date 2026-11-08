@@ -191,6 +191,74 @@ local Unix-socket context. Native processes use the current user's systemd and
 D-Bus session. Project `.env` may set `COMPOSE_PROJECT_NAME` and
 `COMPOSE_PROFILES`; other execution-changing `COMPOSE_*` values are refused.
 
+## Worktrees for parallel agents
+
+A worktree runs another branch of a project DevHub runs in Docker (created with `devhub new`
+in Docker mode, or imported), beside the project and at the same time. Each agent works in
+its own folder, on its own port and its own copy of the database.
+
+```sh
+devhub worktree add shop fix/auth             # preview, changes nothing
+devhub worktree add shop fix/auth --apply     # check out, copy, start
+devhub worktree add shop spike --expire 48 --apply
+devhub worktree list
+devhub exec shop--fix-auth -- bun test
+devhub worktree remove shop--fix-auth         # --force drops uncommitted work
+```
+
+`add` creates the branch from the current `HEAD` when it does not exist, and checks it out
+in `<parent folder>/<project>.worktrees/<slug>`, where the slug is the branch in lowercase
+with dashes (`fix/auth` gives `fix-auth`); that folder must stay in an approved root. The
+worktree is a project of its own, `shop--fix-auth`, with a free port from 4100, its own
+`app.env`, its own Compose project and network, and a private database copied from the one of
+its parent with `pg_dump` (the copy belongs to the role of the worktree). A project on MySQL or
+MariaDB gets no worktree: only Postgres is copied. In `app.env`, the URL of the parent
+(`APP_URL`, `DEFAULT_URI`) becomes the one of the worktree, and the Redis and Meilisearch
+prefixes get the worktree ID. The shared services stay shared.
+
+A worktree nobody started, stopped or ran a command in for 24 hours is stopped by
+`devhub serve`, which checks every 15 minutes. With `--expire HOURS` it is removed once that
+time is over, unless it has uncommitted changes. Otherwise it stays until `worktree remove`,
+which stops it, removes its containers and network, drops its database and role, removes its
+folder and keeps its branch. DevHub
+never deletes a named volume: `remove` prints the dependencies volume to delete by hand. The
+panel shows a worktree after its parent; `project remove` refuses it, since unregistering
+alone would leave its database and folder.
+
+`devhub exec PROJECT -- COMMAND` runs `sh -c COMMAND` in the `app` container of a project
+DevHub runs in Docker, never on this machine. A single word after `--` is a command line
+(`-- "bun test && bun run lint"`); several words are quoted one by one, so
+`-- grep "a b" src` searches for `a b`. The default timeout is 120 seconds (`--timeout`, at most 3600).
+
+## Names with Caddy
+
+The `proxy` profile runs Caddy in `infra-caddy`. It gives every project with a local URL a
+name: `http://shop.localhost`, and `http://fix-auth.shop.localhost` for a worktree.
+Browsers resolve `*.localhost` to this machine without any DNS setting.
+
+```sh
+devhub up --with proxy
+devhub proxy sync
+```
+
+Caddy uses the host network to reach the projects on `127.0.0.1`, and binds port 80
+(`CADDY_HTTP_PORT`) and its admin API (`CADDY_ADMIN_PORT`, 2019) on loopback only. DevHub writes
+`data/caddy/sites/devhub.caddy` in its checkout and reloads Caddy after `worktree add` and
+`remove`; `devhub serve` syncs it every 15 minutes, and `proxy sync` does it at once. The
+sites are not HTTPS.
+
+## MCP server for agents
+
+`devhub mcp` serves the Model Context Protocol on stdio, so an agent drives its own worktree.
+Its tools: `projects_list`, `worktree_add`, `worktree_remove`, `project_action`,
+`project_status`, `project_logs` and `exec`. It runs as your user, like the CLI, so it takes
+no pairing code: any process that can start it can already run `devhub`. Secrets in command
+output and errors are redacted.
+
+```sh
+claude mcp add devhub -- devhub mcp
+```
+
 ## Maintenance
 
 ```sh

@@ -60,6 +60,8 @@ test("guard denies Docker destruction and mounted candidate containers before ex
     ["docker", "buildx", "prune", "-f"],
     ["docker", "--context", "default", "compose", "down", "-fv"],
     ["docker", "network", "rm", "dev-shared-net"],
+    ["docker", "network", "rm", "devhub-shop-1234abcd", "dev-shared-net"],
+    ["docker", "network", "rm", "-f", "devhub-shop-1234abcd"],
     ["docker", "volume", "rm", "project-data"],
     ["docker", "compose", "-p", "project", "down", "-v"],
     ["docker", "compose", "down", "--volumes=true"],
@@ -101,4 +103,10 @@ test("guard permits Docker read, config, up, and an ephemeral unmounted run", as
 
   for (const argv of permitted) await guarded(argv);
   expect(calls).toEqual(permitted);
+});
+
+test("guard lets DevHub remove a project network of its own, and only that", async () => {
+  const guarded = guardExecutor(async () => ({ code: 0, stdout: "", stderr: "" }));
+  expect((await guarded(["docker", "network", "rm", "devhub-shop--fix-auth-0a1b2c3d"])).code).toBe(0);
+  await expect(guarded(["docker", "network", "rm", "devhub-shop"])).rejects.toThrow("not permitted");
 });

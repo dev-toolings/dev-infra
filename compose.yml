@@ -165,6 +165,25 @@ services:
     networks:
       - dev-shared-net
 
+  caddy:
+    # Gives every DevHub project a name: http://shop.localhost, http://fix-auth.shop.localhost.
+    # The host network reaches the apps on 127.0.0.1; the Caddyfile binds to loopback only.
+    image: caddy:2.11.9-alpine@sha256:0bbb055bda6793c999bde78b1b5ce3e89f829fb031af2cf50056ea1246559fee
+    container_name: infra-caddy
+    profiles: [proxy]
+    restart: unless-stopped
+    logging: *shared-logging
+    network_mode: host
+    environment:
+      CADDY_HTTP_PORT: ${CADDY_HTTP_PORT:-80}
+      CADDY_ADMIN_PORT: ${CADDY_ADMIN_PORT:-2019}
+    volumes:
+      # DevHub writes sites/devhub.caddy, then reloads Caddy.
+      - ./data/caddy:/etc/caddy:ro
+    tmpfs:
+      - /data
+      - /config
+
   rabbitmq:
     # 4.x line: 3.13 left community support and carries CVE-2026-57212/57213/44839.
     # Upgrading across minors needs every stable feature flag enabled first
