@@ -36,6 +36,16 @@
   @apply scrollbar-thin scrollbar-thumb-muted-foreground scrollbar-track-transparent;
 }
 
+/* Tailwind leaves buttons on the default cursor. In the base layer, so a utility still wins. */
+@layer base {
+  button:not(:disabled),
+  summary,
+  input:is([type="checkbox"], [type="radio"]):not(:disabled),
+  label:has(input:is([type="checkbox"], [type="radio"]):not(:disabled)) {
+    cursor: pointer;
+  }
+}
+
 body {
   min-width: 320px;
 }
