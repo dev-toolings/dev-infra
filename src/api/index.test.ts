@@ -56,6 +56,15 @@ async function paired(context: ReturnType<typeof setup>) {
 afterEach(() => { for (const path of fixtures.splice(0)) rmSync(path, { recursive: true, force: true }); });
 
 describe("local API authentication", () => {
+  test("removes a project with the JSON request the panel sends, and refuses one without that content type", async () => {
+    const context = setup();
+    const { cookie, auth } = await paired(context);
+    expect((await context.request("/api/v1/projects/sample", { method: "DELETE", headers: { cookie, origin: "http://127.0.0.1:8040" } })).status).toBe(400);
+    const response = await context.request("/api/v1/projects/sample", { method: "DELETE", headers: auth, body: "{}" });
+    expect(response.status).toBe(200);
+    expect((await response.json()).data).toEqual({ removed: true });
+  });
+
   test("marks a worktree with its parent and refuses to only unregister it", async () => {
     const context = setup();
     const { auth } = await paired(context);

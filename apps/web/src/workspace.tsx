@@ -1,6 +1,6 @@
 import { t } from "./lib/i18n";
 import * as React from "react";
-import { getProjectStatus, listContainers, listProjectOperations, listProjects } from "./lib/api";
+import { getProjectStatus, listContainers, listProjectOperations, listProjects, removeProject } from "./lib/api";
 import { useAddProject } from "./lib/use-add-project";
 import { useLifecycle } from "./lib/use-lifecycle";
 import { useLifetime } from "./lib/use-lifetime";
@@ -124,6 +124,12 @@ export function Workspace({ onLogout }: WorkspaceProps) {
     navigate({ view, projectId });
   }
 
+  async function unregisterProject(projectId: string) {
+    await removeProject(projectId, lifetime());
+    projects.update((current) => (current ?? []).filter((item) => item.id !== projectId));
+    projects.reload();
+  }
+
   const projectActions = (
     <>
       <Button type="button" variant="outline" onClick={addProject.requestOpen}>{t("Add existing")}</Button>
@@ -187,6 +193,7 @@ export function Workspace({ onLogout }: WorkspaceProps) {
           error={projects.error && projectList.length === 0 ? projects.error : undefined}
           actions={projectActions}
           onSelect={openProject}
+          onRemove={unregisterProject}
         />
       ) : null}
 

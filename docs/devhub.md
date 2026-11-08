@@ -39,8 +39,9 @@ Project add without `--apply` prints a preview. Interactive additions prompt
 for missing values in a terminal. Use `--group` to select detected folders for
 one local project. A trusted local JSON configuration can be registered with
 `project add --file PATH --apply`; component directories must remain inside the
-registered project root. Removing a project unregisters it and does not remove
-its files or stop its services.
+registered project root. Removing a project, with `project remove` or the trash
+button of its card in the panel, unregisters it and does not remove its files or
+stop its services.
 
 ## Create a project
 

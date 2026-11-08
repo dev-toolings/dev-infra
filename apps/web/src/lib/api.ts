@@ -88,10 +88,10 @@ function networkFailure(error: unknown): unknown {
   return new ApiRequestError(t("DevHub could not be reached. Check that the local manager is running."), "network", 0);
 }
 
-async function send(method: "GET" | "POST", path: string, options: RequestOptions, accept: string): Promise<Response> {
+async function send(method: "GET" | "POST" | "DELETE", path: string, options: RequestOptions, accept: string): Promise<Response> {
   const headers: Record<string, string> = { Accept: accept, ...options.headers };
   const init: RequestInit = { method, credentials: "same-origin", cache: "no-store", signal: options.signal, headers };
-  if (method === "POST") {
+  if (method !== "GET") {
     headers["Content-Type"] = "application/json";
     init.body = JSON.stringify(options.body ?? {});
   }
@@ -109,7 +109,7 @@ async function send(method: "GET" | "POST", path: string, options: RequestOption
   return response;
 }
 
-async function request<T>(method: "GET" | "POST", path: string, options: RequestOptions = {}): Promise<T> {
+async function request<T>(method: "GET" | "POST" | "DELETE", path: string, options: RequestOptions = {}): Promise<T> {
   const response = await send(method, path, options, "application/json");
   try {
     const payload = (await response.json()) as Partial<ApiSuccess<T>> | null;
@@ -148,6 +148,8 @@ export const previewProject = (input: SetupInput, signal?: AbortSignal) =>
 export const createProject = (planId: string, signal?: AbortSignal) =>
   request<PublicProject>("POST", "/projects", { body: { planId }, signal });
 export const listProjects = (signal?: AbortSignal) => request<PublicProject[]>("GET", "/projects", { signal });
+export const removeProject = (projectId: string, signal?: AbortSignal) =>
+  request<{ removed: boolean }>("DELETE", `/projects/${id(projectId)}`, { signal });
 export const getProjectStatus = (projectId: string, signal?: AbortSignal) =>
   request<ProjectStatus>("GET", `/projects/${id(projectId)}/status`, { signal });
 export const listProjectOperations = (projectId: string, signal?: AbortSignal) =>

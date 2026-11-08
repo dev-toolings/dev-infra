@@ -1,8 +1,12 @@
 import { t } from "../../lib/i18n";
-import type { ReactNode } from "react";
-import { FolderGit2 } from "lucide-react";
+import * as React from "react";
+import { FolderGit2, LoaderCircle, Trash2 } from "lucide-react";
 import type { ProjectStatus, PublicProject } from "../../../../../src/contracts";
+import { errorMessage, isAbortError } from "../../lib/api";
 import { plainClick, routePath } from "../../lib/router";
+import { Alert, AlertDescription, AlertTitle } from "../ui/alert";
+import { Button } from "../ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "../ui/dialog";
 import { EmptyState, ErrorState } from "../ui/state";
 import { ProjectListSkeleton } from "./skeletons";
 import { ProjectMark, StateBadge, formatDateTime, projectState, safeHttpUrl } from "./shared";
@@ -15,11 +19,34 @@ export interface ProjectListProps {
   loading?: boolean;
   error?: string;
   /** Shown in the empty state; the page header holds them otherwise. */
-  actions?: ReactNode;
+  actions?: React.ReactNode;
   onSelect: (projectId: string) => void | Promise<void>;
+  onRemove: (projectId: string) => Promise<void>;
 }
 
-export function ProjectList({ projects, statuses, statusLoading = false, loading = false, error, actions, onSelect }: ProjectListProps) {
+export function ProjectList({ projects, statuses, statusLoading = false, loading = false, error, actions, onSelect, onRemove }: ProjectListProps) {
+  const [removing, setRemoving] = React.useState<PublicProject>();
+  const [busy, setBusy] = React.useState(false);
+  const [removeError, setRemoveError] = React.useState<string>();
+
+  function closeDialog() {
+    setRemoving(undefined);
+    setRemoveError(undefined);
+  }
+
+  async function confirmRemoval(project: PublicProject) {
+    setBusy(true);
+    setRemoveError(undefined);
+    try {
+      await onRemove(project.id);
+      closeDialog();
+    } catch (caught) {
+      if (!isAbortError(caught)) setRemoveError(errorMessage(caught));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <section aria-label={t("Projects")}>
       {error ? <ErrorState description={error} /> : loading ? <ProjectListSkeleton /> : null}
@@ -40,7 +67,7 @@ export function ProjectList({ projects, statuses, statusLoading = false, loading
             const address = project.components.map((component) => safeHttpUrl(component.url)).find(Boolean)?.replace(/^https?:\/\//, "").replace(/\/$/, "");
             const status = statuses?.find((item) => item?.projectId === project.id);
             return (
-              <li key={project.id} className="min-w-0">
+              <li key={project.id} className="relative min-w-0">
                 <a
                   href={routePath({ view: "projects", projectId: project.id })}
                   onClick={(event) => plainClick(event, () => onSelect(project.id))}
@@ -58,15 +85,52 @@ export function ProjectList({ projects, statuses, statusLoading = false, loading
                   </span>
                   {project.worktree ? <span className="truncate text-xs text-muted-foreground">{t("Worktree of {parent}, branch {branch}", { parent: project.worktree.parent, branch: project.worktree.branch })}</span> : null}
                   <code className="block w-full truncate text-xs leading-5 text-muted-foreground" title={project.root}>{project.root}</code>
-                  <span className="mt-auto flex flex-wrap items-center justify-between gap-x-3 text-xs text-muted-foreground">
+                  <span className="mt-auto flex flex-wrap items-center justify-between gap-x-3 pr-7 text-xs text-muted-foreground">
                     <span>{project.components.length === 1 ? t("1 component") : t("{count} components", { count: project.components.length })}</span>
                     <span>{t("Added {date}", { date: formatDateTime(project.createdAt) })}</span>
                   </span>
                 </a>
+                {/* A worktree is removed with devhub worktree remove, which also drops its database and folder. */}
+                {project.worktree ? null : <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  className="absolute right-2.5 bottom-2.5 text-muted-foreground hover:text-destructive"
+                  aria-label={t("Remove {name}", { name: project.name })}
+                  title={t("Remove {name}", { name: project.name })}
+                  onClick={() => setRemoving(project)}
+                >
+                  <Trash2 aria-hidden="true" />
+                </Button>}
               </li>
             );
           })}
         </ul>
+      ) : null}
+
+      {removing ? (
+        <Dialog open onOpenChange={(open) => { if (!open && !busy) closeDialog(); }}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle className="break-words">{t("Remove {name} from DevHub?", { name: removing.name })}</DialogTitle>
+              <DialogDescription>{t("The project leaves this list and its operation history is deleted. Its files stay on disk and its services keep running.")}</DialogDescription>
+            </DialogHeader>
+            <code className="block break-all rounded-md bg-muted/60 p-3 text-xs">{removing.root}</code>
+            {removeError ? (
+              <Alert variant="destructive">
+                <AlertTitle>{t("The project could not be removed")}</AlertTitle>
+                <AlertDescription>{removeError}</AlertDescription>
+              </Alert>
+            ) : null}
+            <DialogFooter>
+              <Button type="button" variant="outline" disabled={busy} onClick={closeDialog}>{t("Cancel")}</Button>
+              <Button type="button" variant="destructive" disabled={busy} onClick={() => confirmRemoval(removing)}>
+                {busy ? <LoaderCircle aria-hidden="true" className="animate-spin" /> : <Trash2 aria-hidden="true" />}
+                {t("Remove")}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       ) : null}
     </section>
   );
