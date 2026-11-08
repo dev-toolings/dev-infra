@@ -1,6 +1,6 @@
 import { t } from "../../lib/i18n";
 import * as React from "react";
-import { LoaderCircle, ScanLine, ShieldCheck } from "lucide-react";
+import { ChevronLeft, ChevronRight, LoaderCircle, ScanLine, ShieldCheck } from "lucide-react";
 import type { ContainerInfo, Finding, Scan, PublicChange } from "../../../../../src/contracts";
 import { cn } from "../../lib/utils";
 import { Badge } from "../ui/badge";
@@ -25,6 +25,8 @@ export interface ScansViewProps {
   error?: string;
   onScan?: (imageId: string) => ViewTask;
 }
+
+const PAGE_SIZE = 15;
 
 type ImageFilter = "all" | "unscanned" | "findings" | "failed";
 
@@ -124,6 +126,7 @@ export function ScansView({ scans, changes, containers, inventoryLoading = false
   const [query, setQuery] = React.useState("");
   const [filter, setFilter] = React.useState<ImageFilter>("all");
   const [openId, setOpenId] = React.useState<string>();
+  const [page, setPage] = React.useState(0);
   const rows = React.useMemo(() => buildRows(containers, scans), [containers, scans]);
 
   const counts = {
@@ -138,6 +141,9 @@ export function ScansView({ scans, changes, containers, inventoryLoading = false
     if (filter === "failed" && row.latest?.state !== "failed") return false;
     return matches(query, row.imageId, ...row.references, ...row.containers.map((container) => container.name));
   });
+  const pageCount = Math.max(1, Math.ceil(visible.length / PAGE_SIZE));
+  const currentPage = Math.min(page, pageCount - 1);
+  const pageRows = visible.slice(currentPage * PAGE_SIZE, (currentPage + 1) * PAGE_SIZE);
   const open = rows.find((row) => row.imageId === openId);
   const toggle = (next: ImageFilter) => setFilter((current) => (current === next ? "all" : next));
   const filters: { value: ImageFilter; label: string }[] = [
@@ -183,14 +189,14 @@ export function ScansView({ scans, changes, containers, inventoryLoading = false
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          <SearchField value={query} onChange={setQuery} label={t("Search image or container")} />
+          <SearchField value={query} onChange={(value) => { setQuery(value); setPage(0); }} label={t("Search image or container")} />
           <div role="group" aria-label={t("Filter images")} className="inline-flex items-center gap-0.5 rounded-lg bg-muted p-0.5">
             {filters.map((item) => (
               <button
                 key={item.value}
                 type="button"
                 aria-pressed={filter === item.value}
-                onClick={() => setFilter(item.value)}
+                onClick={() => { setFilter(item.value); setPage(0); }}
                 className={cn(
                   "h-6 rounded-md px-2.5 text-xs font-medium outline-none transition-colors focus-visible:ring-[3px] focus-visible:ring-ring/50",
                   filter === item.value ? "bg-background text-foreground shadow-xs" : "text-muted-foreground hover:text-foreground",
@@ -222,7 +228,7 @@ export function ScansView({ scans, changes, containers, inventoryLoading = false
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {visible.map((row) => (
+                {pageRows.map((row) => (
                   <TableRow key={row.imageId} className="cursor-pointer" onClick={() => setOpenId(row.imageId)}>
                     <TableCell>
                       <button
@@ -257,6 +263,21 @@ export function ScansView({ scans, changes, containers, inventoryLoading = false
                 ))}
               </TableBody>
             </Table>
+            {pageCount > 1 ? (
+              <div className="flex items-center justify-between gap-2 border-t px-3 py-2">
+                <span className="tabular text-xs text-muted-foreground">{t("Page {page} of {count}", { page: currentPage + 1, count: pageCount })}</span>
+                <div className="flex gap-1">
+                  <Button type="button" size="sm" variant="outline" disabled={currentPage === 0} onClick={() => setPage(currentPage - 1)}>
+                    <ChevronLeft aria-hidden="true" />
+                    {t("Previous")}
+                  </Button>
+                  <Button type="button" size="sm" variant="outline" disabled={currentPage >= pageCount - 1} onClick={() => setPage(currentPage + 1)}>
+                    {t("Next")}
+                    <ChevronRight aria-hidden="true" />
+                  </Button>
+                </div>
+              </div>
+            ) : null}
           </Card>
         )}
       </div>
