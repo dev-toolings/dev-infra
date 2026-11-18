@@ -16,7 +16,8 @@ export interface Route {
   containerState?: ContainerState;
 }
 
-const PROJECT_ID_PATTERN = /^[a-z0-9][a-z0-9_-]{0,63}$/;
+// Copy of SAFE_ID in src/catalog/index.ts (importing it would bundle bun:sqlite). Keep both equal.
+const PROJECT_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/;
 
 export function parseRoute(pathname: string, search = ""): Route | undefined {
   const path = pathname.length > 1 ? pathname.replace(/\/$/, "") : pathname;
