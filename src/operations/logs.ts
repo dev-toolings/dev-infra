@@ -62,8 +62,7 @@ export class OperationsLogs {
   constructor(private readonly catalog: CatalogPort, private readonly runtime: RuntimePort) {}
 
   async read(projectId: string, options: LogOptions = {}): Promise<LogEntry[]> {
-    // Project IDs follow SAFE_ID in src/catalog/index.ts, uppercase included.
-    if (typeof projectId !== "string" || !/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,95}$/.test(projectId)) invalid();
+    if (typeof projectId !== "string" || !/^[a-z0-9][a-z0-9_-]{0,95}$/.test(projectId)) invalid();
     const project = this.getProject(projectId);
     const components = [...project.components].sort((a, b) => a.id.localeCompare(b.id));
     if (components.length < 1 || components.length > 64) invalid();

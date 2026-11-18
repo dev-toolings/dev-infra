@@ -27,13 +27,6 @@ test("merges bounded logs with stable cursor, source deduplication, and redactio
   expect(stored?.seq).toBe(1);
 });
 
-test("reads the logs of a project whose ID has uppercase letters, as the catalog allows", async () => {
-  const shop = { ...structuredClone(project), id: "Shop" };
-  const records = new LogCatalog();
-  const upper = { ...records, getProject: (id: string) => { if (id !== "Shop") throw new Error("missing"); return structuredClone(shop); }, updateRecord: records.updateRecord.bind(records), getRecord: records.getRecord.bind(records) } as unknown as CatalogPort;
-  expect(await new OperationsLogs(upper, runtime).read("Shop")).toHaveLength(1);
-});
-
 test("from a cursor, a read returns the oldest unread entries first, so a backlog is never skipped", async () => {
   const records = new LogCatalog();
   const store = { getProject: records.getProject.bind(records), updateRecord: records.updateRecord.bind(records), getRecord: records.getRecord.bind(records) } as unknown as CatalogPort;

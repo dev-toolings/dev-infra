@@ -72,6 +72,12 @@ describe("Catalog", () => {
     expect(JSON.stringify(publicProject(created))).not.toContain("SENTINEL_VALIDATE");
   });
 
+  test("refuses a new project or component ID with uppercase letters, which the runtime cannot run", () => {
+    expect(() => catalog.createProject({ ...project(), id:"Shop" })).toThrow("use lowercase letters");
+    const [web] = project().components;
+    expect(() => catalog.createProject({ ...project(), components:[{ ...web!, id:"Web" }] })).toThrow("use lowercase letters");
+  });
+
   test("persists project and record metadata across reopen", () => {
     catalog.createProject(project());
     catalog.putRecord("logs","cursor",{seq:4});

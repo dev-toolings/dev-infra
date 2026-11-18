@@ -38,6 +38,9 @@ function canonicalVariants(path: string): string[] {
 }
 function overlaps(a: string, b: string): boolean { return canonicalVariants(a).some((left) => canonicalVariants(b).some((right) => isBelow(left, right) || isBelow(right, left))); }
 function safeId(value: string, label: string): void { if (typeof value !== "string" || !SAFE_ID.test(value)) error(`Invalid ${label}`); }
+/** The runtime only starts, stops and reads lowercase project and component IDs: a new one must be one. */
+const NEW_ID = /^[a-z0-9][a-z0-9_-]{0,63}$/;
+function newId(value: string, label: string): void { safeId(value, label); if (!NEW_ID.test(value)) error(`Invalid ${label}: use lowercase letters, numbers, - and _`); }
 function assertKeys(value: object, allowed: string[], label: string): void { for (const key of Object.keys(value)) if (!allowed.includes(key)) error(`Unknown ${label} field`); }
 function now(): string { return new Date().toISOString(); }
 function jsonString(value: unknown): string {
@@ -320,7 +323,7 @@ export class Catalog implements CatalogPort {
     });
   }
   private validateProject(input: ProjectInput): { input: ProjectInput; root: Root; ports: Array<{componentId:string;port:number}> } {
-    if (!input || typeof input !== "object") error("Project is required"); safeId(input.id,"project ID");
+    if (!input || typeof input !== "object") error("Project is required"); newId(input.id,"project ID");
     assertKeys(input as object,["id","name","root","components"],"project");
     if (typeof input.name !== "string" || !input.name.trim() || input.name.length > 128 || /[\u0000-\u001f\u007f]/.test(input.name)) error("Invalid project name");
     let serializedInput: string;
@@ -335,7 +338,7 @@ export class Catalog implements CatalogPort {
     for (const component of input.components) {
       if (!component || typeof component !== "object") error("Invalid component");
       assertKeys(component as object,["id","name","kind","cwd","argv","compose","dependsOn","envFiles","url","health","limits","sources","validation"],"component");
-      safeId(component.id,"component ID"); if (ids.has(component.id)) error("Duplicate component ID"); ids.add(component.id);
+      newId(component.id,"component ID"); if (ids.has(component.id)) error("Duplicate component ID"); ids.add(component.id);
       if (typeof component.name !== "string" || !component.name || component.name.length > 128 || /[\u0000-\u001f\u007f]/.test(component.name)) error("Invalid component name");
       if (component.kind !== "compose" && component.kind !== "native") error("Invalid component kind");
       if (component.health) { if (typeof component.health !== "object") error("Invalid health check"); assertKeys(component.health,["url"],"health check"); if (typeof component.health.url !== "string") error("Health check URL is required"); }

@@ -105,6 +105,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`devhub serve`, `devhub pair`) and a connected React control panel.
 
 ### Changed
+- A new project or component ID must be lowercase (`devhub project add --id Shop` is refused):
+  the runtime only starts, stops and reads lowercase IDs, so such a project could never run.
 - The new project page has three steps: the Docker settings moved beside the Dockerfile, in
   one place. Base image, packages, extensions and "Edit the file" are all edited there.
 - The Logs page fills the screen with one line per entry, follows the newest line until you
