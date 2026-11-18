@@ -104,6 +104,16 @@ test("removing refuses uncommitted work, then cleans everything but the branch a
   expect(git(root, "branch", "--list", "fix").stdout.toString()).toContain("fix");
 });
 
+test("when Git refuses to remove the folder, the database and the registration stay", async () => {
+  const { root, projects, commands, worktrees } = fixture();
+  const plan = await worktrees.plan("shop", "fix");
+  await worktrees.add(plan);
+  git(root, "worktree", "lock", plan.path);
+  await expect(worktrees.remove(plan.id)).rejects.toThrow("git worktree remove failed");
+  expect(commands.some((argv) => argv.some((arg) => arg.startsWith("DROP DATABASE")))).toBe(false);
+  expect(projects.has(plan.id) && worktrees.get(plan.id) !== undefined && existsSync(plan.path)).toBe(true);
+});
+
 test("the sweep stops a worktree idle for a day, and only that one", async () => {
   const old = new Date(Date.now() - 25 * 3600_000).toISOString();
   const log = [{ action: "start", state: "succeeded", updatedAt: old } as Operation];

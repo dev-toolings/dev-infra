@@ -158,6 +158,11 @@ export class Worktrees implements WorktreesPort {
         if ((await run(["docker", "network", "rm", network], { timeoutMs: 30_000, maxOutputBytes: 64_000 })).code !== 0) fail(`Removing the network ${network} failed`, "runtime_stop", 502);
       }
     }
+    // The folder goes first: when Git refuses, the database and the registration are still there to retry.
+    if (existsSync(worktree.path)) {
+      const removed = await gitRun(run, ["-C", parent.root, "worktree", "remove", ...(force ? ["--force"] : []), worktree.path]);
+      if (removed.code !== 0) fail(`git worktree remove failed: ${removed.stderr.trim().slice(0, 300)}`, "git_failed", 409);
+    } else await gitRun(run, ["-C", parent.root, "worktree", "prune"]);
     const database = databaseName(id);
     const host = postgresHost(env, database);
     if (host && DB.test(database)) {
@@ -166,10 +171,6 @@ export class Worktrees implements WorktreesPort {
       if (dropped.code !== 0) fail(`Dropping ${database} failed`, "provisioning_failed", 409);
     }
     if (project) catalog.removeProject(id);
-    if (existsSync(worktree.path)) {
-      const removed = await gitRun(run, ["-C", parent.root, "worktree", "remove", ...(force ? ["--force"] : []), worktree.path]);
-      if (removed.code !== 0) fail(`git worktree remove failed: ${removed.stderr.trim().slice(0, 300)}`, "git_failed", 409);
-    } else await gitRun(run, ["-C", parent.root, "worktree", "prune"]);
     const volume = existsSync(join(this.dir(id), "compose.yml")) ? Object.keys(parse(readFileSync(join(this.dir(id), "compose.yml"), "utf8")).volumes ?? {})[0] : undefined;
     rmSync(this.dir(id), { recursive: true, force: true });
     catalog.deleteRecord(NAMESPACE, id);
