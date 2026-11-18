@@ -107,8 +107,9 @@ and a free loopback port. `devhub up`, `down` and `ps` include these instances.
 
 | Profile | Services | Default |
 |---|---|---|
-| `core` | PostgreSQL, MySQL, Redis, Meilisearch, Mailpit, Adminer, Dozzle | Yes |
+| `core` | PostgreSQL, MySQL, MariaDB, Redis, Meilisearch, Mailpit, Adminer, Dozzle | Yes |
 | `async` | RabbitMQ | Yes |
+| `proxy` | Caddy (`http://<project>.localhost`) | No |
 
 ```bash
 devhub up                  # core + async (RabbitMQ)
