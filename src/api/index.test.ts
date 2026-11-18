@@ -75,6 +75,15 @@ describe("local API authentication", () => {
     expect((await response.json()).error.message).toContain("devhub worktree remove sample");
   });
 
+  test("refuses to unregister a project that still has worktrees", async () => {
+    const context = setup();
+    const { auth } = await paired(context);
+    context.variants.push({ id: "sample--fix", parent: "sample", branch: "fix" });
+    const response = await context.request("/api/v1/projects/sample", { method: "DELETE", headers: auth, body: "{}" });
+    expect(response.status).toBe(409);
+    expect((await response.json()).error.message).toContain("Remove the worktrees of sample first");
+  });
+
   test("requires a session on read and mutation routes, then pairs once and revokes on logout", async () => {
     const context = setup();
     const protectedRoutes: Array<[string, string]> = [

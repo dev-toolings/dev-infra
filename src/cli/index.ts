@@ -262,6 +262,7 @@ export async function runCli(argv: string[], services: AppServices, options: Cli
       const project = services.catalog.getProject(command.id);
       if (command.action === "show") { write(projectSummary(project), command.json); return 0; }
       if (command.action === "remove" && services.worktrees.get(project.id)) throw new DevHubError(`Remove a worktree with devhub worktree remove ${project.id}: it also drops its database and folder.`);
+      if (command.action === "remove" && services.worktrees.list().some((item) => item.parent === project.id)) throw new DevHubError(`Remove the worktrees of ${project.id} first with devhub worktree remove: they need it to clean up.`);
       if (command.action === "remove") { services.catalog.removeProject(project.id); write({ removed: project.id }, command.json, "Project unregistered; its files and services were left in place"); return 0; }
       if (command.action === "status") { const status = await services.operations.status(project.id); write(status, command.json); return status.components.some((item) => item.state === "unhealthy" || item.state === "unknown") ? 1 : 0; }
       if (command.action === "logs") {

@@ -354,6 +354,7 @@ export function createApp(services: AppServices, options: ApiOptions): Hono<ApiE
     const active = services.operations.listOperations(projectId).some((operation) => operation.state === "queued" || operation.state === "running");
     if (active) return fail("operation_active", "Project has an active operation.", 409);
     if (services.worktrees.get(projectId)) return fail("worktree", `Remove a worktree with devhub worktree remove ${projectId}: it also drops its database and folder.`, 409);
+    if (services.worktrees.list().some((item) => item.parent === projectId)) return fail("worktree", `Remove the worktrees of ${projectId} first with devhub worktree remove: they need it to clean up.`, 409);
     services.catalog.removeProject(projectId); return json({ removed: true });
   });
   app.get(`${PREFIX}/projects/:id/status`, async (c) => {
