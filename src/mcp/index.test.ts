@@ -31,3 +31,13 @@ test("exec output reaches the agent with its secrets redacted", async () => {
   expect(text).toStartWith("exit code 1\n--- stdout\nok\n");
   expect(text).not.toContain("secretpassword");
 });
+
+test("a message that is not an object with a string method is an Invalid Request, not a crash", async () => {
+  for (const message of [null, 42, "x", [], { jsonrpc: "2.0", id: 3 }]) {
+    expect(await handleMcp(message, tools)).toEqual({ jsonrpc: "2.0", id: null, error: { code: -32600, message: "Invalid Request" } });
+  }
+});
+
+test("initialize answers the server protocol version when the client asks for one it does not support", async () => {
+  expect(await call("initialize", { protocolVersion: "1999-01-01" })).toMatchObject({ result: { protocolVersion: "2025-06-18" } });
+});

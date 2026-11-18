@@ -75,7 +75,12 @@ export function mcpTools(services: AppServices): Tool[] {
   ];
 }
 
-export async function handleMcp(request: Request, tools: Tool[]): Promise<Record<string, unknown> | undefined> {
+export async function handleMcp(message: unknown, tools: Tool[]): Promise<Record<string, unknown> | undefined> {
+  // Batches (arrays) are not supported and get the same answer as any other invalid message.
+  if (typeof message !== "object" || message === null || Array.isArray(message) || typeof (message as { method?: unknown }).method !== "string") {
+    return { jsonrpc: "2.0", id: null, error: { code: -32600, message: "Invalid Request" } };
+  }
+  const request = message as Request;
   const reply = (result: unknown) => ({ jsonrpc: "2.0", id: request.id ?? null, result });
   const failure = (code: number, message: string) => ({ jsonrpc: "2.0", id: request.id ?? null, error: { code, message } });
   // A notification gets no answer.
@@ -83,7 +88,8 @@ export async function handleMcp(request: Request, tools: Tool[]): Promise<Record
   switch (request.method) {
     case "initialize": {
       const version = readFileSync(resolve(import.meta.dir, "../../VERSION"), "utf8").trim();
-      return reply({ protocolVersion: typeof request.params?.protocolVersion === "string" ? request.params.protocolVersion : PROTOCOL, capabilities: { tools: {} }, serverInfo: { name: "devhub", version } });
+      // PROTOCOL is the only version this server speaks, so it is the answer whatever the client asked for.
+      return reply({ protocolVersion: PROTOCOL, capabilities: { tools: {} }, serverInfo: { name: "devhub", version } });
     }
     case "ping": return reply({});
     case "tools/list": return reply({ tools: tools.map(({ call: _call, ...tool }) => tool) });
@@ -106,8 +112,8 @@ export async function serveMcp(services: AppServices): Promise<number> {
   const lines = createInterface({ input: process.stdin });
   for await (const line of lines) {
     if (!line.trim()) continue;
-    let request: Request;
-    try { request = JSON.parse(line) as Request; } catch { process.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", id: null, error: { code: -32700, message: "Parse error" } })}\n`); continue; }
+    let request: unknown;
+    try { request = JSON.parse(line); } catch { process.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", id: null, error: { code: -32700, message: "Parse error" } })}\n`); continue; }
     const response = await handleMcp(request, tools);
     if (response) process.stdout.write(`${JSON.stringify(response)}\n`);
   }
