@@ -16,8 +16,9 @@ export interface Route {
   containerState?: ContainerState;
 }
 
-// Same rule as NEW_ID in src/catalog/index.ts: the IDs DevHub creates and runs (importing it would bundle bun:sqlite).
-const PROJECT_ID_PATTERN = /^[a-z0-9][a-z0-9_-]{0,63}$/;
+// SAFE_ID of src/catalog/index.ts (importing it would bundle bun:sqlite): a project registered before IDs had to be
+// lowercase still opens, even if the runtime refuses to run it.
+const PROJECT_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/;
 
 export function parseRoute(pathname: string, search = ""): Route | undefined {
   const path = pathname.length > 1 ? pathname.replace(/\/$/, "") : pathname;

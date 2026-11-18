@@ -49,6 +49,12 @@ function viteFixture(root: string) {
   return project;
 }
 
+test("preview refuses an uppercase --id before anything is planned", async () => {
+  const root = fixture(); const path = viteFixture(root); const catalog = new MemoryCatalog(); catalog.addRoot(root);
+  const discovery = new Discovery({ catalog, run: async () => response("") });
+  await expect(discovery.preview({ path, name: "Shop", id: "Shop", preset: "native" })).rejects.toThrow("lowercase");
+});
+
 test("preview is side effect free and apply registers a Vite component with strict port", async () => {
   const root = fixture(); const path = viteFixture(root); const catalog = new MemoryCatalog(); catalog.addRoot(root);
   const run = async (argv: string[]) => { expect(argv).toEqual(["ss", "-H", "-ltn"]); return response(""); };

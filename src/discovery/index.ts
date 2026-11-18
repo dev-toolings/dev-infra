@@ -56,7 +56,8 @@ function yamlData(text: string): Record<string, unknown> {
   if (!plain(value)) fail("Compose metadata must be a YAML mapping", "invalid", 400);
   return value;
 }
-function validProjectId(id: string): boolean { return /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(id); }
+// Same rule as NEW_ID in src/catalog/index.ts: refused at the preview, not only at --apply.
+function validProjectId(id: string): boolean { return /^[a-z0-9][a-z0-9_-]{0,63}$/.test(id); }
 function portFromUrl(value: string | undefined): number | undefined {
   if (!value) return undefined;
   try { const url = new URL(value); const n = Number(url.port || (url.protocol === "https:" ? 443 : 80)); return Number.isInteger(n) && n > 0 && n <= 65535 ? n : undefined; } catch { return undefined; }
@@ -296,7 +297,7 @@ export class Discovery implements DiscoveryPort {
     if (isProtected(canonical)) fail("Protected DevHub paths cannot be registered", "path_denied", 403);
     const detection = await this.inspect(canonical);
     const id = input.id ?? safeName(input.name).toLowerCase();
-    if (!validProjectId(id)) fail("Project ID must contain only letters, numbers, underscores, and hyphens");
+    if (!validProjectId(id)) fail("Project ID must contain only lowercase letters, numbers, underscores, and hyphens");
     try { this.catalog.getProject(id); fail("Project ID is already registered", "conflict", 409); } catch (error) { if (!(error instanceof DevHubError) || error.code !== "not_found") throw error; }
     const preset = input.preset;
     if (preset === "symfony-docker" && !detection.stacks.includes("symfony")) fail("Symfony metadata was not detected", "unsupported_preset", 409);

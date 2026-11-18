@@ -62,14 +62,16 @@ describe("Runtime Compose adapter", () => {
   test("from a time, reads the oldest lines since then, and falls back to the tail when the backlog is too large", async () => {
     const f = fixture();
     const reads: string[][] = [];
-    let overflow = false;
+    let overflow = false, burst = false;
     f.run = async (argv) => {
       if (argv[1] === "context") return { code: 0, stdout: JSON.stringify([{ Endpoints: { docker: { Host: "unix:///var/run/docker.sock" } } }]), stderr: "" };
       if (argv.includes("ps")) return { code: 0, stdout: JSON.stringify([{ ID: "0123456789abcdef", State: "running", Labels: { "com.docker.compose.project": "sample", "com.docker.compose.service": "web", "com.docker.compose.project.working_dir": f.app, "com.docker.compose.project.config_files": join(f.app, "compose.yml") } }]), stderr: "" };
       if (argv[1] === "logs") {
         reads.push(argv);
         if (overflow && argv.includes("--since")) throw new DevHubError("Command output exceeded its limit", "output_limit", 502);
-        return { code: 0, stdout: "2026-01-01T00:00:01Z one\n2026-01-01T00:00:02Z two\n2026-01-01T00:00:03Z three\n", stderr: "" };
+        const lines = burst ? ["2026-01-01T00:00:01Z a", "2026-01-01T00:00:01Z b", "2026-01-01T00:00:01Z c", "2026-01-01T00:00:02Z d"] : ["2026-01-01T00:00:01Z one", "2026-01-01T00:00:02Z two", "2026-01-01T00:00:03Z three"];
+        const tail = argv.indexOf("--tail");
+        return { code: 0, stdout: `${(tail < 0 ? lines : lines.slice(-Number(argv[tail + 1]))).join("\n")}\n`, stderr: "" };
       }
       return { code: 0, stdout: "", stderr: "" };
     };
@@ -82,6 +84,10 @@ describe("Runtime Compose adapter", () => {
     expect(reads.at(-1)).toEqual(["docker", "logs", "--timestamps", "--tail", "2", "0123456789abcdef"]);
     expect(tail.map((entry) => entry.message)).toEqual(["two", "three"]);
     await expect(runtime.logs(f.project, f.component, 2, "yesterday")).rejects.toThrow("Invalid log time");
+    // More lines at `since` than one read holds: the tail keeps the source moving instead of the same batch forever.
+    overflow = false; burst = true;
+    const moving = await runtime.logs(f.project, f.component, 2, "2026-01-01T00:00:01Z");
+    expect(moving.map((entry) => entry.message)).toEqual(["c", "d"]);
   });
   test("associates owned containers and leaves unmatched containers observed only", async () => {
     const f = fixture();

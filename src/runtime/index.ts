@@ -341,7 +341,6 @@ export class Runtime implements RuntimePort {
   async logs(project: Project, component: Component, limit = 100, since?: string): Promise<LogEntry[]> {
     const { cwd } = this.validate(project, component); const count = Math.max(1, Math.min(1000, Math.trunc(limit)));
     if (since !== undefined && !LOG_TIME.test(since)) throw err("Invalid log time");
-    let oldestFirst = since !== undefined;
     let result: Awaited<ReturnType<Executor>>;
     if (component.kind === "compose") {
       this.preflightCompose(project, component, cwd);
@@ -352,9 +351,10 @@ export class Runtime implements RuntimePort {
       const outputs: string[] = [];
       for (const id of ids) {
         const tail = () => this.run(["docker", "logs", "--timestamps", "--tail", String(count), id], READ);
-        // Docker has no "oldest N": a backlog too large for one read falls back to the tail, as before.
+        // Docker has no "oldest N": a container whose backlog is too large for one read gives its tail, as before.
+        // The other containers keep their oldest-first lines.
         const one = since === undefined ? await tail() : await this.run(["docker", "logs", "--timestamps", "--since", since, id], READ)
-          .catch((error) => { if (error instanceof DevHubError && error.code === "output_limit") { oldestFirst = false; return tail(); } throw error; });
+          .catch((error) => { if (error instanceof DevHubError && error.code === "output_limit") return tail(); throw error; });
         if (one.code !== 0) throw err("Runtime log read failed", "runtime_logs", 502);
         outputs.push(one.stdout, one.stderr);
       }
@@ -381,7 +381,12 @@ export class Runtime implements RuntimePort {
       }
     }
     if (component.kind === "compose") entries.sort((a, b) => a.time.localeCompare(b.time));
-    return oldestFirst ? entries.slice(0, count) : entries.slice(-count);
+    if (since === undefined) return entries.slice(-count);
+    const batch = entries.slice(0, count);
+    // A full batch that never leaves `since` (a burst within one timestamp) would be read again at every poll:
+    // take the tail instead, so the source keeps moving.
+    if (batch.length === count && batch.every((entry) => entry.time === since)) return this.logs(project, component, limit);
+    return batch;
   }
   /** Read-only and open to every local container: DevHub observes unlinked containers without owning them. */
   async followContainer(id: string, since: string | undefined, onLine: (line: ContainerLogLine) => void): Promise<FollowHandle> {
