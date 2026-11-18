@@ -42,6 +42,13 @@ function reducer(state: LogState, action: LogAction): LogState {
   }
 }
 
+// The stream makes the server re-read every component's logs each poll: never follow from a hidden tab.
+function subscribeVisibility(onChange: () => void): () => void {
+  document.addEventListener("visibilitychange", onChange);
+  return () => document.removeEventListener("visibilitychange", onChange);
+}
+const pageVisible = () => document.visibilityState !== "hidden";
+
 export interface LogStream {
   entries: LogEntry[];
   error: string | undefined;
@@ -52,14 +59,16 @@ export interface LogStream {
 
 /**
  * Follows the finite SSE log stream of one project. Reconnects with the last numeric cursor
- * and exponential backoff, keeps at most 1000 entries, and aborts on pause, project switch
- * or unmount. Entries already seen are never appended twice.
+ * and exponential backoff, keeps at most 1000 entries, and aborts on pause, hidden tab,
+ * project switch or unmount. Entries already seen are never appended twice.
  */
 export function useLogStream(projectId: string | undefined, active: boolean): LogStream {
   const [state, dispatch] = React.useReducer(reducer, undefined, () => empty(projectId));
   const [error, setError] = React.useState<{ projectId: string | undefined; message: string }>();
   const [settledProjectId, setSettledProjectId] = React.useState<string>();
   const cursorRef = React.useRef<{ projectId: string | undefined; seq: number | undefined }>({ projectId, seq: undefined });
+  const visible = React.useSyncExternalStore(subscribeVisibility, pageVisible);
+  const following = active && visible;
 
   React.useEffect(() => {
     dispatch({ type: "project", projectId });
@@ -68,7 +77,7 @@ export function useLogStream(projectId: string | undefined, active: boolean): Lo
   }, [projectId]);
 
   React.useEffect(() => {
-    if (!projectId || !active) return;
+    if (!projectId || !following) return;
     const controller = new AbortController();
     const { signal } = controller;
     let pending: LogEntry[] = [];
@@ -140,7 +149,7 @@ export function useLogStream(projectId: string | undefined, active: boolean): Lo
       controller.abort();
       flush();
     };
-  }, [projectId, active]);
+  }, [projectId, following]);
 
   const clear = React.useCallback(() => dispatch({ type: "clear", projectId }), [projectId]);
   const current = state.projectId === projectId;
