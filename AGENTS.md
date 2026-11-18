@@ -12,7 +12,7 @@ bun run typecheck
 python3 tests/backend-isolated.py
 python3 tests/infra-contract.py
 bats tests
-for p in core async core,async; do
+for p in core async core,async proxy; do
   COMPOSE_PROFILES="$p" docker compose --env-file .env.example -f compose.yml config > /dev/null
 done
 ```

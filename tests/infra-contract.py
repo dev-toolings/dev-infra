@@ -46,3 +46,16 @@ for profile in ("core", "async", "core,async"):
         for name in ("mailpit", "adminer", "dozzle"):
             assert "@sha256:" in after["services"][name]["image"], name
     print(f"PASS infrastructure identity: {profile}")
+
+# Caddy came after the baseline: pin its own identity instead.
+caddy = render("proxy")["services"]
+assert set(caddy) == {"caddy"}, "Profile membership changed: proxy"
+caddy = caddy["caddy"]
+assert caddy["container_name"] == "infra-caddy"
+assert caddy["profiles"] == ["proxy"]
+assert caddy["network_mode"] == "host"
+assert "ports" not in caddy
+assert caddy["environment"] == {"CADDY_HTTP_PORT": "80", "CADDY_ADMIN_PORT": "2019"}
+assert "@sha256:" in caddy["image"]
+assert caddy["logging"] == {"driver": "json-file", "options": {"max-size": "10m", "max-file": "3"}}
+print("PASS infrastructure identity: proxy")

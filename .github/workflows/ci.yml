@@ -42,7 +42,7 @@ jobs:
 
       - name: Compose config
         run: |
-          for profiles in core async core,async; do
+          for profiles in core async core,async proxy; do
             COMPOSE_PROFILES="$profiles" docker compose --env-file .env.example -f compose.yml config > /dev/null
           done
 
