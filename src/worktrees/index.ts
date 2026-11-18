@@ -64,6 +64,15 @@ export class Worktrees implements WorktreesPort {
     const { catalog, operations, run, stateDir } = this.options;
     const parent = catalog.getProject(plan.parent);
     const component = managedComponent(parent);
+    // Before anything is created: `worktree remove` drops this name, so it must not belong to someone else.
+    if (plan.database) {
+      if (!DB.test(plan.database)) fail("Unexpected database name");
+      const host = postgresHost(readFileSync(join(this.dir(parent.id), "app.env"), "utf8"), databaseName(parent.id)) ?? fail("No Postgres address found in the project env file");
+      const admin = await this.options.services.containerEnv(host, "POSTGRES_USER");
+      const found = await run(["docker", "exec", host, "psql", "-tA", "-v", "ON_ERROR_STOP=1", "-U", admin, "-d", "postgres", "-c", `SELECT 1 FROM pg_database WHERE datname = '${plan.database}' UNION ALL SELECT 1 FROM pg_roles WHERE rolname = '${plan.database}'`], { timeoutMs: 60_000, maxOutputBytes: 64_000 });
+      if (found.code !== 0) fail(`Database provisioning failed; check that ${host} runs with devhub up`, "provisioning_failed", 409);
+      if (found.stdout.trim()) fail(`A database or role named ${plan.database} already exists; DevHub does not take it over`, "conflict", 409);
+    }
     mkdirSync(dirname(plan.path), { recursive: true });
     const added = await gitRun(run, ["-C", parent.root, "worktree", "add", ...(plan.newBranch ? ["-b", plan.branch, plan.path] : [plan.path, plan.branch])]);
     if (added.code !== 0) fail(`git worktree add failed: ${added.stderr.trim().slice(0, 300)}`, "git_failed", 409);
@@ -140,8 +149,13 @@ export class Worktrees implements WorktreesPort {
     const worktree = this.get(id) ?? fail("No worktree with this ID", "not_found", 404);
     const parent = catalog.getProject(worktree.parent);
     if (existsSync(worktree.path) && !force) {
-      const status = await gitRun(run, ["-C", worktree.path, "status", "--porcelain"]);
-      if (status.code !== 0 || status.stdout.trim()) fail("The worktree has uncommitted changes; commit them or use --force", "dirty_worktree", 409);
+      // Git deletes ignored files with the folder: a local .env or test data counts as work too.
+      const status = await gitRun(run, ["-C", worktree.path, "status", "--porcelain", "--ignored"]);
+      if (status.code !== 0) fail("Reading the worktree status failed", "git_failed", 409);
+      const lines = status.stdout.split("\n").filter(Boolean);
+      const ignored = lines.filter((line) => line.startsWith("!! ")).map((line) => line.slice(3));
+      if (lines.length > ignored.length) fail("The worktree has uncommitted changes; commit them or use --force", "dirty_worktree", 409);
+      if (ignored.length) fail(`The worktree has ignored files that Git would delete: ${ignored.slice(0, 10).join(", ")}; move them or use --force`, "dirty_worktree", 409);
     }
     const project = catalog.listProjects().find((item) => item.id === id);
     const env = existsSync(join(this.dir(id), "app.env")) ? readFileSync(join(this.dir(id), "app.env"), "utf8") : "";
@@ -192,7 +206,7 @@ export class Worktrees implements WorktreesPort {
     return run(["docker", "compose", "-p", component.compose!.projectName, `--project-directory=${component.cwd}`, `--file=${join(this.dir(projectId), "compose.yml")}`, "exec", "-T", "app", "sh", "-c", command], { timeoutMs, maxOutputBytes: 1_000_000 });
   }
 
-  /** Stops the variants idle for a day and removes the expired ones without uncommitted work. */
+  /** Stops the variants idle for a day and removes the expired ones without uncommitted work or ignored files. */
   async sweep(now = Date.now()): Promise<{ stopped: string[]; removed: string[] }> {
     const { operations } = this.options;
     const stopped: string[] = [], removed: string[] = [];

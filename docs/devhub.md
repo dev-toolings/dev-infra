@@ -224,7 +224,7 @@ devhub worktree add shop fix/auth --apply     # check out, copy, start
 devhub worktree add shop spike --expire 48 --apply
 devhub worktree list
 devhub exec shop--fix-auth -- bun test
-devhub worktree remove shop--fix-auth         # --force drops uncommitted work
+devhub worktree remove shop--fix-auth         # --force drops uncommitted work and ignored files
 ```
 
 `add` creates the branch from the current `HEAD` when it does not exist, and checks it out
@@ -233,13 +233,15 @@ with dashes (`fix/auth` gives `fix-auth`); that folder must stay in an approved 
 worktree is a project of its own, `shop--fix-auth`, with a free port from 4100, its own
 `app.env`, its own Compose project and network, and a private database copied from the one of
 its parent with `pg_dump` (the copy belongs to the role of the worktree). A project on MySQL or
-MariaDB gets no worktree: only Postgres is copied. In `app.env`, the URL of the parent
+MariaDB gets no worktree: only Postgres is copied. `add` refuses a database or role that
+already exists under the worktree name: `remove` drops that name. In `app.env`, the URL of the parent
 (`APP_URL`, `DEFAULT_URI`) becomes the one of the worktree, and the Redis and Meilisearch
 prefixes get the worktree ID. The shared services stay shared.
 
 A worktree nobody started, stopped or ran a command in for 24 hours is stopped by
 `devhub serve`, which checks every 15 minutes. With `--expire HOURS` it is removed once that
-time is over, unless it has uncommitted changes. Otherwise it stays until `worktree remove`,
+time is over, unless it has uncommitted changes or ignored files (a local `.env`, test data),
+which Git would delete with the folder. Otherwise it stays until `worktree remove`,
 which stops it, removes its containers and network, drops its database and role, removes its
 folder and keeps its branch. DevHub
 never deletes a named volume: `remove` prints the dependencies volume to delete by hand. The

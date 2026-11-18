@@ -34,7 +34,7 @@ export function mcpTools(services: AppServices): Tool[] {
     },
     {
       name: "worktree_add", description: "Check out a branch next to a project DevHub runs in Docker and start it with its own port and a copy of its database. The branch is created from HEAD when missing.",
-      inputSchema: object({ project: string("ID of the parent project"), branch: string("Git branch"), expireHours: { type: "number", description: "Remove the worktree after this many hours, unless it has uncommitted changes" } }, ["project", "branch"]),
+      inputSchema: object({ project: string("ID of the parent project"), branch: string("Git branch"), expireHours: { type: "number", description: "Remove the worktree after this many hours, unless it has uncommitted changes or ignored files" } }, ["project", "branch"]),
       call: async (args) => {
         const plan = await worktrees.plan(arg(args, "project", "string"), arg(args, "branch", "string"), arg(args, "expireHours", "number", true));
         const result = await worktrees.add(plan);
@@ -42,7 +42,7 @@ export function mcpTools(services: AppServices): Tool[] {
       },
     },
     {
-      name: "worktree_remove", description: "Stop a worktree, drop its database and remove its folder. Its branch and commits are kept. Refuses uncommitted changes unless force is true.",
+      name: "worktree_remove", description: "Stop a worktree, drop its database and remove its folder. Its branch and commits are kept. Refuses uncommitted changes and ignored files unless force is true.",
       inputSchema: object({ id: string("ID of the worktree project"), force: { type: "boolean" } }, ["id"]),
       call: (args) => worktrees.remove(arg(args, "id", "string"), arg(args, "force", "boolean", true) ?? false),
     },

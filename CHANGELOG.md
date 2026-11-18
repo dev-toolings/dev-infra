@@ -11,7 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `devhub worktree add PROJECT BRANCH` runs a branch of a Docker project beside it, in
   `<project>.worktrees/<branch>`, with its own port, env file, Compose project and a copy of
   its Postgres database. `worktree remove` cleans it up and keeps the branch. An idle worktree
-  is stopped after 24 hours; `--expire HOURS` removes it once that time is over.
+  is stopped after 24 hours; `--expire HOURS` removes it once that time is over, unless it holds
+  uncommitted changes or ignored files. `worktree add` refuses a database or role that already exists.
 - `devhub exec PROJECT -- COMMAND` runs a command in the app container of a Docker project.
 - `devhub mcp`: an MCP server on stdio, so coding agents create, run and inspect their worktree.
 - The `proxy` profile runs Caddy (`infra-caddy`): every project answers on

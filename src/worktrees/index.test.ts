@@ -27,7 +27,7 @@ function fixture(operationsLog: Operation[] = [], extraEnv = "") {
     volumes: { node_modules: {} }, networks: { default: { name: "devhub-shop-1234", external: true } },
   }));
   const parent: Project = { id: "shop", name: "Shop", root, createdAt: "now", components: [{ id: "app", name: "App", kind: "compose", cwd: root, url: "http://127.0.0.1:4100", dependsOn: [], compose: { files: ["compose.yml"], projectName: "devhub-shop", profiles: [], services: ["app"], managed: { infra: ["infra-postgres"] } } }] };
-  const projects = new Map<string, Project>([["shop", parent]]), records = new Map<string, unknown>(), commands: string[][] = [], executed: string[] = [], conflicts = { left: 0 };
+  const projects = new Map<string, Project>([["shop", parent]]), records = new Map<string, unknown>(), commands: string[][] = [], executed: string[] = [], conflicts = { left: 0 }, database = { exists: false };
   const catalog = {
     assertAllowedPath: (path: string) => path,
     getProject: (id: string) => projects.get(id) ?? (() => { throw new DevHubError("missing", "not_found", 404); })(),
@@ -46,8 +46,8 @@ function fixture(operationsLog: Operation[] = [], extraEnv = "") {
     listOperations: () => operationsLog,
   } as unknown as OperationsPort;
   const services = { containerEnv: async () => "test" } as unknown as SharedServicesPort;
-  const run: Executor = async (argv, options) => { if (argv[0] === "git") return execCommand(argv, options); commands.push(argv); return { code: 0, stdout: "", stderr: "" }; };
-  return { root, stateDir, infraDir, projects, records, commands, executed, conflicts, worktrees: new Worktrees({ catalog, discovery, operations, services, run, stateDir, infraDir }) };
+  const run: Executor = async (argv, options) => { if (argv[0] === "git") return execCommand(argv, options); commands.push(argv); return { code: 0, stdout: database.exists && argv.some((arg) => arg.includes("pg_roles")) ? "1\n" : "", stderr: "" }; };
+  return { root, stateDir, infraDir, projects, records, commands, executed, conflicts, database, worktrees: new Worktrees({ catalog, discovery, operations, services, run, stateDir, infraDir }) };
 }
 
 test("a worktree gets its own folder, port, env, database copy and Compose project", async () => {
@@ -102,6 +102,26 @@ test("removing refuses uncommitted work, then cleans everything but the branch a
   expect(existsSync(plan.path)).toBe(false);
   expect(records.has(plan.id) || projects.has(plan.id)).toBe(false);
   expect(git(root, "branch", "--list", "fix").stdout.toString()).toContain("fix");
+});
+
+test("an add refuses a database or role that already exists, before creating anything", async () => {
+  const { projects, records, commands, database, worktrees } = fixture();
+  const plan = await worktrees.plan("shop", "fix");
+  database.exists = true;
+  await expect(worktrees.add(plan)).rejects.toThrow("already exists");
+  expect(existsSync(plan.path) || records.size > 0 || projects.has(plan.id)).toBe(false);
+  expect(commands.some((argv) => argv.includes("provision"))).toBe(false);
+});
+
+test("removing without --force keeps a worktree with ignored files, since Git would delete them", async () => {
+  const { worktrees } = fixture();
+  const plan = await worktrees.plan("shop", "fix");
+  await worktrees.add(plan);
+  writeFileSync(join(plan.path, ".gitignore"), ".env.local\n");
+  git(plan.path, "add", ".gitignore"); git(plan.path, "commit", "-q", "-m", "ignore");
+  writeFileSync(join(plan.path, ".env.local"), "SECRET=1\n");
+  await expect(worktrees.remove(plan.id)).rejects.toThrow("ignored files that Git would delete: .env.local");
+  expect(existsSync(join(plan.path, ".env.local"))).toBe(true);
 });
 
 test("when Git refuses to remove the folder, the database and the registration stay", async () => {
