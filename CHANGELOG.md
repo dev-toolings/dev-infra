@@ -107,6 +107,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The Logs page fills the screen with one line per entry, follows the newest line until you
   scroll up, and shows colors and JSON like the other log views. Its heading, labels and
   per-entry badges are gone: `stderr` stays marked and the component shows when several run.
+- The image scans list shows 15 rows per page, so the filters and the newest rows stay in
+  reach. A new search or filter goes back to the first page.
 - New Symfony and Laravel projects test with Pest in place of PHPUnit, and Symfony projects
   add `phpstan-symfony` to PHPStan. Their `AGENTS.md` now states the PSR, PHPDoc, PHPStan and
   Pest rules.

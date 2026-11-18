@@ -143,10 +143,11 @@ follows the browser, and the session menu switches it. API text uses `translate(
   rows share aligned columns (name, address, state, actions) and get icon actions, with a
   tooltip, only when the project has several components.
 - New project (`components/views/create-project.tsx`): a workshop across the full width.
-  On the left, in a column up to `36rem`, the steps (Project and stack, Services, Docker, Create;
-  native mode skips Docker) with one primary button. On the right, the files the server
-  would write for the exact form, in `CodeBlock`, with a `FileTree` whose files open beside it. Editing
-  the Dockerfile turns that panel into a text area. There is no separate preview step.
+  On the left, in a column up to `36rem`, the steps (Stack and project, Services, Create) with
+  one primary button. On the right, the files the server would write for the exact form, in
+  `CodeBlock`, with a `FileTree` whose files open beside it. In Docker mode the Docker settings
+  (base image, `ARG` values, container variables) sit beside the Dockerfile, and editing the
+  Dockerfile turns that panel into a text area. There is no separate preview step.
 - Release lines: a table of each component with its LTS, latest and other lines, the end
   of support and the CVE count from the last `devhub versions` report.
 - Syntax colors in `CodeBlock` and file types in `FileTree` are the one exception to color
