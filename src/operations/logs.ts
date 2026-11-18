@@ -90,7 +90,9 @@ export class OperationsLogs {
     return record.entries
       .filter((entry) => entry.seq > cursor)
       .filter((entry) => options.componentId === undefined || entry.componentId === options.componentId)
-      .slice(-limit)
+      // From a cursor, the oldest unread entries come first: the next read resumes after them, so none is skipped.
+      // Without one (absent or 0, a first read), the newest entries are the useful tail.
+      .slice(...(cursor > 0 ? [0, limit] : [-limit]))
       .map(({ key: _key, ...entry }) => entry);
   }
 

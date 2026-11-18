@@ -33,3 +33,17 @@ test("reads the logs of a project whose ID has uppercase letters, as the catalog
   const upper = { ...records, getProject: (id: string) => { if (id !== "Shop") throw new Error("missing"); return structuredClone(shop); }, updateRecord: records.updateRecord.bind(records), getRecord: records.getRecord.bind(records) } as unknown as CatalogPort;
   expect(await new OperationsLogs(upper, runtime).read("Shop")).toHaveLength(1);
 });
+
+test("from a cursor, a read returns the oldest unread entries first, so a backlog is never skipped", async () => {
+  const records = new LogCatalog();
+  const store = { getProject: records.getProject.bind(records), updateRecord: records.updateRecord.bind(records), getRecord: records.getRecord.bind(records) } as unknown as CatalogPort;
+  const backlog: LogEntry[] = Array.from({ length: 150 }, (_, n) => ({ seq: n + 1, time: new Date(Date.UTC(2026, 9, 29, 1) + n * 1000).toISOString(), projectId: "logs", componentId: "api", stream: "stdout", message: `line ${n + 1}`, sourceId: `s${n + 1}` }));
+  const busy = { ...runtime, logs: async () => structuredClone(backlog) } as unknown as RuntimePort;
+  const logs = new OperationsLogs(store, busy);
+  // A first read is the tail; a read from a cursor resumes right after it, oldest first.
+  expect((await logs.read("logs", { cursor: 0, limit: 100 })).map((entry) => entry.message)).toEqual(backlog.slice(50).map((entry) => entry.message));
+  const first = await logs.read("logs", { cursor: 1, limit: 100 });
+  expect(first.map((entry) => entry.message)).toEqual(backlog.slice(1, 101).map((entry) => entry.message));
+  const next = await logs.read("logs", { cursor: first.at(-1)!.seq, limit: 100 });
+  expect(next.map((entry) => entry.message)).toEqual(backlog.slice(101).map((entry) => entry.message));
+});
