@@ -161,8 +161,11 @@ export class Worktrees implements WorktreesPort {
     const env = existsSync(join(this.dir(id), "app.env")) ? readFileSync(join(this.dir(id), "app.env"), "utf8") : "";
     // An add that failed before writing the Compose file has nothing running.
     if (project && existsSync(join(this.dir(id), "compose.yml"))) {
-      await operations.execute(id, "stop");
-      const down = await run(["docker", "compose", "-p", `devhub-${id}`, `--project-directory=${worktree.path}`, `--file=${join(this.dir(id), "compose.yml")}`, "down"], { timeoutMs: 120_000, maxOutputBytes: 256_000 });
+      // A folder already gone (deleted by hand, or by a removal that failed later) cannot be validated
+      // for a runtime stop: Compose then finds the containers by project name alone.
+      const present = existsSync(worktree.path);
+      if (present) await operations.execute(id, "stop");
+      const down = await run(["docker", "compose", "-p", `devhub-${id}`, ...(present ? [`--project-directory=${worktree.path}`, `--file=${join(this.dir(id), "compose.yml")}`] : []), "down"], { timeoutMs: 120_000, maxOutputBytes: 256_000 });
       if (down.code !== 0) fail("Removing the containers failed", "runtime_stop", 502);
       // Docker has a few dozen bridge networks: one left per worktree would soon stop every start.
       const infra = project.components[0]?.compose?.managed?.infra ?? [];

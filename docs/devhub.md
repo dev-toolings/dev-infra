@@ -242,8 +242,8 @@ A worktree nobody started, stopped or ran a command in for 24 hours is stopped b
 `devhub serve`, which checks every 15 minutes. With `--expire HOURS` it is removed once that
 time is over, unless it has uncommitted changes or ignored files (a local `.env`, test data),
 which Git would delete with the folder. Otherwise it stays until `worktree remove`,
-which stops it, removes its containers and network, drops its database and role, removes its
-folder and keeps its branch. DevHub
+which stops it, removes its containers and network, removes its folder, then drops its database
+and role, and keeps its branch. DevHub
 never deletes a named volume: `remove` prints the dependencies volume to delete by hand. The
 panel shows a worktree after its parent; `project remove` refuses it, since unregistering
 alone would leave its database and folder.

@@ -177,7 +177,7 @@ test("a MySQL or MariaDB project gets no worktree, since only Postgres is copied
 });
 
 test("removing frees the project network, and prunes Git when the folder is already gone", async () => {
-  const { root, commands, worktrees } = fixture();
+  const { root, commands, executed, worktrees } = fixture();
   const plan = await worktrees.plan("shop", "gone");
   await worktrees.add(plan);
   rmSync(plan.path, { recursive: true, force: true });
@@ -186,4 +186,7 @@ test("removing frees the project network, and prunes Git when the folder is alre
   expect(network[3]).toStartWith("devhub-shop--gone-");
   expect(commands).toContainEqual(["docker", "network", "disconnect", network[3]!, "infra-postgres"]);
   expect(git(root, "worktree", "list").stdout.toString()).not.toContain("gone");
+  // The runtime refuses a missing folder: a retry must reach the database drop without it.
+  expect(executed).not.toContain("stop shop--gone");
+  expect(commands).toContainEqual(["docker", "compose", "-p", "devhub-shop--gone", "down"]);
 });
