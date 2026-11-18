@@ -39,7 +39,7 @@ function setup(now = () => Date.now()) {
       followContainer: (id: string, since: string | undefined, onLine: (line: ContainerLogLine) => void) => follow.start(id, since, onLine),
     },
     create: { plan: async (input: object, draft?: boolean) => ({ ...input, draft }) },
-    worktrees: { list: () => variants, get: (id: string) => variants.find((item) => item.id === id) },
+    worktrees: { list: () => variants, get: (id: string) => variants.find((item) => item.id === id), remove: async (id: string, force?: boolean) => { calls.push(["worktree remove", id, force]); return { removed: id }; } },
     maintenance: { scan: async () => { throw new Error("not used"); }, listScans: () => [], getScan: () => { throw new Error("not used"); }, preview: async () => { throw new Error("not used"); }, apply: async () => { throw new Error("not used"); }, validate: async () => { throw new Error("not used"); }, activate: async () => { throw new Error("not used"); }, listChanges: () => [] },
   } as unknown as AppServices;
   const app = createApp(services, { stateDir, pairingCode: code, origins: ["http://127.0.0.1:8040"], hostnames: ["127.0.0.1:8040"], now });
@@ -73,6 +73,16 @@ describe("local API authentication", () => {
     const response = await context.request("/api/v1/projects/sample", { method: "DELETE", headers: auth, body: "{}" });
     expect(response.status).toBe(409);
     expect((await response.json()).error.message).toContain("devhub worktree remove sample");
+  });
+
+  test("removes a worktree with the JSON request the panel sends, forced only on a boolean", async () => {
+    const context = setup();
+    const { auth } = await paired(context);
+    expect((await context.request("/api/v1/worktrees/shop--fix", { method: "DELETE", headers: auth, body: JSON.stringify({ force: "yes" }) })).status).toBe(400);
+    const response = await context.request("/api/v1/worktrees/shop--fix", { method: "DELETE", headers: auth, body: JSON.stringify({ force: true }) });
+    expect(response.status).toBe(200);
+    expect((await response.json()).data).toEqual({ removed: "shop--fix" });
+    expect(context.calls).toContainEqual(["worktree remove", "shop--fix", true]);
   });
 
   test("refuses to unregister a project that still has worktrees", async () => {

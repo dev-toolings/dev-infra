@@ -19,6 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `http://<project>.localhost`, a worktree on `http://<branch>.<project>.localhost`.
 - Each project card of the panel has a button to remove the project from DevHub, after a
   confirmation. Its files and services stay in place, as with `project remove`.
+- A worktree card deletes the worktree like `devhub worktree remove`, after a confirmation, and
+  asks again before dropping uncommitted changes or ignored files.
 - The Dockerfile of a new project declares what can change as `ARG`: versions of the image
   (PHP, Node, Python, Bun, FrankenPHP, Composer), Debian release, system packages and PHP
   extensions. The panel edits them beside the Dockerfile, with the container variables.

@@ -357,6 +357,15 @@ export function createApp(services: AppServices, options: ApiOptions): Hono<ApiE
     if (services.worktrees.list().some((item) => item.parent === projectId)) return fail("worktree", `Remove the worktrees of ${projectId} first with devhub worktree remove: they need it to clean up.`, 409);
     services.catalog.removeProject(projectId); return json({ removed: true });
   });
+  // Same cleanup as devhub worktree remove: containers, network, folder, then database. The branch stays.
+  app.delete(`${PREFIX}/worktrees/:id`, async (c) => {
+    const worktreeId = c.req.param("id"); if (!id(worktreeId)) return fail("invalid_id", "Invalid worktree ID.", 400);
+    const body = await parseBody(c); if (body instanceof Response) return body;
+    if (!exactKeys(body, ["force"]) || (body.force !== undefined && typeof body.force !== "boolean")) return fail("invalid_body", "force must be a boolean.", 400);
+    const active = services.operations.listOperations(worktreeId).some((operation) => operation.state === "queued" || operation.state === "running");
+    if (active) return fail("operation_active", "Project has an active operation.", 409);
+    return json(await services.worktrees.remove(worktreeId, body.force === true));
+  });
   app.get(`${PREFIX}/projects/:id/status`, async (c) => {
     if (!id(c.req.param("id"))) return fail("invalid_id", "Invalid project ID.", 400);
     return json(publicStatus(await services.operations.status(c.req.param("id"))));

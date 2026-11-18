@@ -245,8 +245,10 @@ which Git would delete with the folder. Otherwise it stays until `worktree remov
 which stops it, removes its containers and network, removes its folder, then drops its database
 and role, and keeps its branch. DevHub
 never deletes a named volume: `remove` prints the dependencies volume to delete by hand. The
-panel shows a worktree after its parent; `project remove` refuses it, since unregistering
-alone would leave its database and folder.
+panel shows a worktree after its parent, and its card deletes it like `worktree remove`: when
+Git would lose work, the panel says so and asks again before forcing. `project remove` refuses
+a worktree, since unregistering alone would leave its database and folder, and refuses a
+project that still has worktrees.
 
 `devhub exec PROJECT -- COMMAND` runs `sh -c COMMAND` in the `app` container of a project
 DevHub runs in Docker, never on this machine. A single word after `--` is a command line

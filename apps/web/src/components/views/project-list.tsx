@@ -2,7 +2,7 @@ import { t } from "../../lib/i18n";
 import * as React from "react";
 import { FolderGit2, LoaderCircle, Trash2 } from "lucide-react";
 import type { ProjectStatus, PublicProject } from "../../../../../src/contracts";
-import { errorMessage, isAbortError } from "../../lib/api";
+import { ApiRequestError, errorMessage, isAbortError } from "../../lib/api";
 import { plainClick, routePath } from "../../lib/router";
 import { Alert, AlertDescription, AlertTitle } from "../ui/alert";
 import { Button } from "../ui/button";
@@ -22,26 +22,34 @@ export interface ProjectListProps {
   actions?: React.ReactNode;
   onSelect: (projectId: string) => void | Promise<void>;
   onRemove: (projectId: string) => Promise<void>;
+  /** Stops a worktree and removes its containers, folder and database; `force` also drops uncommitted work. */
+  onRemoveWorktree: (worktreeId: string, force: boolean) => Promise<void>;
 }
 
-export function ProjectList({ projects, statuses, statusLoading = false, loading = false, error, actions, onSelect, onRemove }: ProjectListProps) {
+export function ProjectList({ projects, statuses, statusLoading = false, loading = false, error, actions, onSelect, onRemove, onRemoveWorktree }: ProjectListProps) {
   const [removing, setRemoving] = React.useState<PublicProject>();
   const [busy, setBusy] = React.useState(false);
   const [removeError, setRemoveError] = React.useState<string>();
+  /** The server refused a worktree with work Git would delete: the next try may force it. */
+  const [canForce, setCanForce] = React.useState(false);
 
   function closeDialog() {
     setRemoving(undefined);
     setRemoveError(undefined);
+    setCanForce(false);
   }
 
-  async function confirmRemoval(project: PublicProject) {
+  async function confirmRemoval(project: PublicProject, force = false) {
     setBusy(true);
     setRemoveError(undefined);
     try {
-      await onRemove(project.id);
+      if (project.worktree) await onRemoveWorktree(project.id, force);
+      else await onRemove(project.id);
       closeDialog();
     } catch (caught) {
-      if (!isAbortError(caught)) setRemoveError(errorMessage(caught));
+      if (isAbortError(caught)) return;
+      setRemoveError(errorMessage(caught));
+      setCanForce(!!project.worktree && caught instanceof ApiRequestError && caught.code === "dirty_worktree");
     } finally {
       setBusy(false);
     }
@@ -90,8 +98,7 @@ export function ProjectList({ projects, statuses, statusLoading = false, loading
                     <span>{t("Added {date}", { date: formatDateTime(project.createdAt) })}</span>
                   </span>
                 </a>
-                {/* A worktree is removed with devhub worktree remove, which also drops its database and folder. */}
-                {project.worktree ? null : <Button
+                <Button
                   type="button"
                   variant="ghost"
                   size="icon-sm"
@@ -101,7 +108,7 @@ export function ProjectList({ projects, statuses, statusLoading = false, loading
                   onClick={() => setRemoving(project)}
                 >
                   <Trash2 aria-hidden="true" />
-                </Button>}
+                </Button>
               </li>
             );
           })}
@@ -112,21 +119,25 @@ export function ProjectList({ projects, statuses, statusLoading = false, loading
         <Dialog open onOpenChange={(open) => { if (!open && !busy) closeDialog(); }}>
           <DialogContent>
             <DialogHeader>
-              <DialogTitle className="break-words">{t("Remove {name} from DevHub?", { name: removing.name })}</DialogTitle>
-              <DialogDescription>{t("The project leaves this list and its operation history is deleted. Its files stay on disk and its services keep running.")}</DialogDescription>
+              <DialogTitle className="break-words">{removing.worktree ? t("Delete the worktree {name}?", { name: removing.name }) : t("Remove {name} from DevHub?", { name: removing.name })}</DialogTitle>
+              <DialogDescription>
+                {removing.worktree
+                  ? t("DevHub stops the worktree, removes its containers, its folder and its database copy. The branch {branch} and its commits stay, as does the dependencies volume.", { branch: removing.worktree.branch })
+                  : t("The project leaves this list and its operation history is deleted. Its files stay on disk and its services keep running.")}
+              </DialogDescription>
             </DialogHeader>
             <code className="block break-all rounded-md bg-muted/60 p-3 text-xs">{removing.root}</code>
             {removeError ? (
               <Alert variant="destructive">
-                <AlertTitle>{t("The project could not be removed")}</AlertTitle>
+                <AlertTitle>{removing.worktree ? t("The worktree could not be removed") : t("The project could not be removed")}</AlertTitle>
                 <AlertDescription>{removeError}</AlertDescription>
               </Alert>
             ) : null}
             <DialogFooter>
               <Button type="button" variant="outline" disabled={busy} onClick={closeDialog}>{t("Cancel")}</Button>
-              <Button type="button" variant="destructive" disabled={busy} onClick={() => confirmRemoval(removing)}>
+              <Button type="button" variant="destructive" disabled={busy} onClick={() => confirmRemoval(removing, canForce)}>
                 {busy ? <LoaderCircle aria-hidden="true" className="animate-spin" /> : <Trash2 aria-hidden="true" />}
-                {t("Remove")}
+                {canForce ? t("Remove and lose this work") : t("Remove")}
               </Button>
             </DialogFooter>
           </DialogContent>
