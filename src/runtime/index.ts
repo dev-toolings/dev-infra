@@ -384,8 +384,8 @@ export class Runtime implements RuntimePort {
     if (since === undefined) return entries.slice(-count);
     const batch = entries.slice(0, count);
     // A full batch that never leaves `since` (a burst within one timestamp) would be read again at every poll:
-    // take the tail instead, so the source keeps moving.
-    if (batch.length === count && batch.every((entry) => entry.time === since)) return this.logs(project, component, limit);
+    // step past that timestamp, oldest first. Only lines of the burst beyond one read are dropped, never newer ones.
+    if (batch.length === count && batch.every((entry) => entry.time === since)) return entries.filter((entry) => entry.time > since).slice(0, count);
     return batch;
   }
   /** Read-only and open to every local container: DevHub observes unlinked containers without owning them. */

@@ -87,7 +87,7 @@ describe("Runtime Compose adapter", () => {
     // More lines at `since` than one read holds: the tail keeps the source moving instead of the same batch forever.
     overflow = false; burst = true;
     const moving = await runtime.logs(f.project, f.component, 2, "2026-01-01T00:00:01Z");
-    expect(moving.map((entry) => entry.message)).toEqual(["c", "d"]);
+    expect(moving.map((entry) => entry.message)).toEqual(["d"]);
   });
   test("associates owned containers and leaves unmatched containers observed only", async () => {
     const f = fixture();
