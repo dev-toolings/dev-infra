@@ -27,6 +27,17 @@ test("merges bounded logs with stable cursor, source deduplication, and redactio
   expect(stored?.seq).toBe(1);
 });
 
+test("a resume reads each source from its newest stored entry; a first read takes the tail", async () => {
+  const records = new LogCatalog();
+  const store = { getProject: records.getProject.bind(records), updateRecord: records.updateRecord.bind(records), getRecord: records.getRecord.bind(records) } as unknown as CatalogPort;
+  const asked: Array<string | undefined> = [];
+  const source = { ...runtime, logs: async (_project: Project, _component: unknown, _limit: number, since?: string) => { asked.push(since); return [{ seq: 1, time: "2026-10-29T01:00:05.000Z", projectId: "logs", componentId: "api", stream: "stdout", message: "five", sourceId: "s5" }]; } } as unknown as RuntimePort;
+  const logs = new OperationsLogs(store, source);
+  const first = await logs.read("logs");
+  await logs.read("logs", { cursor: first.at(-1)!.seq });
+  expect(asked).toEqual([undefined, "2026-10-29T01:00:05.000Z"]);
+});
+
 test("from a cursor, a read returns the oldest unread entries first, so a backlog is never skipped", async () => {
   const records = new LogCatalog();
   const store = { getProject: records.getProject.bind(records), updateRecord: records.updateRecord.bind(records), getRecord: records.getRecord.bind(records) } as unknown as CatalogPort;

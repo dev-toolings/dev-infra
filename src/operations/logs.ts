@@ -76,7 +76,11 @@ export class OperationsLogs {
     const incoming: Array<{ component: Component; entries: LogEntry[] }> = [];
     // Read sources concurrently; a component that cannot be read (never started, tool unavailable) contributes nothing.
     const sources = options.componentId === undefined ? components : components.filter((item) => item.id === options.componentId);
-    const settled = await Promise.allSettled(sources.map((component) => this.runtime.logs(project, component, perComponent)));
+    // A resume (cursor > 0) reads each source from its newest stored entry, oldest first: lines written while
+    // nobody read (a hidden tab) are collected in order instead of falling out of a tail.
+    const stored = cursor > 0 ? this.load(projectId, expectedCreatedAt).entries : [];
+    const since = (componentId: string) => stored.reduce<string | undefined>((latest, entry) => entry.componentId === componentId && (!latest || entry.time > latest) ? entry.time : latest, undefined);
+    const settled = await Promise.allSettled(sources.map((component) => this.runtime.logs(project, component, perComponent, since(component.id))));
     settled.forEach((result, index) => {
       if (result.status !== "fulfilled") return;
       const entries = result.value;

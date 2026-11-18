@@ -55,7 +55,8 @@ export interface RuntimePort {
  check(project: Project, component: Component): Promise<ComponentStatus>;
  start(project: Project, component: Component): Promise<void>;
  stop(project: Project, component: Component): Promise<void>;
- logs(project: Project, component: Component, limit?: number): Promise<LogEntry[]>;
+ /** With `since` (an ISO time), the oldest `limit` entries from that time; without it, the newest `limit`. */
+ logs(project: Project, component: Component, limit?: number, since?: string): Promise<LogEntry[]>;
  inventory(projects: Project[]): Promise<ContainerInfo[]>;
  followContainer(id: string, since: string | undefined, onLine: (line: ContainerLogLine) => void): Promise<FollowHandle>;
 }

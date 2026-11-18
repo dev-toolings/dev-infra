@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { chmodSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import type { Component, Executor, Follower, Project } from "../contracts";
+import { DevHubError, type Component, type Executor, type Follower, type Project } from "../contracts";
 import { overrideContent, overrideFile } from "../security/override";
 import { Runtime } from "./index";
 
@@ -58,6 +58,30 @@ describe("Runtime Compose adapter", () => {
     const logs = await runtime.logs(f.project, f.component, 25);
     expect(logs).toMatchObject([{ projectId: "sample", componentId: "web", message: "hello" }]);
     expect(logs[0]?.sourceId?.startsWith("2026-01-01T00:00:00Z:")).toBe(true);
+  });
+  test("from a time, reads the oldest lines since then, and falls back to the tail when the backlog is too large", async () => {
+    const f = fixture();
+    const reads: string[][] = [];
+    let overflow = false;
+    f.run = async (argv) => {
+      if (argv[1] === "context") return { code: 0, stdout: JSON.stringify([{ Endpoints: { docker: { Host: "unix:///var/run/docker.sock" } } }]), stderr: "" };
+      if (argv.includes("ps")) return { code: 0, stdout: JSON.stringify([{ ID: "0123456789abcdef", State: "running", Labels: { "com.docker.compose.project": "sample", "com.docker.compose.service": "web", "com.docker.compose.project.working_dir": f.app, "com.docker.compose.project.config_files": join(f.app, "compose.yml") } }]), stderr: "" };
+      if (argv[1] === "logs") {
+        reads.push(argv);
+        if (overflow && argv.includes("--since")) throw new DevHubError("Command output exceeded its limit", "output_limit", 502);
+        return { code: 0, stdout: "2026-01-01T00:00:01Z one\n2026-01-01T00:00:02Z two\n2026-01-01T00:00:03Z three\n", stderr: "" };
+      }
+      return { code: 0, stdout: "", stderr: "" };
+    };
+    const runtime = new Runtime({ run: f.run, stateDir: join(f.root, "state"), assertAllowedPath: (path) => path });
+    const since = await runtime.logs(f.project, f.component, 2, "2026-01-01T00:00:01Z");
+    expect(reads.at(-1)).toEqual(["docker", "logs", "--timestamps", "--since", "2026-01-01T00:00:01Z", "0123456789abcdef"]);
+    expect(since.map((entry) => entry.message)).toEqual(["one", "two"]);
+    overflow = true;
+    const tail = await runtime.logs(f.project, f.component, 2, "2026-01-01T00:00:01Z");
+    expect(reads.at(-1)).toEqual(["docker", "logs", "--timestamps", "--tail", "2", "0123456789abcdef"]);
+    expect(tail.map((entry) => entry.message)).toEqual(["two", "three"]);
+    await expect(runtime.logs(f.project, f.component, 2, "yesterday")).rejects.toThrow("Invalid log time");
   });
   test("associates owned containers and leaves unmatched containers observed only", async () => {
     const f = fixture();

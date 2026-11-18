@@ -109,6 +109,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the runtime only starts, stops and reads lowercase IDs, so such a project could never run.
 - The new project page has three steps: the Docker settings moved beside the Dockerfile, in
   one place. Base image, packages, extensions and "Edit the file" are all edited there.
+- The project log stream closes while the browser tab is hidden. When it comes back, DevHub
+  reads each source from its last stored line, oldest first, so the lines written meanwhile
+  show once and in order (a Docker backlog over 4 MiB still falls back to the newest lines).
 - The Logs page fills the screen with one line per entry, follows the newest line until you
   scroll up, and shows colors and JSON like the other log views. Its heading, labels and
   per-entry badges are gone: `stderr` stays marked and the component shows when several run.

@@ -338,8 +338,10 @@ export class Runtime implements RuntimePort {
     try { const response = await this.fetcher(url.toString(), { method: "GET", redirect: "manual", signal: controller.signal, proxy: false }); await response.body?.cancel(); return response.status >= 200 && response.status < 300; }
     catch { return false; } finally { clearTimeout(timer); }
   }
-  async logs(project: Project, component: Component, limit = 100): Promise<LogEntry[]> {
+  async logs(project: Project, component: Component, limit = 100, since?: string): Promise<LogEntry[]> {
     const { cwd } = this.validate(project, component); const count = Math.max(1, Math.min(1000, Math.trunc(limit)));
+    if (since !== undefined && !LOG_TIME.test(since)) throw err("Invalid log time");
+    let oldestFirst = since !== undefined;
     let result: Awaited<ReturnType<Executor>>;
     if (component.kind === "compose") {
       this.preflightCompose(project, component, cwd);
@@ -349,7 +351,10 @@ export class Runtime implements RuntimePort {
       if (!ids.length) return [];
       const outputs: string[] = [];
       for (const id of ids) {
-        const one = await this.run(["docker", "logs", "--timestamps", "--tail", String(count), id], READ);
+        const tail = () => this.run(["docker", "logs", "--timestamps", "--tail", String(count), id], READ);
+        // Docker has no "oldest N": a backlog too large for one read falls back to the tail, as before.
+        const one = since === undefined ? await tail() : await this.run(["docker", "logs", "--timestamps", "--since", since, id], READ)
+          .catch((error) => { if (error instanceof DevHubError && error.code === "output_limit") { oldestFirst = false; return tail(); } throw error; });
         if (one.code !== 0) throw err("Runtime log read failed", "runtime_logs", 502);
         outputs.push(one.stdout, one.stderr);
       }
@@ -357,7 +362,9 @@ export class Runtime implements RuntimePort {
     } else if (component.kind === "native") {
       assertLocalBus(); const unit = await this.nativeUnit(project, component, cwd, false);
       if (!(await this.unitOwned(unit))) throw err("Refusing to read logs for an unowned systemd unit", "runtime_ownership", 403);
-      result = await this.run(["journalctl", "--user", "--unit", unit.name, "--no-pager", "--output=json", "--lines", String(count)], READ);
+      // journalctl reads "YYYY-MM-DD HH:MM:SS.ffffff UTC"; --lines=+N keeps the oldest N.
+      const window = since === undefined ? ["--lines", String(count)] : ["--since", `${since.replace("T", " ").replace(/Z$/, "")} UTC`, `--lines=+${count}`];
+      result = await this.run(["journalctl", "--user", "--unit", unit.name, "--no-pager", "--output=json", ...window], READ);
     } else throw err("Unsupported runtime kind");
     if (result.code !== 0) throw err("Runtime log read failed", "runtime_logs", 502);
     const entries: LogEntry[] = [];
@@ -374,7 +381,7 @@ export class Runtime implements RuntimePort {
       }
     }
     if (component.kind === "compose") entries.sort((a, b) => a.time.localeCompare(b.time));
-    return entries.slice(-count);
+    return oldestFirst ? entries.slice(0, count) : entries.slice(-count);
   }
   /** Read-only and open to every local container: DevHub observes unlinked containers without owning them. */
   async followContainer(id: string, since: string | undefined, onLine: (line: ContainerLogLine) => void): Promise<FollowHandle> {
