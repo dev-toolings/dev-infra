@@ -32,6 +32,9 @@ export function ProjectList({ projects, statuses, statusLoading = false, loading
   const [removeError, setRemoveError] = React.useState<string>();
   /** The server refused a worktree with work Git would delete: the next try may force it. */
   const [canForce, setCanForce] = React.useState(false);
+  /** The dialog is mounted apart from its button: focus goes back to it, or to the list once its card is gone. */
+  const trigger = React.useRef<HTMLButtonElement | null>(null);
+  const list = React.useRef<HTMLElement>(null);
 
   function closeDialog() {
     setRemoving(undefined);
@@ -56,7 +59,7 @@ export function ProjectList({ projects, statuses, statusLoading = false, loading
   }
 
   return (
-    <section aria-label={t("Projects")}>
+    <section ref={list} tabIndex={-1} aria-label={t("Projects")} className="outline-none">
       {error ? <ErrorState description={error} /> : loading ? <ProjectListSkeleton /> : null}
 
       {!error && !loading && projects.length === 0 ? (
@@ -105,7 +108,7 @@ export function ProjectList({ projects, statuses, statusLoading = false, loading
                   className="absolute right-2.5 bottom-2.5 text-muted-foreground hover:text-destructive"
                   aria-label={t("Remove {name}", { name: project.name })}
                   title={t("Remove {name}", { name: project.name })}
-                  onClick={() => setRemoving(project)}
+                  onClick={(event) => { trigger.current = event.currentTarget; setRemoving(project); }}
                 >
                   <Trash2 aria-hidden="true" />
                 </Button>
@@ -117,7 +120,7 @@ export function ProjectList({ projects, statuses, statusLoading = false, loading
 
       {removing ? (
         <Dialog open onOpenChange={(open) => { if (!open && !busy) closeDialog(); }}>
-          <DialogContent>
+          <DialogContent onCloseAutoFocus={(event) => { event.preventDefault(); (trigger.current?.isConnected ? trigger.current : list.current)?.focus(); }}>
             <DialogHeader>
               <DialogTitle className="break-words">{removing.worktree ? t("Delete the worktree {name}?", { name: removing.name }) : t("Remove {name} from DevHub?", { name: removing.name })}</DialogTitle>
               <DialogDescription>

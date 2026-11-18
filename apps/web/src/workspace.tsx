@@ -131,9 +131,13 @@ export function Workspace({ onLogout }: WorkspaceProps) {
   }
 
   async function deleteWorktree(worktreeId: string, force: boolean) {
-    await removeWorktree(worktreeId, force, lifetime());
-    projects.update((current) => (current ?? []).filter((item) => item.id !== worktreeId));
-    projects.reload();
+    try {
+      await removeWorktree(worktreeId, force, lifetime());
+      projects.update((current) => (current ?? []).filter((item) => item.id !== worktreeId));
+    } finally {
+      // A removal that failed midway may already have deleted the folder or the registration.
+      projects.reload();
+    }
   }
 
   const projectActions = (
