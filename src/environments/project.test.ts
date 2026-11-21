@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parse } from "yaml";
-import type { CatalogPort, Executor, Project, SharedServicesPort } from "../contracts";
+import type { CatalogPort, Executor, Project } from "../contracts";
 import { projectNetwork } from "../services";
 import { featureHost, prepareProject, projectRecipe, purgeProjectDatabase } from "./project";
 import type { Environment, Recipe } from "./types";
@@ -25,18 +25,20 @@ function fixture() {
   writeFileSync(join(imported, "compose.yml"), [
     "services:", "  app:", "    build:", `      context: ${join(imported, "build")}`, "    user: 1000:1000", "    env_file:", `      - ${join(imported, "app.env")}`,
     "    ports:", "      - 127.0.0.1:4101:3000", "    volumes:", `      - ${parentRoot}:/app`, "      - vendor:/app/vendor", `      - ${join(imported, "build", "entry.sh")}:/devhub/entry.sh:ro`,
-    "    security_opt:", "      - no-new-privileges:true", "volumes:", "  vendor: {}", "networks:", "  default:", `    name: ${projectNetwork("demo", ["infra-postgres"])}`, "    external: true", "",
+    "    security_opt:", "      - no-new-privileges:true", "    healthcheck:", "      test: [CMD, true]", "      start_period: 300s", "volumes:", "  vendor: {}", "networks:", "  default:", `    name: ${projectNetwork("demo", ["infra-postgres"])}`, "    external: true", "",
   ].join("\n"));
   const project = {
     id: "demo", name: "Demo", root: parentRoot,
     components: [{ id: "app", name: "app", cwd: parentRoot, url: "http://127.0.0.1:4101", compose: { projectName: "devhub-demo", files: [], profiles: [], services: ["app"], managed: { infra: ["infra-postgres"] } } }],
   } as unknown as Project;
   const catalog = { getProject: () => project, listProjects: () => [project] } as unknown as CatalogPort;
-  const services = { containerEnv: async () => "postgres" } as unknown as SharedServicesPort;
   const commands: string[][] = [];
+  const environments: (Record<string, string> | undefined)[] = [];
   let failCopy = false, existing = false;
-  const run: Executor = async (argv) => {
+  const run: Executor = async (argv, options) => {
     commands.push(argv);
+    environments.push(options?.env);
+    if (argv.includes("printenv")) return { code: 0, stdout: "postgres\n", stderr: "" };
     if (argv.some((arg) => arg.includes("pg_dump"))) return failCopy ? { code: 1, stdout: "", stderr: "disk full" } : { code: 0, stdout: "", stderr: "" };
     if (argv.includes("-tA")) return { code: 0, stdout: existing ? "1\n" : "", stderr: "" };
     return { code: 0, stdout: "", stderr: "" };
@@ -46,8 +48,8 @@ function fixture() {
     id: "ef-0123456789abcdef0123456789abcdef", slug: "checkout", recipe, bootstrap: {},
     repos: [{ name: "app", source: parentRoot, path: worktree, ref: "HEAD", sha: "a".repeat(40), branch: "devhub/x/app", attach: false, prepared: true }],
   } as unknown as Environment & { recipe: Recipe };
-  const options = { catalog, services, run, stateDir, infraDir };
-  return { root, parentRoot, worktree, source, imported, recipe, entry, options, commands, setFailCopy: (value: boolean) => { failCopy = value; }, setExisting: (value: boolean) => { existing = value; } };
+  const options = { catalog, run, stateDir, infraDir };
+  return { root, parentRoot, worktree, source, imported, recipe, entry, options, commands, environments, setFailCopy: (value: boolean) => { failCopy = value; }, setExisting: (value: boolean) => { existing = value; } };
 }
 
 test("a DevHub project becomes a shared recipe routed to its app port on its project network", () => {
@@ -55,6 +57,8 @@ test("a DevHub project becomes a shared recipe routed to its app port on its pro
   expect(f.recipe).toMatchObject({
     isolation: "shared", generated: { project: "demo" }, repositories: { app: { path: f.parentRoot, ref: "HEAD" } },
     routes: [{ path: "/", service: "app", port: 3000 }], shared: { networks: [projectNetwork("demo", ["infra-postgres"])], volumes: [] },
+    // The project's health check allows 300 s for a first dependency install.
+    readySeconds: 330,
   });
 });
 
@@ -76,6 +80,9 @@ test("the feature source points at its worktree, its own env file and a private 
   expect(f.entry.bootstrap["database-copy"]).toBe("done");
   expect(f.commands.some((argv) => argv.includes("connect") && argv.includes("infra-postgres"))).toBe(true);
   expect(f.commands.find((argv) => argv.some((arg) => arg.includes("pg_dump")))?.slice(-3)).toEqual(["postgres", "dh_demo", database]);
+  // The provisioning script runs docker itself: it must reach the same local Engine as the feature.
+  const provision = f.commands.findIndex((argv) => argv.includes("provision"));
+  expect(f.environments[provision]).toEqual({ DOCKER_HOST: "unix:///var/run/docker.sock" });
 });
 
 test("a copy cut short is dropped and made again, a foreign database is never taken over", async () => {
@@ -104,4 +111,13 @@ test("a half-written source from an interrupted run is written again", async () 
   writeFileSync(join(f.source, "compose.yml.tmp"), "services:\n  app:\n    bui");
   await prepareProject(f.options, f.entry, f.source, () => {});
   expect(parse(readFileSync(join(f.source, "compose.yml"), "utf8")).services.app.env_file).toEqual([join(f.source, "app.env")]);
+});
+
+test("the app URL keeps the port of a proxy that does not listen on 80", async () => {
+  const f = fixture();
+  process.env.DEVHUB_FEATURE_PROXY_PORT = "8080";
+  try {
+    await prepareProject(f.options, f.entry, f.source, () => {});
+  } finally { delete process.env.DEVHUB_FEATURE_PROXY_PORT; }
+  expect(readFileSync(join(f.source, "app.env"), "utf8")).toContain(`APP_URL=http://${featureHost(f.entry, "demo")}:8080\n`);
 });

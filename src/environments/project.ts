@@ -2,15 +2,17 @@ import { randomBytes } from "node:crypto";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { parse, stringify } from "yaml";
-import { DevHubError, type CatalogPort, type Component, type Executor, type Project, type SharedServicesPort } from "../contracts";
+import { DevHubError, type CatalogPort, type Component, type Executor, type Project } from "../contracts";
 import { databaseName } from "../imports";
 import { proxyHost } from "../proxy";
 import { managedEntry } from "../runtime/mounts";
 import { connectProjectNetwork, projectNetwork } from "../services";
-import { previewHost } from "./docker";
+import { featureProxyPort, previewHost } from "./docker";
+import { LOCAL_DOCKER_HOST } from "../runtime/executor";
 import type { Environment, Recipe } from "./types";
 
-type Options = { catalog: CatalogPort; services?: SharedServicesPort; run: Executor; stateDir: string; infraDir: string };
+/** `run` must pin docker to the local Engine (environments/docker.ts hostExecutor): the feature containers live there. */
+type Options = { catalog: CatalogPort; run: Executor; stateDir: string; infraDir: string };
 type Entry = Environment & { recipe: Recipe };
 
 const DB = /^[a-z_][a-z0-9_]{0,62}$/;
@@ -39,6 +41,8 @@ export function projectRecipe(project: Project, stateDir: string): Recipe {
   const app = parse(readFileSync(join(dir, "compose.yml"), "utf8")).services.app;
   const port = Number(String(app.ports?.[0] ?? "").split(":").at(-1));
   if (!Number.isInteger(port) || port < 1 || port > 65535) fail("The project app publishes no port");
+  // A first start installs dependencies: wait as long as the app's own health check allows, plus a margin.
+  const startPeriod = Number(/^(\d+)s$/.exec(String(app.healthcheck?.start_period ?? ""))?.[1] ?? 0);
   return {
     version: 1, repositories: { app: { path: project.root, ref: "HEAD" } },
     compose: { repository: "app", files: [], profiles: [], services: ["app"], vars: {}, secretFiles: {} },
@@ -46,18 +50,23 @@ export function projectRecipe(project: Project, stateDir: string): Recipe {
     routes: [{ path: "/", service: "app", port, healthPath: "/__devhub_health" }], steps: [],
     shared: { networks: [projectNetwork(project.id, component.compose!.managed!.infra)], volumes: [] },
     isolation: "shared", capabilities: {}, internet: [], resources: { cpus: 2, memoryMiB: 2048 }, idleMinutes: 1440, localFiles: [],
-    previewDomain: projectDomain(project.id), generated: { project: project.id },
+    previewDomain: projectDomain(project.id), generated: { project: project.id }, readySeconds: Math.max(90, startPeriod + 30),
   };
 }
 
 /** The copy carries no owner: every object belongs to the private role of the feature. */
 export async function copyDatabase(run: Executor, infraDir: string, source: { host: string; admin: string; from: string }, target: string, envFile: string): Promise<void> {
   if (![source.from, target, source.admin].every((name) => DB.test(name))) fail("Unexpected database name", "invalid", 400);
-  const provisioned = await run(["bash", resolve(infraDir, "bin/devhub"), "db", "provision", target, envFile, source.host, source.admin], { cwd: infraDir, timeoutMs: 60_000, maxOutputBytes: 64_000 });
+  const provisioned = await run(["bash", resolve(infraDir, "bin/devhub"), "db", "provision", target, envFile, source.host, source.admin], { cwd: infraDir, timeoutMs: 60_000, maxOutputBytes: 64_000, env: { DOCKER_HOST: LOCAL_DOCKER_HOST } });
   if (provisioned.code !== 0) fail(`Database provisioning failed; check that ${source.host} runs with devhub up`, "provisioning_failed");
   const copied = await run(["docker", "exec", source.host, "sh", "-c", // Through a file, not a pipe: sh has no pipefail, and a failed dump would restore nothing and pass.
     'f=$(mktemp) || exit 1; pg_dump -U "$1" --no-owner --no-acl -f "$f" "$2" && psql -q -v ON_ERROR_STOP=1 -U "$3" -d "$3" -f "$f"; rc=$?; rm -f "$f"; exit $rc', "sh", source.admin, source.from, target], { timeoutMs: 600_000, maxOutputBytes: 256_000 });
   if (copied.code !== 0) fail(`Copying ${source.from} into ${target} failed: ${copied.stderr.trim().slice(0, 300)}`, "provisioning_failed");
+}
+
+async function postgresAdmin(run: Executor, host: string): Promise<string> {
+  const result = await run(["docker", "exec", host, "printenv", "POSTGRES_USER"], { timeoutMs: 10_000, maxOutputBytes: 8_000 });
+  return result.code === 0 && DB.test(result.stdout.trim()) ? result.stdout.trim() : fail(`${host} has no POSTGRES_USER; check that it runs with devhub up`, "provisioning_failed");
 }
 
 async function databaseExists(run: Executor, host: string, admin: string, database: string): Promise<boolean> {
@@ -108,7 +117,8 @@ export async function prepareProject(options: Options, entry: Entry, sourceDir: 
 
     const password = randomBytes(24).toString("hex");
     const oldPassword = entry.database ? new Map(envLines(parentEnv)).get("DEVHUB_DB_PASSWORD") ?? fail("The project env file has no DEVHUB_DB_PASSWORD") : "";
-    const url = `http://${featureHost(entry, parent.id)}`;
+    const port = featureProxyPort();
+    const url = `http://${featureHost(entry, parent.id)}${port === 80 ? "" : `:${port}`}`;
     const env = envLines(parentEnv).map(([key, value]) => {
       if (entry.database && key === "DEVHUB_DB_PASSWORD") return `${key}=${password}`;
       if (entry.database && /^postgres(?:ql)?:\/\//.test(value) && value.includes(`/${parentDb}`)) value = value.replaceAll(oldPassword, password).replace(new RegExp(`\\b${parentDb}\\b`, "g"), entry.database);
@@ -125,9 +135,8 @@ export async function prepareProject(options: Options, entry: Entry, sourceDir: 
   }
   await connectProjectNetwork(run, parent.id, component.compose!.managed!.infra);
   if (!entry.database || entry.bootstrap["database-copy"] === "done") return;
-  const services = options.services ?? fail("Shared services are unavailable", "provisioning_failed", 503);
   const host = databaseHost(options, entry, sourceDir) ?? fail("No Postgres address found in the feature env file");
-  const admin = await services.containerEnv(host, "POSTGRES_USER");
+  const admin = await postgresAdmin(run, host);
   if (entry.bootstrap["database-copy"]) await dropDatabase(run, host, admin, entry.database);
   else if (await databaseExists(run, host, admin, entry.database)) fail(`A database or role named ${entry.database} already exists; DevHub does not take it over`, "conflict");
   entry.bootstrap["database-copy"] = "running";
@@ -147,7 +156,6 @@ export async function prepareProject(options: Options, entry: Entry, sourceDir: 
  */
 export async function purgeProjectDatabase(options: Options, entry: Entry, sourceDir: string): Promise<void> {
   if (!entry.database || !entry.bootstrap["database-copy"]) return;
-  const services = options.services ?? fail("Shared services are unavailable", "provisioning_failed", 503);
   const host = databaseHost(options, entry, sourceDir) ?? fail("No Postgres address found for the feature database");
-  await dropDatabase(options.run, host, await services.containerEnv(host, "POSTGRES_USER"), entry.database);
+  await dropDatabase(options.run, host, await postgresAdmin(options.run, host), entry.database);
 }

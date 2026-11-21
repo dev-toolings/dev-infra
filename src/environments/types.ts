@@ -31,6 +31,8 @@ export interface Recipe {
   previewDomain?: string;
   /** Set by DevHub, never read from a recipe file: the recipe was derived from this DevHub project. */
   generated?: { project: string };
+  /** Set by DevHub for a generated recipe: how long launch waits for readiness (default 90). */
+  readySeconds?: number;
 }
 
 export interface CreateEnvironment {

@@ -48,7 +48,7 @@ export function composeServices(modules: ManagerModules, executor: Executor, sta
   const create = new modules.Creator({ catalog, discovery, imports, operations, services: shared, run, infraDir });
   const versions = new modules.Versions({ run, stateDir, infraDir });
   const projects = new ProjectTools({ catalog, run, stateDir, infraDir });
-  const environments = new Environments({ catalog, services: shared, run, stateDir, infraDir });
+  const environments = new Environments({ catalog, run, stateDir, infraDir });
   return { catalog, discovery, operations, maintenance, imports, create, versions, projects, environments };
 }
 export async function services(stateDir = stateDirectory(), reservedPorts = CONTROLLER_PORTS): Promise<AppServices> {

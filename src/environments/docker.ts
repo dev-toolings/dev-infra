@@ -2,12 +2,13 @@ import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from "nod
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { DevHubError, type ExecOptions, type Executor, type ExecResult } from "../contracts";
+import { LOCAL_DOCKER_HOST } from "../runtime/executor";
 import type { Environment, EnvironmentResources, Preview, Recipe } from "./types";
 
 export const featureLabel = "com.devhub.feature";
 export const gateway = "devhub-preview";
 const projectLabel = "com.docker.compose.project";
-const localDockerHost = "unix:///var/run/docker.sock";
+const localDockerHost = LOCAL_DOCKER_HOST;
 const owner = '{{index .Labels "' + featureLabel + '"}}';
 const project = '{{index .Labels "' + projectLabel + '"}}';
 const containerFormat = '{{.Id}}\t{{.Name}}\t{{index .Config.Labels "com.docker.compose.service"}}\t{{.State.Status}}\t{{if .State.Health}}{{.State.Health.Status}}{{end}}\t{{.Image}}\t{{index .Config.Labels "' + featureLabel + '"}}\t{{index .Config.Labels "' + projectLabel + '"}}';
@@ -24,6 +25,12 @@ export function allowsVerifiedFeatureRemoval(kind: "network" | "volume", targets
 const lines = (value: string) => value.split(/\r?\n/).filter(Boolean);
 /** The domain alias of a feature preview; the ID part keeps two features with the same name apart. */
 export const previewHost = (env: Pick<Environment, "id" | "slug">, domain: string) => `${env.slug}-${env.id.slice(3, 11)}.${domain}`;
+/** The HTTP port of the DevHub proxy that serves feature domain aliases. */
+export function featureProxyPort(): number {
+  const port = Number(process.env.DEVHUB_FEATURE_PROXY_PORT ?? 80);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) throw new DevHubError("Invalid feature proxy port", "proxy_unavailable", 409);
+  return port;
+}
 export const emptyResources = (): EnvironmentResources => ({ containers: [], volumes: [], networks: [], images: [] });
 
 /** Docker operations execute against the local Ubuntu Engine, even when the caller has another context selected. */
@@ -165,8 +172,7 @@ export class FeatureDocker {
     const file = join(this.infraDir, "data", "caddy", "sites", env.id + ".caddy");
     const pending = join(directory, "proxy-reload-pending");
     if (!preview && !existsSync(file) && !existsSync(pending)) return undefined;
-    const composePort = Number(process.env.DEVHUB_FEATURE_PROXY_PORT ?? 80);
-    if (!Number.isInteger(composePort) || composePort < 1 || composePort > 65535) throw new DevHubError("Invalid feature proxy port", "proxy_unavailable", 409);
+    const composePort = featureProxyPort();
     const mounts = await this.run(["docker", "inspect", "--format", '{{.State.Status}}\t{{range .Mounts}}{{if eq .Destination "/etc/caddy"}}{{.Source}}{{end}}{{end}}', "infra-caddy"], { timeoutMs: 5000 });
     const expected = "running\t" + join(this.infraDir, "data", "caddy");
     // The .localhost alias of a DevHub project feature is optional, like the project's own: Caddy reads it when the proxy starts.

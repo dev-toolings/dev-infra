@@ -2,7 +2,7 @@ import { chmodSync, constants, copyFileSync, existsSync, lstatSync, mkdirSync, r
 import { homedir, hostname } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
-import { DevHubError, type CatalogPort, type Executor, type ExecResult, type SharedServicesPort } from "../contracts";
+import { DevHubError, type CatalogPort, type Executor, type ExecResult } from "../contracts";
 import { gitRun } from "../git";
 import { redactLogLine, redactOutput as redactCommandOutput, redactText } from "../operations/logger";
 import { emptyResources, FeatureDocker, hostExecutor } from "./docker";
@@ -94,7 +94,7 @@ export class Environments {
   private readonly locks: string;
   private readonly models: string;
 
-  constructor(private readonly options: { catalog: CatalogPort; services?: SharedServicesPort; run: Executor; stateDir: string; infraDir: string }) {
+  constructor(private readonly options: { catalog: CatalogPort; run: Executor; stateDir: string; infraDir: string }) {
     this.run = hostExecutor(options.run);
     this.docker = new FeatureDocker(this.run, options.infraDir);
     this.locks = join(options.stateDir, "feature-locks");
@@ -405,7 +405,7 @@ export class Environments {
     }
     if (entry.recipe.generated) {
       this.step(entry, "project-source");
-      await prepareProject(this.options, entry, join(directory(this.model(entry), true), "source"), () => this.save(entry));
+      await prepareProject({ ...this.options, run: this.run }, entry, join(directory(this.model(entry), true), "source"), () => this.save(entry));
     }
   }
 
@@ -455,7 +455,7 @@ export class Environments {
       }
     });
     this.step(entry, "readiness");
-    const deadline = Date.now() + 90_000;
+    const deadline = Date.now() + (entry.recipe.readySeconds ?? 90) * 1000;
     do {
       entry.resources = await this.docker.inspect(entry);
       entry.preview = await this.docker.endpoint(entry);
@@ -628,7 +628,7 @@ export class Environments {
       this.save(entry);
       if (flags.purgeData && entry.recipe.generated && entry.database) {
         this.step(entry, "drop-database");
-        await purgeProjectDatabase(this.options, entry, join(this.model(entry), "source"));
+        await purgeProjectDatabase({ ...this.options, run: this.run }, entry, join(this.model(entry), "source"));
         delete entry.database;
         this.save(entry);
       }

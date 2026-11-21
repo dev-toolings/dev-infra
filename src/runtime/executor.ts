@@ -2,6 +2,7 @@ import type { Executor, Follower, LogStreamName } from "../contracts";
 import { DevHubError } from "../contracts";
 import { isTrustedGitOptions } from "../git";
 
+export const LOCAL_DOCKER_HOST = "unix:///var/run/docker.sock";
 const inherited = ["PATH", "HOME", "XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS", "LANG", "LC_ALL", "LC_CTYPE", "LC_MESSAGES", "TERM", "NO_COLOR"];
 const safeCallerEnvironment = new Set(["LANG", "LC_ALL", "LC_CTYPE", "LC_MESSAGES", "NO_COLOR", "TERM", "CLICOLOR", "CLICOLOR_FORCE", "FORCE_COLOR"]);
 const trustedGitEnvironment = new Map([
@@ -52,6 +53,11 @@ function commandEnvironment(options: Parameters<Executor>[1]): Record<string, st
       throw new DevHubError("Invalid command environment", "unsafe_environment", 400);
     }
     if (safeCallerEnvironment.has(key)) {
+      env[key] = value;
+      continue;
+    }
+    // The local Engine only: a script that runs docker cannot follow a remote context.
+    if (key === "DOCKER_HOST" && value === LOCAL_DOCKER_HOST) {
       env[key] = value;
       continue;
     }

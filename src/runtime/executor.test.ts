@@ -24,6 +24,12 @@ test("executor rejects caller-controlled executable and loader environment", asy
   }
 });
 
+test("executor accepts DOCKER_HOST only as the local Engine socket", async () => {
+  const result = await execCommand([process.execPath, "--eval", "process.stdout.write(process.env.DOCKER_HOST ?? '')"], { env: { DOCKER_HOST: "unix:///var/run/docker.sock" } });
+  expect(result.stdout).toBe("unix:///var/run/docker.sock");
+  await expect(execCommand([process.execPath, "--eval", "process.exit(0)"], { env: { DOCKER_HOST: "tcp://192.0.2.1:2376" } })).rejects.toThrow("Unsupported command environment");
+});
+
 test("executor passes only inherited safe values and explicit locale/color values to a child", async () => {
   const result = await execCommand([
     process.execPath,
