@@ -145,7 +145,7 @@ test("structured command output keeps tabs and lines while removing controls and
 });
 
 test("long unbroken tokens and runs of separators are redacted in linear time", () => {
-  for (const sample of ["a".repeat(200_000), "?".repeat(200_000), "?a".repeat(100_000), "a=".repeat(100_000), "x@".repeat(100_000)]) {
+  for (const sample of ["a".repeat(200_000), "?".repeat(200_000), `${"?".repeat(200_000)}=x`, "?a".repeat(100_000), `${"'a':".repeat(50_000)}`, `${"\"a\"=".repeat(50_000)}`, "a=".repeat(100_000), "x@".repeat(100_000)]) {
     const started = performance.now();
     expect(redactOutput(sample)).toBe(sample);
     expect(performance.now() - started).toBeLessThan(1000);
@@ -158,6 +158,7 @@ test("a key that is not sensitive never takes the next credential as its value",
   expect(redactText("msg: api_key=fixture-secret done")).toBe("msg: api_key=[redacted] done");
   expect(redactText("token=abc== next=ok")).toBe("token=[redacted] next=ok");
   expect(redactOutput("https://example.test/?api?key=fixture-secret&page=2")).toBe("https://example.test/?api?key=[redacted]&page=2");
+  expect(redactOutput("'password=fixturesecret':\n")).toBe("'password=[redacted]\n");
   for (const key of ["%61uth", "%70ass", "%70wd"]) expect(redactOutput(`https://x/?foo?${key}=fixture-secret`)).toBe(`https://x/?foo?${key}=[redacted]`);
   expect(redactText('{"user":"ada","password":"fixture secret"}')).toBe('{"user":"ada","password":[redacted]}');
 });

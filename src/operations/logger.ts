@@ -102,12 +102,15 @@ function redactAssignments(text: string): string {
   ASSIGNMENT_KEY.lastIndex = 0;
   for (let match = ASSIGNMENT_KEY.exec(text); match; match = ASSIGNMENT_KEY.exec(text)) {
     const key = match[0].replace(/\s*[:=]\s*$/, "").replace(/^["']|["']$/g, "");
-    if (!isSensitiveKey(key)) continue;
     const start = match.index + match[0].length;
     ASSIGNMENT_VALUE.lastIndex = start;
-    if (!ASSIGNMENT_VALUE.exec(text)) continue;
-    safe += `${text.slice(copied, start)}${REDACTED}`;
-    copied = ASSIGNMENT_KEY.lastIndex = ASSIGNMENT_VALUE.lastIndex;
+    if (isSensitiveKey(key) && ASSIGNMENT_VALUE.exec(text)) {
+      safe += `${text.slice(copied, start)}${REDACTED}`;
+      copied = ASSIGNMENT_KEY.lastIndex = ASSIGNMENT_VALUE.lastIndex;
+    } else if (/^["']/.test(match[0])) {
+      // A quoted key left as is may hold an assignment of its own: `'password=x':`.
+      ASSIGNMENT_KEY.lastIndex = match.index + 1;
+    }
   }
   return safe + text.slice(copied);
 }
