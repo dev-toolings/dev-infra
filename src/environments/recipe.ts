@@ -9,6 +9,8 @@ const identifier = /^[a-z][a-z0-9_-]{0,47}$/;
 const serviceName = /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,62}$/;
 const variable = /^[A-Z_][A-Z0-9_]*$/;
 const reservedVariablePrefix = /^(COMPOSE_|DOCKER_|BUILDX_|DEVHUB_REPO_|GIT_)/;
+// Docker's default set: a hardened service can keep some of them back, never gain more.
+const keptCapability = /^(?:AUDIT_WRITE|CHOWN|DAC_OVERRIDE|FOWNER|FSETID|KILL|MKNOD|NET_BIND_SERVICE|NET_RAW|SETFCAP|SETGID|SETPCAP|SETUID|SYS_CHROOT)$/;
 const pathPattern = /^\/(?:[a-zA-Z0-9._~-]+(?:\/[a-zA-Z0-9._~-]+)*)?$/;
 
 export function recipeError(message: string): never { throw new DevHubError(message, "invalid_recipe", 400); }
@@ -81,7 +83,7 @@ export function listRecipes(directory: string): { id: string }[] {
   }
 }
 export function parseRecipe(raw: unknown): Recipe {
-  const input = object(raw, "recipe", ["version", "repositories", "compose", "routes", "steps", "shared", "resources", "idleMinutes", "localFiles", "previewDomain"]);
+  const input = object(raw, "recipe", ["version", "repositories", "compose", "routes", "steps", "shared", "isolation", "capabilities", "internet", "resources", "idleMinutes", "localFiles", "previewDomain"]);
   if (input.version !== 1) recipeError("Only recipe version 1 is supported");
   const repositories = fromRecord(input.repositories, "repositories", (name, rawRepo) => {
     string(name, "repository name", identifier);
@@ -135,6 +137,15 @@ export function parseRecipe(raw: unknown): Recipe {
   distinct(steps.map((step) => step.id), "Step IDs");
   const shared = object(input.shared ?? {}, "shared", ["networks", "volumes"]);
   const sharedNames = (value: unknown, name: string) => distinct(array(value ?? [], name, (item) => string(item, name, serviceName)), name);
+  const sharedResources = { networks: sharedNames(shared.networks, "shared.networks"), volumes: sharedNames(shared.volumes, "shared.volumes") };
+  const isolation = string(input.isolation ?? "shared", "isolation", /^(shared|dedicated|hardened)$/) as Recipe["isolation"];
+  if (isolation !== "shared" && (sharedResources.networks.length || sharedResources.volumes.length)) recipeError("Only the shared isolation level can use shared networks or volumes");
+  if (isolation !== "hardened" && (input.capabilities !== undefined || input.internet !== undefined)) recipeError("capabilities and internet apply to the hardened isolation level only");
+  const capabilities = fromRecord(input.capabilities ?? {}, "capabilities", (name, value) => {
+    service(name);
+    return distinct(array(value, "capabilities", (item) => string(item, "capability", keptCapability)), "capabilities");
+  });
+  const internet = distinct(array(input.internet ?? [], "internet", service), "internet");
   const resources = object(input.resources ?? {}, "resources", ["cpus", "memoryMiB"]);
   const localFiles = array(input.localFiles ?? [], "localFiles", (rawFile) => {
     const file = object(rawFile, "local file", ["repository", "source", "target"]);
@@ -148,7 +159,7 @@ export function parseRecipe(raw: unknown): Recipe {
     version: 1, repositories,
     compose: { repository: repoName(compose.repository), files, services, vars, secretFiles,
       profiles: distinct(array(compose.profiles ?? [], "compose.profiles", (name) => string(name, "Compose profile", serviceName)), "Compose profiles") },
-    routes, steps, shared: { networks: sharedNames(shared.networks, "shared.networks"), volumes: sharedNames(shared.volumes, "shared.volumes") },
+    routes, steps, shared: sharedResources, isolation, capabilities, internet,
     resources: { cpus: number(resources.cpus ?? 1, "CPU limit", 0.1, 64, false), memoryMiB: number(resources.memoryMiB ?? 256, "memory limit", 32, 65536) },
     idleMinutes: number(input.idleMinutes ?? 1440, "idle minutes", 1, 43200), localFiles, previewDomain,
   };

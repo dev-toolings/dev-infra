@@ -2,6 +2,7 @@
 """Exercise feature environment readiness, capacity and interrupted bootstrap on real Docker."""
 from contextlib import ExitStack
 import json
+import re
 import os
 from pathlib import Path
 import runpy
@@ -143,7 +144,36 @@ def main():
              "-c", "user.name=fixture", "commit", "-m", "unsafe bind fixture"])
         unsafe = command("create", "recovery", "--feature", "unsafe bind", expected=1)
         assert unsafe["operation"]["error"]["code"] == "compose_invalid" and not unsafe["resources"]["containers"]
-        print("PASS: failed migration, capacity, clean interpolation, interrupted bootstrap, retry, readiness drift, wrong checkout and external volume retention")
+
+        # Hardened isolation: no capability beyond the recipe's, the host user in a worktree mount, no Internet.
+        compose.write_text(source.replace("  api:\n", "  api:\n    volumes:\n      - ${DEVHUB_REPO_API}:/app\n"))
+        git(repos["deployment"], "add", "compose.yml")
+        run(["git", "-C", str(repos["deployment"]), "-c", "user.email=fixture@example.invalid",
+             "-c", "user.name=fixture", "commit", "-m", "hardened fixture"])
+        hardened = {**recipe, "isolation": "hardened", "shared": {"networks": [], "volumes": []}, "steps": [],
+                    "capabilities": {"postgres": ["CHOWN", "DAC_OVERRIDE", "FOWNER", "SETGID", "SETUID"]}}
+        (root / "recipes/hardened.json").write_text(json.dumps(hardened))
+        created = run([cli, "env", "create", "hardened", "--feature", "hardened", "--json"], env=env, check=False, timeout=300)
+        sandbox = json.loads(created.stdout)["data"]
+        ids.add(sandbox["id"])
+        if sandbox["observed"] != "ready":
+            for container in sandbox["resources"]["containers"]:
+                state = run([*DOCKER, "inspect", "--format", "{{json .State}} {{json .NetworkSettings.Ports}}", container["id"]], env=env, check=False)
+                logs = run([*DOCKER, "logs", "--tail", "20", container["id"]], env=env, check=False)
+                print(container["service"], state.stdout.strip(), (logs.stdout + logs.stderr)[-1500:])
+        assert sandbox["observed"] == "ready", sandbox["operation"]
+        assert fixture["wait_http"](sandbox["preview"]["url"] + "/api/health")[0] == 200
+        api = lambda *argv: command("exec", sandbox["id"], "--service", "api", "--", *argv)
+        assert api("id", "-u")["stdout"].strip() == str(os.getuid())
+        status = api("cat", "/proc/self/status")["stdout"]
+        assert re.search(r"CapEff:\s+0{16}\s", status) and re.search(r"CapBnd:\s+0{16}\s", status), status
+        api("touch", "/app/hardened-owner")
+        worktree = next(repo["path"] for repo in sandbox["repos"] if repo["name"] == "api")
+        assert (Path(worktree) / "hardened-owner").stat().st_uid == os.getuid()
+        offline = command("exec", sandbox["id"], "--service", "api", "--", "node", "-e",
+                          "fetch('https://example.com').then(() => process.exit(0), () => process.exit(7))", expected=7)
+        assert offline["code"] == 7, offline
+        print("PASS: failed migration, capacity, clean interpolation, interrupted bootstrap, retry, readiness drift, wrong checkout, external volume retention and hardened isolation")
 
 
 if __name__ == "__main__":

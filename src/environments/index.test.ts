@@ -21,7 +21,7 @@ function fixture(run: Executor, overrides: Partial<Environment> = {}) {
   const recipe: Recipe = {
     version: 1, repositories: {},
     compose: { repository: "app", files: [], profiles: [], services: ["api"], vars: {}, secretFiles: {} },
-    routes: [], steps: [], shared: { networks: [], volumes: [] },
+    routes: [], steps: [], shared: { networks: [], volumes: [] }, isolation: "shared", capabilities: {}, internet: [],
     resources: { cpus: 1, memoryMiB: 512 }, idleMinutes: 30, localFiles: [],
   };
   const hash = (input: string) => createHash("sha256").update(input).digest("hex");

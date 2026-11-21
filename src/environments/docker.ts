@@ -91,7 +91,7 @@ export class FeatureDocker {
     }
     // Keep the verified targets tied to this inspection. Remove networks by ID so an identically named replacement is never selected.
     inspectedResources.set(result, {
-      network: new Set(result.networks.filter(({ id, name }) => /^[a-f0-9]{64}$/.test(id) && /^devhub-(?:net|ingress)-[a-f0-9]{20}$/.test(name)).map(({ id }) => id)),
+      network: new Set(result.networks.filter(({ id, name }) => /^[a-f0-9]{64}$/.test(id) && /^devhub-(?:net|ingress|publish|egress)-[a-f0-9]{20}$/.test(name)).map(({ id }) => id)),
       volume: new Set(result.volumes.filter(({ name }) => /^devhub-vol-[a-f0-9]{24}$/.test(name)).map(({ name }) => name)),
     });
     return result;

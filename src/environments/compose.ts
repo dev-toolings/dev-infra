@@ -8,6 +8,7 @@ import type { Environment, Recipe } from "./types";
 
 const CADDY_IMAGE = "caddy:2.11.9-alpine@sha256:0bbb055bda6793c999bde78b1b5ce3e89f829fb031af2cf50056ea1246559fee";
 const OWNER_LABEL = "com.devhub.feature";
+const NO_NEW_PRIVILEGES = "no-new-privileges:true";
 const NAME = /^[a-z0-9][a-z0-9_-]{0,55}$/;
 const SERVICE = /^[a-zA-Z0-9][A-Za-z0-9_.-]{0,62}$/;
 type Model = {
@@ -50,13 +51,16 @@ function escapeEnv(value: string): string {
   return `'${value.replaceAll("\\", "\\\\").replaceAll("'", "\\'")}'`;
 }
 
-function validateModel(model: Model, selected: string[], shared: { networks: string[]; volumes: string[] }): void {
+/** `kept` is set on the final model only: the source cannot ask for capabilities, only the hardened recipe gives them. */
+function validateModel(model: Model, selected: string[], shared: { networks: string[]; volumes: string[] }, kept?: Recipe["capabilities"]): void {
   if (!object(model.services)) fail("Compose did not produce a service model");
   for (const name of selected) if (!object(model.services[name])) fail("A selected Compose service is missing");
   for (const [name, service] of Object.entries(model.services)) {
     if (service.privileged || service.devices || service.network_mode || [service.pid, service.ipc, service.uts].some((value) => typeof value === "string" && /^(?:host|container:|service:)/.test(value)) || service.volumes_from) fail(`Compose service ${name} requests host access that the environment cannot isolate`);
-    if (service.cap_add?.length || service.cgroup_parent || service.userns_mode || service.links?.length || service.runtime || service.use_api_socket ||
-        service.cgroup === "host" || service.security_opt?.length || service.gpus || service.device_cgroup_rules?.length || service.mac_address ||
+    const added = service.cap_add?.length && !(kept && service.cap_add.every((cap: string) => (kept[name] ?? []).includes(cap)));
+    const options = service.security_opt?.length && !(kept && service.security_opt.length === 1 && service.security_opt[0] === NO_NEW_PRIVILEGES);
+    if (added || options || service.cgroup_parent || service.userns_mode || service.links?.length || service.runtime || service.use_api_socket ||
+        service.cgroup === "host" || service.gpus || service.device_cgroup_rules?.length || service.mac_address ||
         service.credential_spec || service.post_start?.length || service.pre_stop?.length || service.deploy?.resources?.reservations?.devices?.length) fail(`Compose service ${name} requests host privileges that the environment cannot isolate`);
     if (service.build && (service.build.privileged || service.build.network === "host")) fail(`Compose service ${name} requests a privileged build`);
     const buildKeys = new Set(["context", "dockerfile", "args", "target", "cache_from", "cache_to", "pull", "no_cache", "shm_size", "platform", "tags", "labels"]);
@@ -85,6 +89,30 @@ function validateModel(model: Model, selected: string[], shared: { networks: str
   }
   for (const [kind, resources] of [["secret", model.secrets], ["config", model.configs]] as const) {
     for (const [name, resource] of Object.entries(resources ?? {})) if (resource.external || !resource.file) fail(`Compose ${kind} ${name} must use a local confirmed file`);
+  }
+}
+
+/**
+ * Drops every capability the recipe does not keep, forbids gaining privileges, runs services that
+ * write into a worktree as the host user, and gives Internet access only to the listed services.
+ */
+function hardenServices(model: Model, recipe: Recipe, roots: string[], egressNetwork: () => string): void {
+  for (const name of [...Object.keys(recipe.capabilities), ...recipe.internet]) if (!model.services[name]) fail(`Hardening names the unselected service ${name}`);
+  const egress = recipe.internet.length ? egressNetwork() : undefined;
+  const uid = process.getuid?.(), gid = process.getgid?.();
+  for (const [name, service] of Object.entries(model.services)) {
+    service.cap_drop = ["ALL"];
+    const kept = recipe.capabilities[name] ?? [];
+    if (kept.length) service.cap_add = [...kept];
+    service.security_opt = [NO_NEW_PRIVILEGES];
+    const writesWorktree = (service.volumes ?? []).some((mount: Record<string, any>) => mount.type === "bind" && !mount.read_only && roots.some((root) => inside(root, String(mount.source))));
+    if (writesWorktree) {
+      if (service.user === undefined) {
+        if (uid === undefined || gid === undefined) fail("The host user ID is unavailable for a hardened worktree mount");
+        service.user = `${uid}:${gid}`;
+      } else if (/^(?:0|root)(?::|$)/.test(String(service.user))) fail(`Compose service ${name} runs as root with a writable worktree mount`);
+    }
+    if (egress && recipe.internet.includes(name)) service.networks = { ...(object(service.networks) ? service.networks : {}), [egress]: {} };
   }
 }
 
@@ -270,24 +298,27 @@ export async function renderCompose(run: Executor, recipe: Recipe, env: Environm
   for (const service of Object.values(model.services)) { delete service.container_name; delete service.ports; }
 
   const label = { [OWNER_LABEL]: env.id };
+  const hardened = recipe.isolation === "hardened";
   const networkNames: string[] = [];
   const declared = model.networks ?? {};
   for (const [key, value] of Object.entries(declared)) {
     if (value.external) continue;
     const name = `devhub-net-${hash(`${env.id}:${key}`).slice(0, 20)}`;
     value.name = name; value.labels = { ...(value.labels ?? {}), ...label }; networkNames.push(name);
+    // An internal network has no route out: only the services listed in `internet` get one below.
+    if (hardened) value.internal = true;
   }
   model.networks = declared;
 
   const gatewayNetworks: Record<string, Record<string, unknown>> = {};
   if (recipe.routes.length) {
     // Reuse one feature-owned subnet when all routed services are on it. Otherwise allocate one private ingress subnet.
-    const routeNetwork = Object.entries(declared).find(([key, network]) => !network.external && !network.internal &&
+    const routeNetwork = Object.entries(declared).find(([key, network]) => !network.external && (hardened || !network.internal) &&
       recipe.routes.every(({ service }) => Object.hasOwn(model.services[service]!.networks ?? {}, key)))?.[0];
     const network = routeNetwork ?? "devhub-ingress-" + hash(env.id).slice(0, 20);
     if (!routeNetwork) {
       if (Object.hasOwn(declared, network)) fail("Compose network conflicts with the generated preview network");
-      declared[network] = { name: network, labels: label };
+      declared[network] = { name: network, labels: label, ...(hardened ? { internal: true } : {}) };
       networkNames.push(network);
     }
     for (const route of recipe.routes) {
@@ -297,6 +328,13 @@ export async function renderCompose(run: Executor, recipe: Recipe, env: Environm
       target.networks = { ...current, [network]: { ...(current[network] ?? {}), aliases: [...new Set([...(current[network]?.aliases ?? []), alias])] } };
     }
     gatewayNetworks[network] = {};
+    if (hardened) {
+      // Docker publishes a port only through a network with a route out: the gateway alone joins this one.
+      const publish = "devhub-publish-" + hash(env.id).slice(0, 20);
+      declared[publish] = { name: publish, labels: label };
+      networkNames.push(publish);
+      gatewayNetworks[publish] = {};
+    }
   }
 
   for (const name of selected) {
@@ -323,6 +361,12 @@ export async function renderCompose(run: Executor, recipe: Recipe, env: Environm
     service.logging = { driver: "json-file", options: { "max-size": "10m", "max-file": "3" } };
     service.deploy = { ...(service.deploy ?? {}), resources: { ...(service.deploy?.resources ?? {}), limits: { ...(service.deploy?.resources?.limits ?? {}), cpus: String(recipe.resources.cpus), memory: `${recipe.resources.memoryMiB}M` } } };
   }
+  if (hardened) hardenServices(model, recipe, roots, () => {
+    const egress = "devhub-egress-" + hash(env.id).slice(0, 20);
+    declared[egress] = { name: egress, labels: label };
+    networkNames.push(egress);
+    return egress;
+  });
 
   if (recipe.routes.length) {
     const gatewayName = "devhub-preview";
@@ -334,6 +378,8 @@ export async function renderCompose(run: Executor, recipe: Recipe, env: Environm
       labels: label, logging: { driver: "json-file", options: { "max-size": "10m", "max-file": "3" } },
       healthcheck: { test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/__devhub_health"], interval: "5s", timeout: "3s", retries: 12 },
       deploy: { resources: { limits: { cpus: String(recipe.resources.cpus), memory: `${recipe.resources.memoryMiB}M` } } },
+      // Without DAC_OVERRIDE, root in the gateway can no longer read the private Caddyfile: it runs as its owner.
+      ...(hardened ? { cap_drop: ["ALL"], security_opt: [NO_NEW_PRIVILEGES], user: `${process.getuid?.()}:${process.getgid?.()}` } : {}),
     };
     model.services[gatewayName] = gateway;
     serviceImages[gatewayName] = CADDY_IMAGE;
@@ -352,11 +398,12 @@ export async function renderCompose(run: Executor, recipe: Recipe, env: Environm
   // Final validation resolves the env files in memory. The on-disk model keeps only their paths.
   const finalArgs = ["docker", "compose", "--project-directory", outDir, "--env-file", "/dev/null", "-p", env.composeProject, "-f", composeFile];
   const verified = await composeConfig(run, finalArgs, outDir, [], true);
-  validateModel(verified, Object.keys(model.services), recipe.shared);
+  validateModel(verified, Object.keys(model.services), recipe.shared, hardened ? recipe.capabilities : undefined);
   rebaseResources(verified, env, outDir, secretPaths);
   for (const [name, service] of Object.entries(verified.services)) {
     if (service.labels?.[OWNER_LABEL] !== env.id) fail(`Final Compose service ${name} lost its owner label`);
     if (name !== "devhub-preview" && service.ports?.length) fail(`Final Compose service ${name} publishes a host port`);
+    if (hardened && (!service.cap_drop?.includes("ALL") || !service.security_opt?.includes(NO_NEW_PRIVILEGES))) fail(`Final Compose service ${name} lost its hardening`);
   }
   for (const [key, network] of Object.entries(verified.networks ?? {})) if (!network.external && network.labels?.[OWNER_LABEL] !== env.id) fail(`Final Compose network ${key} lost its owner label`);
   for (const [key, volume] of Object.entries(verified.volumes ?? {})) if (!volume.external && volume.labels?.[OWNER_LABEL] !== env.id) fail(`Final Compose volume ${key} lost its owner label`);

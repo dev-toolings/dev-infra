@@ -20,6 +20,11 @@ export interface Recipe {
     retry?: "safe" | "manual";
   }[];
   shared: { networks: string[]; volumes: string[] };
+  /** shared may use approved external resources; dedicated refuses them; hardened also drops privileges and Internet access. */
+  isolation: "shared" | "dedicated" | "hardened";
+  /** hardened only: capabilities kept per service, and services that keep Internet access. */
+  capabilities: Record<string, string[]>;
+  internet: string[];
   resources: { cpus: number; memoryMiB: number };
   idleMinutes: number;
   localFiles: { repository: string; source: string; target: string }[];

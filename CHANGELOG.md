@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `devhub env` runs each feature branch as its own Compose stack from a versioned recipe: its
+  worktrees, containers, networks, volumes and a loopback preview, with stop, start, destroy,
+  purge, reconcile and a JSON interface for scripts and agents. A recipe's `isolation` is
+  `shared`, `dedicated` (no external network or volume) or `hardened` (also no capabilities
+  beyond the listed ones, `no-new-privileges`, the host user in writable worktree mounts and no
+  Internet access except for the listed services). See `docs/feature-environments.md`.
 - `devhub worktree add PROJECT BRANCH` runs a branch of a Docker project beside it, in
   `<project>.worktrees/<branch>`, with its own port, env file, Compose project and a copy of
   its Postgres database. `worktree remove` cleans it up and keeps the branch. An idle worktree

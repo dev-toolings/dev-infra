@@ -20,7 +20,7 @@ function fixture() {
   const recipe: Recipe = {
     version: 1, repositories: { app: { path: repo, ref: "main" } },
     compose: { repository: "app", files: [{ repository: "app", path: "compose.yml" }], profiles: [], services: ["api"], vars: { APP_MODE: "test" }, secretFiles: {} },
-    routes: [{ path: "/api", service: "api", port: 8080 }, { path: "/", service: "api", port: 8080 }], steps: [], shared: { networks: [], volumes: [] },
+    routes: [{ path: "/api", service: "api", port: 8080 }, { path: "/", service: "api", port: 8080 }], steps: [], shared: { networks: [], volumes: [] }, isolation: "shared", capabilities: {}, internet: [],
     resources: { cpus: 1, memoryMiB: 512 }, idleMinutes: 30, localFiles: [],
   };
   const env: Environment = {
@@ -194,4 +194,47 @@ test("rejects a Compose-declared anonymous data volume", async () => {
   const f = fixture();
   f.model.services.api.volumes = [{ type: "volume", target: "/var/data" }];
   await expect(renderCompose(f.run, f.recipe, f.env, f.output)).rejects.toThrow("anonymous volume");
+});
+
+test("hardened isolation drops privileges, runs worktree writers as the host user and cuts Internet access", async () => {
+  const f = fixture();
+  f.recipe.isolation = "hardened";
+  f.recipe.capabilities = { db: ["CHOWN", "SETUID", "SETGID"] };
+  f.recipe.internet = ["db"];
+  f.recipe.compose.services = ["api", "db"];
+  f.model.services.api.volumes = [{ type: "bind", source: f.repo, target: "/app" }];
+  f.model.services.db = { image: "postgres:16-alpine", networks: { default: {} } };
+  const result = await renderCompose(f.run, f.recipe, f.env, f.output);
+  const model = JSON.parse(readFileSync(join(f.output, "compose.json"), "utf8"));
+  const { api, db, "devhub-preview": gateway } = model.services;
+  for (const service of [api, db, gateway]) {
+    expect(service.cap_drop).toEqual(["ALL"]);
+    expect(service.security_opt).toEqual(["no-new-privileges:true"]);
+  }
+  expect(api.cap_add).toBeUndefined();
+  expect(db.cap_add).toEqual(["CHOWN", "SETUID", "SETGID"]);
+  expect(api.user).toBe(`${process.getuid!()}:${process.getgid!()}`);
+  expect(db.user).toBeUndefined();
+  expect(gateway.user).toBe(api.user);
+  expect(model.networks.default.internal).toBe(true);
+  const outside = Object.keys(model.networks).filter((key) => !model.networks[key].internal);
+  expect(outside).toHaveLength(2);
+  expect(outside.filter((key) => Object.hasOwn(gateway.networks, key))).toHaveLength(1);
+  expect(outside.filter((key) => Object.hasOwn(db.networks, key))).toHaveLength(1);
+  expect(Object.keys(api.networks).every((key) => model.networks[key].internal)).toBe(true);
+  expect(result.networks).toHaveLength(3);
+});
+
+test("hardened isolation refuses a root service writing into a worktree and source capabilities", async () => {
+  const root = fixture();
+  root.recipe.isolation = "hardened";
+  root.model.services.api.volumes = [{ type: "bind", source: root.repo, target: "/app" }];
+  root.model.services.api.user = "root";
+  await expect(renderCompose(root.run, root.recipe, root.env, root.output)).rejects.toThrow("runs as root with a writable worktree mount");
+
+  const source = fixture();
+  source.recipe.isolation = "hardened";
+  source.recipe.capabilities = { api: ["CHOWN"] };
+  source.model.services.api.cap_add = ["CHOWN"];
+  await expect(renderCompose(source.run, source.recipe, source.env, source.output)).rejects.toThrow("requests host privileges");
 });

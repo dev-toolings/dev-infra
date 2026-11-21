@@ -79,7 +79,17 @@ The versioned JSON response is shaped as `{"version":1,"data":...}`. The environ
 
 The complete example is [recipe.v1.json](../data/examples/feature-environment/recipe.v1.json). Recipe JSON is validated before use. Repository `path` values and secret-file paths are absolute. Compose file paths and local-file targets are repository-relative. A step's `argv` is an argument array executed directly, without a shell. Keep each argument as a JSON string and escape embedded quotes as `\"`. To use shell syntax, explicitly pass a shell and its arguments.
 
-Version 1 includes `repositories`, `compose`, `routes`, `steps`, `shared`, `resources`, and `idleMinutes`. `localFiles` is optional. `compose.services` names the selected services. Route paths map to a selected service and container port. Use `healthPath` to name a dedicated health endpoint. Steps use `install`, `migrate`, `seed`, `check`, or `test` phases. `retry` defaults to safe for ordinary steps and manual for seed steps. External networks and volumes must be listed in `shared` before a Compose file can use them.
+Version 1 includes `repositories`, `compose`, `routes`, `steps`, `shared`, `resources`, and `idleMinutes`. `localFiles`, `isolation`, `capabilities` and `internet` are optional. `compose.services` names the selected services. Route paths map to a selected service and container port. Use `healthPath` to name a dedicated health endpoint. Steps use `install`, `migrate`, `seed`, `check`, or `test` phases. `retry` defaults to safe for ordinary steps and manual for seed steps. External networks and volumes must be listed in `shared` before a Compose file can use them.
+
+`isolation` picks how far a feature is separated from the host and the other stacks:
+
+| Level | What the provider enforces |
+| --- | --- |
+| `shared` (default) | Feature-owned containers, networks and volumes. External networks and volumes listed in `shared` are allowed. |
+| `dedicated` | Same, and `shared` must be empty: the feature reaches no external network or volume. |
+| `hardened` | `dedicated`, plus every service drops all capabilities except those listed for it in `capabilities` (Docker default set only), runs with `no-new-privileges`, runs as the host user when it mounts a worktree writably (a root user there is refused), and sits on internal networks without Internet access. Services listed in `internet` keep a route out. The preview gateway alone joins a network that publishes its loopback port. |
+
+`hardened` limits mistakes in trusted code. It shares the host kernel and is no boundary for hostile code. Images that need root at startup, such as the official PostgreSQL image, need their capabilities listed, for example `"capabilities": {"postgres": ["CHOWN", "DAC_OVERRIDE", "FOWNER", "SETGID", "SETUID"]}`. Files baked into an image as root with mode 0600 cannot be read by the host user: mount the worktree code instead.
 
 The deployment Compose fixture deliberately declares a fixed host port and a fixed database volume name. The database recipe waits for the permanent TCP listener, migrates a table and seeds one row safely. DevHub removes published app ports, adds its loopback preview gateway, and assigns the managed volume a name scoped to each feature. The PostgreSQL volume keeps each environment's data separate. Caddy uses a feature-owned network common to the routed services when available. It uses a dedicated feature ingress network when those services are on separate networks.
 
