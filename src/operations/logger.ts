@@ -51,9 +51,10 @@ const GRAY = "\u001b[90m";
 const BOLD = "\u001b[1m";
 const RESET = "\u001b[0m";
 const ANSI_SEQUENCE = /\u001b(?:\[[0-?]*[ -/]*[@-~]|\][^\u0007]*(?:\u0007|\u001b\\)|P[^\u001b]*\u001b\\)/g;
-const EMAIL = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi;
+// The lookbehinds start a match only at the beginning of a token: without them, a long unbroken token costs quadratic time.
+const EMAIL = /(?<![A-Z0-9._%+-])[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi;
 const URL_USERINFO = /(\b[a-z][a-z0-9+.-]*:\/\/)([^\s/?#@]*@)/gi;
-const CREDENTIAL_ASSIGNMENT = /((?:"[^"]+"|'[^']+'|[A-Za-z0-9_.-]+)\s*[:=]\s*)(?:(?:Bearer|Basic)\s+[^\s,;}&]+|"(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*'|[^\s,;}&]+)/gi;
+const CREDENTIAL_ASSIGNMENT = /((?:"[^"]+"|'[^']+'|(?<![A-Za-z0-9_.-])[A-Za-z0-9_.-]+)\s*[:=]\s*)(?:(?:Bearer|Basic)\s+[^\s,;}&]+|"(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*'|[^\s,;}&]+)/gi;
 const EXACT_SENSITIVE_KEYS = new Set([
   "auth", "request", "pass", "pwd",
 ]);
@@ -91,7 +92,7 @@ function decodedKey(value: string): string {
   }
 }
 
-/** Removes terminal controls and credential-shaped values at any length. Quadratic on one unbroken multi-kilobyte token. */
+/** Removes terminal controls and credential-shaped values at any length. */
 function redactSecrets(text: string, layout: TextLayout = "single-line"): string {
   let safe = cleanControls(text.replace(/\b(?:set-cookie|cookie)\s*:\s*[^\r\n]*/gi, (header) => `${header.slice(0, header.indexOf(":") + 1)} ${REDACTED}`), layout);
   safe = safe.replace(URL_USERINFO, (_match, scheme: string) => `${scheme}${REDACTED}@`);

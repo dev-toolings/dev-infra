@@ -144,6 +144,12 @@ test("structured command output keeps tabs and lines while removing controls and
   });
 });
 
+test("a long unbroken token is redacted in linear time", () => {
+  const started = performance.now();
+  expect(redactOutput("a".repeat(200_000))).toBe("a".repeat(200_000));
+  expect(performance.now() - started).toBeLessThan(1000);
+});
+
 test("nested data, errors, cycles, and excessive entries stay bounded", () => {
   const cyclic: Record<string, unknown> = { status: "ok" };
   cyclic.self = cyclic;

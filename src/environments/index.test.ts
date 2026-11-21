@@ -80,6 +80,24 @@ test.each([
   } finally { f.close(); }
 });
 
+test("exec returns a long line whole while the operation log stays bounded", async () => {
+  const line = "y".repeat(20_000);
+  const f = fixture(async (argv) => {
+    const [command, action] = argv.slice(4);
+    if (command === "ps") return { code: 0, stdout: "container-1\n", stderr: "" };
+    if (command === "container" && action === "inspect") return { code: 0, stdout: `container-1\t/api\tapi\trunning\t\tsha256:image\t${id}\t${composeProject}\n`, stderr: "" };
+    if (command === "exec") return { code: 0, stdout: `${line}\napi_token=fixture-token-value\n`, stderr: "" };
+    return { code: 0, stdout: "", stderr: "" };
+  }, { configuration: { fingerprint: "fixture", services: ["api"], volumes: [], networks: [], images: [], serviceImages: {} } });
+  try {
+    const model = join(f.stateDir, "feature-environments", id);
+    mkdirSync(model, { recursive: true });
+    writeFileSync(join(model, "compose.json"), JSON.stringify({ services: { api: {} } }));
+    const result = await f.environments.exec(id, "api", ["cat", "big"]);
+    expect(result.stdout).toBe(`${line}\napi_token=[redacted]\n`);
+  } finally { f.close(); }
+});
+
 test("reconcile retries a failed idle stop and records its success", async () => {
   let state = "running", stops = 0;
   const f = fixture(async (argv) => {

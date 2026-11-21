@@ -4,7 +4,7 @@ import { dirname, isAbsolute, join, resolve } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import { DevHubError, type CatalogPort, type Executor, type ExecResult, type SharedServicesPort } from "../contracts";
 import { gitRun } from "../git";
-import { redactLogLine, redactText } from "../operations/logger";
+import { redactLogLine, redactOutput as redactCommandOutput, redactText } from "../operations/logger";
 import { emptyResources, FeatureDocker, hostExecutor } from "./docker";
 import { featureLock } from "./lock";
 import { inside, listRecipes, readRecipe, recipeId } from "./recipe";
@@ -40,7 +40,8 @@ function readOutputFile(file: string): string {
   return readFileSync(file, "utf8");
 }
 
-function redactOutput(value: string, secrets: string[]): string {
+/** `whole` keeps every line at full length, for command output handed back to the caller; logs stay bounded per line. */
+function redactOutput(value: string, secrets: string[], whole = false): string {
   if (!value) return value;
   const literals = [...new Set(secrets.filter(Boolean))];
   // A short secret can occur inside ordinary text. Withhold the affected stream on any match.
@@ -48,7 +49,7 @@ function redactOutput(value: string, secrets: string[]): string {
   const escaped = literals.filter((secret) => secret.length >= 4).sort((a, b) => b.length - a.length)
     .map((secret) => secret.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
   if (escaped.length) value = value.replace(new RegExp(escaped.join("|"), "g"), "[redacted]");
-  return value.split(/\r?\n/).map(redactLogLine).join("\n");
+  return whole ? redactCommandOutput(value) as string : value.split(/\r?\n/).map(redactLogLine).join("\n");
 }
 
 function fail(message: string, code: string, status = 409): never { throw new DevHubError(message, code, status); }
@@ -208,7 +209,7 @@ export class Environments {
           collect(variable.slice(0, separator), variable.slice(separator + 1));
         }
       }
-      return { code, stdout: redactOutput(stdout, secrets), stderr: redactOutput(stderr, secrets) };
+      return { code, stdout: redactOutput(stdout, secrets, true), stderr: redactOutput(stderr, secrets, true) };
     } catch {
       return { code, stdout: "", stderr: "Container output withheld because its secrets could not be verified" };
     }
