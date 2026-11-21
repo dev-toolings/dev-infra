@@ -6,6 +6,7 @@ import {
   LOG_REDACT_PATHS,
   REDACTED,
   redactFields,
+  redactOutput,
   redactText,
   SENSITIVE_KEY_NAMES,
 } from "./logger";
@@ -137,6 +138,12 @@ test("redactText removes terminal controls and redacts free-standing credentials
   expect(text).not.toContain("\u001b");
 });
 
+test("structured command output keeps tabs and lines while removing controls and redacting credentials", () => {
+  expect(redactOutput({ stdout: "\u001b[31ma\tb\r\nc\u001b[0m\n\"api\nkey\"=fixture-value\u0007end\n" })).toEqual({
+    stdout: "a\tb\nc\n\"api\nkey\"=[redacted] end\n",
+  });
+});
+
 test("nested data, errors, cycles, and excessive entries stay bounded", () => {
   const cyclic: Record<string, unknown> = { status: "ok" };
   cyclic.self = cyclic;
@@ -178,6 +185,7 @@ test("container log lines keep JSON valid, colors and spacing, but never a secre
   const json = JSON.parse(redactLogLine(JSON.stringify({ message: "password=hunter2 ok", context: { token: "abc", big: "x".repeat(3000) }, level_name: "INFO" })));
   expect(json).toMatchObject({ message: "password=[redacted] ok", context: { token: "[redacted]" }, level_name: "INFO" });
   expect(json.context.big.length).toBe(3000);
+  expect(redactLogLine(JSON.stringify({ message: "first\nsecond" }))).toBe('{"message":"first second"}');
 
   expect(redactLogLine("\u001b[32m  INFO\u001b[0m   app  started\u0007\u001b]0;title\u0007")).toBe("\u001b[32m  INFO\u001b[0m   app  started");
   expect(redactLogLine("\tat main (app.ts:1)")).toBe("\tat main (app.ts:1)");

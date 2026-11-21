@@ -69,7 +69,7 @@ export function mcpTools(services: AppServices): Tool[] {
       call: async (args) => {
         const timeout = Math.min(Math.max(arg<number | undefined>(args, "timeoutSeconds", "number", true) ?? 120, 1), 3600);
         const result = await worktrees.exec(arg(args, "project", "string"), arg(args, "command", "string"), timeout * 1000);
-        return `exit code ${result.code}\n--- stdout\n${redactText(result.stdout)}\n--- stderr\n${redactText(result.stderr)}`;
+        return `exit code ${result.code}\n--- stdout\n${redactText(result.stdout, "multiline")}\n--- stderr\n${redactText(result.stderr, "multiline")}`;
       },
     },
   ];

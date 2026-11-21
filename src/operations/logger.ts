@@ -53,7 +53,7 @@ const RESET = "\u001b[0m";
 const ANSI_SEQUENCE = /\u001b(?:\[[0-?]*[ -/]*[@-~]|\][^\u0007]*(?:\u0007|\u001b\\)|P[^\u001b]*\u001b\\)/g;
 const EMAIL = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi;
 const URL_USERINFO = /(\b[a-z][a-z0-9+.-]*:\/\/)([^\s/?#@]*@)/gi;
-const CREDENTIAL_ASSIGNMENT = /((?:"[^"\r\n]+"|'[^'\r\n]+'|[A-Za-z0-9_.-]+)\s*[:=]\s*)(?:(?:Bearer|Basic)\s+[^\s,;}&]+|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,;}&]+)/gi;
+const CREDENTIAL_ASSIGNMENT = /((?:"[^"]+"|'[^']+'|[A-Za-z0-9_.-]+)\s*[:=]\s*)(?:(?:Bearer|Basic)\s+[^\s,;}&]+|"(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*'|[^\s,;}&]+)/gi;
 const EXACT_SENSITIVE_KEYS = new Set([
   "auth", "request", "pass", "pwd",
 ]);
@@ -70,9 +70,14 @@ function isSensitiveKey(value: string): boolean {
   return EXACT_SENSITIVE_KEYS.has(key) || SENSITIVE_KEY_PARTS.some((sensitive) => key.includes(sensitive));
 }
 
-function cleanControls(value: string): string {
-  return value
-    .replace(ANSI_SEQUENCE, "")
+type TextLayout = "single-line" | "multiline";
+
+function cleanControls(value: string, layout: TextLayout = "single-line"): string {
+  const plain = value.replace(ANSI_SEQUENCE, "");
+  if (layout === "multiline") {
+    return plain.replace(/\r\n/g, "\n").replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g, " ");
+  }
+  return plain
     .replace(/[\u0000-\u001f\u007f-\u009f]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
@@ -87,8 +92,8 @@ function decodedKey(value: string): string {
 }
 
 /** Removes terminal controls and credential-shaped values at any length. Quadratic on one unbroken multi-kilobyte token. */
-function redactSecrets(text: string): string {
-  let safe = cleanControls(text.replace(/\b(?:set-cookie|cookie)\s*:\s*[^\r\n]*/gi, (header) => `${header.slice(0, header.indexOf(":") + 1)} ${REDACTED}`));
+function redactSecrets(text: string, layout: TextLayout = "single-line"): string {
+  let safe = cleanControls(text.replace(/\b(?:set-cookie|cookie)\s*:\s*[^\r\n]*/gi, (header) => `${header.slice(0, header.indexOf(":") + 1)} ${REDACTED}`), layout);
   safe = safe.replace(URL_USERINFO, (_match, scheme: string) => `${scheme}${REDACTED}@`);
   safe = safe.replace(/([?&])([^=&#\s]+)=([^&#\s]*)/g, (match, separator: string, key: string, value: string) =>
     isSensitiveKey(decodedKey(key)) ? `${separator}${key}=${REDACTED}` : match,
@@ -105,9 +110,9 @@ function redactSecrets(text: string): string {
 }
 
 /** Bounded redactSecrets for logs and other diagnostics. */
-export function redactText(text: string): string {
+export function redactText(text: string, layout: TextLayout = "single-line"): string {
   if (text.length > MAX_INPUT_STRING_LENGTH) return TRUNCATED;
-  const safe = redactSecrets(text);
+  const safe = redactSecrets(text, layout);
   if (safe.length > MAX_STRING_LENGTH) return `${safe.slice(0, MAX_STRING_LENGTH - TRUNCATED.length)}${TRUNCATED}`;
   return safe;
 }
@@ -120,7 +125,8 @@ interface RedactionLimits {
 }
 
 const LOG_LIMITS: RedactionLimits = { depth: MAX_DEPTH, entries: MAX_ENTRIES, keyLength: MAX_KEY_LENGTH, text: redactText };
-const NO_LIMITS: RedactionLimits = { depth: Infinity, entries: Infinity, keyLength: Infinity, text: redactSecrets };
+const UNBOUNDED_LIMITS = { depth: Infinity, entries: Infinity, keyLength: Infinity };
+const OUTPUT_LIMITS: RedactionLimits = { ...UNBOUNDED_LIMITS, text: (value) => redactSecrets(value, "multiline") };
 
 interface CloneContext {
   seen: WeakSet<object>;
@@ -240,9 +246,9 @@ export function redactFields(fields: Record<string, unknown>): Record<string, un
   return { fields: UNSUPPORTED };
 }
 
-/** Applies the redactFields secret rules with no size limit, for complete command output. */
+/** Applies the redactFields secret rules with no size limit and preserves command output layout. */
 export function redactOutput(value: unknown): unknown {
-  return cloneSafe(value, { seen: new WeakSet(), entries: 0, limits: NO_LIMITS }, 0);
+  return cloneSafe(value, { seen: new WeakSet(), entries: 0, limits: OUTPUT_LIMITS }, 0);
 }
 
 const SGR_SPLIT = /(\u001b\[[0-9;]*m)/;
@@ -260,7 +266,7 @@ function boundedLogText(text: string): string {
   return end > 0 ? `${text.slice(0, end)} ${TRUNCATED}` : TRUNCATED;
 }
 
-const LOG_LINE_LIMITS: RedactionLimits = { ...NO_LIMITS, text: (value) => redactSecrets(boundedLogText(value)) };
+const LOG_LINE_LIMITS: RedactionLimits = { ...UNBOUNDED_LIMITS, text: (value) => redactSecrets(boundedLogText(value)) };
 
 /** Keeps color codes and spacing, drops every other terminal control. */
 function displayControls(line: string): string {
