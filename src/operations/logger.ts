@@ -116,9 +116,9 @@ function redactAssignments(text: string): string {
 function redactSecrets(text: string, layout: TextLayout = "single-line"): string {
   let safe = cleanControls(text.replace(/\b(?:set-cookie|cookie)\s*:\s*[^\r\n]*/gi, (header) => `${header.slice(0, header.indexOf(":") + 1)} ${REDACTED}`), layout);
   safe = safe.replace(URL_USERINFO, (_match, scheme: string) => `${scheme}${REDACTED}@`);
-  // A key never holds `?`: excluding it keeps a long run of question marks linear.
-  safe = safe.replace(/([?&])([^=&#?\s]+)=([^&#\s]*)/g, (match, separator: string, key: string, value: string) =>
-    isSensitiveKey(decodedKey(key)) ? `${separator}${key}=${REDACTED}` : match,
+  // The value is optional so a key without `=` is consumed whole: the scan never restarts inside it, which keeps a run of `?` linear.
+  safe = safe.replace(/([?&])([^=&#\s]+)(?:=([^&#\s]*))?/g, (match, separator: string, key: string, value: string | undefined) =>
+    value !== undefined && isSensitiveKey(decodedKey(key)) ? `${separator}${key}=${REDACTED}` : match,
   );
   safe = redactAssignments(safe);
   safe = safe.replace(/\b(?:bearer|basic)\s+[A-Za-z0-9._~+\/-]+=*/gi, (match) => {
