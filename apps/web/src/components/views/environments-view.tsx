@@ -2,7 +2,7 @@ import { t } from "../../lib/i18n";
 import * as React from "react";
 import { AlertCircle, ExternalLink, GitBranch, LoaderCircle, Play, Plus, RefreshCw, Square, Trash2 } from "lucide-react";
 import type { FeatureEnvironment } from "../../lib/api";
-import { createEnvironment, errorMessage, getEnvironment, isAbortError, listEnvironmentRecipes, listEnvironments, previewEnvironment, removeEnvironment, startEnvironment, stopEnvironment } from "../../lib/api";
+import { createEnvironment, errorMessage, getEnvironment, isAbortError, listEnvironmentRecipes, listEnvironments, removeEnvironment, startEnvironment, stopEnvironment } from "../../lib/api";
 import { useResource } from "../../lib/use-resource";
 import { Alert, AlertDescription, AlertTitle } from "../ui/alert";
 import { Badge } from "../ui/badge";
@@ -44,10 +44,8 @@ export function EnvironmentsView() {
   const [build, setBuild] = React.useState(false);
   const [createBusy, setCreateBusy] = React.useState(false);
   const [createError, setCreateError] = React.useState<string>();
-  const [actionBusy, setActionBusy] = React.useState<string>();
+  const [actionBusy, setActionBusy] = React.useState<Set<string>>(() => new Set());
   const [actionError, setActionError] = React.useState<{ id: string; message: string }>();
-  const [previewUrls, setPreviewUrls] = React.useState<Record<string, { url: string; domainUrl?: string }>>({});
-  const [previewBusy, setPreviewBusy] = React.useState<string>();
   const [expandedId, setExpandedId] = React.useState<string>();
   const [removing, setRemoving] = React.useState<FeatureEnvironment>();
   const removeTrigger = React.useRef<HTMLButtonElement | null>(null);
@@ -77,15 +75,12 @@ export function EnvironmentsView() {
   }
 
   async function runAction(environment: FeatureEnvironment, action: "start" | "stop" | "remove") {
-    setActionBusy(environment.id);
+    setActionBusy((current) => new Set(current).add(environment.id));
     setActionError(undefined);
     try {
-      if (action === "start") await startEnvironment(environment.id);
-      else if (action === "stop") await stopEnvironment(environment.id);
-      else {
-        const updated = await removeEnvironment(environment.id);
-        environments.update((current) => (current ?? []).map((item) => item.id === environment.id ? updated : item));
-      }
+      const updated = await (action === "start" ? startEnvironment(environment.id)
+        : action === "stop" ? stopEnvironment(environment.id) : removeEnvironment(environment.id));
+      environments.update((current) => (current ?? []).map((item) => item.id === environment.id ? updated : item));
       if (action === "remove") {
         setExpandedId(undefined);
         setRemoving(undefined);
@@ -93,27 +88,17 @@ export function EnvironmentsView() {
     } catch (error) {
       if (!isAbortError(error)) setActionError({ id: environment.id, message: errorMessage(error) });
     } finally {
-      setActionBusy(undefined);
+      setActionBusy((current) => {
+        const next = new Set(current);
+        next.delete(environment.id);
+        return next;
+      });
       environments.reload();
     }
   }
 
-  async function openPreview(environment: FeatureEnvironment) {
-    setPreviewBusy(environment.id);
-    setActionError(undefined);
-    try {
-      const preview = await previewEnvironment(environment.id);
-      const url = safeHttpUrl(preview.url);
-      if (!url) throw new Error(t("DevHub returned an unexpected response."));
-      setPreviewUrls((current) => ({ ...current, [environment.id]: { url, domainUrl: safeHttpUrl(preview.domainUrl) } }));
-    } catch (error) {
-      if (!isAbortError(error)) setActionError({ id: environment.id, message: errorMessage(error) });
-    } finally {
-      setPreviewBusy(undefined);
-    }
-  }
-
   const recipeOptions = [...(recipes.data ?? [])].sort((a, b) => a.id.localeCompare(b.id));
+  const removingBusy = removing !== undefined && actionBusy.has(removing.id);
 
   return (
     <section ref={listRef} tabIndex={-1} aria-label={t("Feature environments")} className="mx-auto flex w-full max-w-6xl min-w-0 flex-1 flex-col gap-4 outline-none">
@@ -171,12 +156,12 @@ export function EnvironmentsView() {
         <ul className="grid min-w-0 grid-cols-1 gap-3 lg:grid-cols-2 2xl:grid-cols-3">
           {environments.data.map((environment) => {
             const status = statusStyle[environment.observed] ?? statusStyle.error;
-            const previewInfo = previewUrls[environment.id];
-            const previewUrl = previewInfo?.url;
-            const domainPreviewUrl = previewInfo?.domainUrl ?? safeHttpUrl(environment.preview?.domainUrl);
             const currentEnvironment = environment.id === detail.data?.id ? detail.data : environment;
             const services = serviceRows(currentEnvironment.configuration?.services, currentEnvironment.resources?.containers);
-            const busy = actionBusy === environment.id;
+            const busy = actionBusy.has(environment.id);
+            const preview = !busy && environment.desired === "running" && environment.observed === "ready" ? environment.preview : undefined;
+            const previewUrl = safeHttpUrl(preview?.url);
+            const domainPreviewUrl = safeHttpUrl(preview?.domainUrl);
             const canStop = environment.desired === "running" && !["stopped", "stopping", "destroying", "destroyed"].includes(environment.observed);
             const canRetry = environment.desired === "running" && ["error", "degraded"].includes(environment.observed);
             const canStart = environment.desired !== "destroyed" && (environment.desired !== "running" || canRetry) && !["creating", "starting", "destroying", "destroyed"].includes(environment.observed);
@@ -200,10 +185,10 @@ export function EnvironmentsView() {
                   <div className="min-w-0 rounded-lg border bg-muted/30 p-3">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <p className="text-xs font-medium">{t("Preview")}</p>
-                      {previewUrl ? <a className="inline-flex min-h-11 items-center gap-1.5 text-sm text-primary underline-offset-4 hover:underline focus-visible:rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:min-h-8" href={previewUrl} target="_blank" rel="noopener noreferrer">{t("Open preview")}<ExternalLink aria-hidden="true" className="size-3.5" /></a> : <Button type="button" variant="outline" className="min-h-11 md:min-h-8" disabled={previewBusy === environment.id || environment.observed !== "ready"} onClick={() => void openPreview(environment)}>{previewBusy === environment.id ? <LoaderCircle aria-hidden="true" className="animate-spin" /> : <ExternalLink aria-hidden="true" />}{t("Open preview")}</Button>}
+                      {previewUrl ? <a className="inline-flex min-h-11 items-center gap-1.5 text-sm text-primary underline-offset-4 hover:underline focus-visible:rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:min-h-8" href={previewUrl} target="_blank" rel="noopener noreferrer">{t("Open preview")}<ExternalLink aria-hidden="true" className="size-3.5" /></a> : <Button type="button" variant="outline" className="min-h-11 md:min-h-8" disabled><ExternalLink aria-hidden="true" />{t("Open preview")}</Button>}
                     </div>
                     {previewUrl ? <p className="mt-1 break-all font-mono text-xs text-muted-foreground">{previewUrl}</p> : <p className="mt-1 text-xs text-muted-foreground">{t("Preview is not ready yet")}</p>}
-                    {environment.preview?.port ? <p className="mt-1 text-xs text-muted-foreground">{t("Port {port}", { port: environment.preview.port })}</p> : null}
+                    {preview?.port ? <p className="mt-1 text-xs text-muted-foreground">{t("Port {port}", { port: preview.port })}</p> : null}
                     {domainPreviewUrl ? <p className="mt-1 break-all text-xs"><a className="text-primary underline-offset-4 hover:underline" href={domainPreviewUrl} target="_blank" rel="noopener noreferrer">{t("Open domain preview")}</a></p> : null}
                   </div>
                   {services.length > 0 ? (
@@ -234,7 +219,7 @@ export function EnvironmentsView() {
       ) : null}
 
       {removing ? (
-        <Dialog open onOpenChange={(open) => { if (!open && !actionBusy) setRemoving(undefined); }}>
+        <Dialog open onOpenChange={(open) => { if (!open && !removingBusy) setRemoving(undefined); }}>
           <DialogContent onCloseAutoFocus={(event) => { event.preventDefault(); (removeTrigger.current?.isConnected ? removeTrigger.current : listRef.current)?.focus(); }}>
             <DialogHeader>
               <DialogTitle className="break-words">{t("Remove environment resources for {feature}?", { feature: removing.feature })}</DialogTitle>
@@ -242,9 +227,9 @@ export function EnvironmentsView() {
             </DialogHeader>
             {actionError?.id === removing.id ? <Alert variant="destructive"><AlertTitle>{t("Environment could not be removed")}</AlertTitle><AlertDescription>{actionError.message}</AlertDescription></Alert> : null}
             <DialogFooter>
-              <Button type="button" variant="outline" disabled={actionBusy === removing.id} onClick={() => setRemoving(undefined)}>{t("Cancel")}</Button>
-              <Button type="button" variant="destructive" disabled={actionBusy === removing.id} onClick={() => void runAction(removing, "remove")}>
-                {actionBusy === removing.id ? <LoaderCircle aria-hidden="true" className="animate-spin" /> : <Trash2 aria-hidden="true" />}{t("Remove")}
+              <Button type="button" variant="outline" disabled={removingBusy} onClick={() => setRemoving(undefined)}>{t("Cancel")}</Button>
+              <Button type="button" variant="destructive" disabled={removingBusy} onClick={() => void runAction(removing, "remove")}>
+                {removingBusy ? <LoaderCircle aria-hidden="true" className="animate-spin" /> : <Trash2 aria-hidden="true" />}{t("Remove")}
               </Button>
             </DialogFooter>
           </DialogContent>

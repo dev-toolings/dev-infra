@@ -95,7 +95,7 @@ The deployment Compose fixture deliberately declares a fixed host port and a fix
 
 Run `devhub env timer-install` to write, enable and start the systemd user timer. It runs `env reconcile` once per minute and inherits the paths and limits configured in the installation command. Check it with `systemctl --user status devhub-feature-reconcile.timer` and read its run output with `journalctl --user -u devhub-feature-reconcile.service`. Keep the user manager running between SSH logins with `loginctl enable-linger "$USER"` if your administrator permits it. Run `systemctl --user disable --now devhub-feature-reconcile.timer` to stop periodic reconciliation.
 
-Idle time uses the last lifecycle operation, `exec` or `test`. View and status requests leave the activity timestamp as recorded. The timer skips environments with active operations. Idle stop retains worktrees, branches and database data. The provider supports live stop/start. Pause, snapshots, strict disk quotas and remote Docker contexts are unsupported.
+Idle time uses the last lifecycle operation, `exec` or `test`. View and status requests leave the activity timestamp as recorded. The timer skips environments with active operations. Idle stop retains worktrees, branches and database data. If a stop or its preview route update fails, reconciliation inspects the current resources and retries the stop. The provider supports live stop/start. Pause, snapshots, strict disk quotas and remote Docker contexts are unsupported.
 
 The defaults are five active environments, two concurrent build or bootstrap operations, and 2,048 MiB free on each relevant filesystem. Override them in the DevHub process with `DEVHUB_FEATURE_MAX_ACTIVE`, `DEVHUB_FEATURE_MAX_BUILDS` and `DEVHUB_FEATURE_MIN_FREE_MIB`. Use the same settings for the CLI, controller and timer. Each selected service, including Caddy, gets the recipe's CPU and RAM cap. Docker logs rotate at 10 MB per file and three files per container. DevHub also keeps a bounded operation log.
 
@@ -107,7 +107,7 @@ The direct preview listens on `127.0.0.1` at the port reported in `preview`. It 
 ssh -N -L 127.0.0.1:<local-port>:127.0.0.1:<preview-port> <ubuntu-host>
 ```
 
-Open `http://127.0.0.1:<local-port>` on the workstation. Keep the published host binding on loopback. Docker can allocate a different remote port after a stop and start. Read `devhub env preview ID --json` before reopening the tunnel. A configured domain alias keeps the same name as the upstream port changes.
+Open `http://127.0.0.1:<local-port>` on the workstation. Keep the published host binding on loopback. Docker can allocate a different remote port after a stop and start. The panel displays the preview links for ready environments using the latest reported address. Read `devhub env preview ID --json` before reopening the tunnel. A configured domain alias keeps the same name as the upstream port changes.
 
 Check these points if the preview fails.
 
@@ -146,13 +146,15 @@ A successful response uses `{"version":1,"data":...}`. A rejected request uses `
 
 Create and start wait for initial checks. While a command is running, a separate `list` or `status` request can report its ID and `operation.step`. `desired` represents the requested lifecycle state. `observed`, `resources.containers[].health`, `observationError`, and `operation.state` report the latest observation and operation. After an interruption, run reconcile and inspect status. Bootstrap install, migrate and seed steps keep their completion state. A manual step whose side effects are uncertain requires checking its effects before `start --retry-step STEP`.
 
+A create retry with the same key returns the existing environment. If its allocation or launch was interrupted, the result reports `operation.state` as `interrupted`. Inspect the environment and use `devhub env start ID` to resume.
+
 The paired loopback controller uses `/api/v1/environments`. GET lists, POST creates, and GET or DELETE on `/:id` reads or removes. POST to `/:id/start`, `stop`, `exec`, `test` and `preview` uses JSON bodies. GET `/:id/logs?service=api&tail=100` reads logs. Create accepts the idempotency key in the request body or `Idempotency-Key` header. Use the existing DevHub session and Origin controls. Host-level timer installation stays on the CLI.
 
 ## Bootstrap and Git troubleshooting
 
 - If Git rejects an attached branch, run `git worktree list` in its source repository. Choose a free branch explicitly or let DevHub allocate one. The initial commit and branch are recorded per repository.
 - If Compose rejects a bind, build or environment path, use a checked-in worktree path or a recipe-approved file. Other repositories are available through `DEVHUB_REPO_<NAME>` interpolation, where the name is uppercase with underscores. Relative paths resolve from the recipe's Compose project directory.
-- A recipe's `compose.vars` populate interpolation. Service environment values belong in the Compose service definition or its approved `env_file`. A `compose.secretFiles` value points at a specific host file and supplies its path for a Compose secret reference. Keep literal secrets out of committed recipes. DevHub snapshots the generated Compose model privately.
+- A recipe's `compose.vars` populate interpolation. Service environment values belong in the Compose service definition or its approved `env_file`. A `compose.secretFiles` value points at a specific host file and supplies its path for a Compose secret reference. Keep literal secrets out of committed recipes. The generated Compose snapshot records file references for `env_file` and Compose secrets. Docker reads the values from those files when it starts the services.
 - If the provider rejects fixed networking, a host namespace, privileged access or an unapproved external resource, use a bridge network and named local volumes. Only the Caddy gateway publishes a host port. DevHub rejects anonymous image volumes unless their mount targets are declared explicitly.
 - If a bootstrap step fails, inspect `devhub env logs ID --service operation`. Use an image with a compatible `timeout` executable for targeted commands. Run checks against their dedicated service, and make repeatable migrations safe to rerun.
 

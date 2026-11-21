@@ -1,6 +1,7 @@
 import { basename } from "node:path";
-import type { Executor, Follower } from "./contracts";
+import type { ExecOptions, Executor, Follower } from "./contracts";
 import { DevHubError } from "./contracts";
+import { allowsVerifiedFeatureRemoval } from "./environments/docker";
 import { isTrustedGitOptions } from "./git";
 
 /**
@@ -116,7 +117,7 @@ function composeCommandError(rootArgs: string[]): string | undefined {
   return undefined;
 }
 
-function dockerCommandError(argv: string[]): string | undefined {
+function dockerCommandError(argv: string[], options?: ExecOptions): string | undefined {
   const executable = basename(argv[0] ?? "").toLowerCase();
   if (executable === "docker-compose" || executable === "docker-compose.exe") {
     return composeCommandError(argv.slice(1));
@@ -142,6 +143,7 @@ function dockerCommandError(argv: string[]): string | undefined {
     // A project network holds no data, and a removed worktree must free its own (devhub-<id>-<hash>).
     const names = rootArgs.slice(1);
     if (root === "network" && names.length > 0 && names.every((name) => /^devhub-[a-z0-9][a-z0-9_-]*-[0-9a-f]{8}$/.test(name))) return undefined;
+    if (subcommand === "rm" && allowsVerifiedFeatureRemoval(root, names, options)) return undefined;
     return `Docker ${root} removal is not permitted`;
   }
 
@@ -168,7 +170,7 @@ export function guardExecutor(run: Executor): Executor {
     if ((executable === "git" || executable === "git.exe") && !isTrustedGitOptions(options)) {
       throw new DevHubError("Git must be invoked through gitRun", "unsafe_git", 403);
     }
-    const denied = dockerCommandError(argv);
+    const denied = dockerCommandError(argv, options);
     if (denied) throw new DevHubError(denied, "unsafe_command", 403);
     return run(argv, options);
   };

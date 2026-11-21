@@ -265,7 +265,7 @@ Commands:
   presets                             List supported project presets
   versions                            Check pinned versions for end of life and CVEs (needs Go)
   env create|list|status|start|stop|destroy  Isolated Compose environments per feature
-  env --help                          Preview, logs, exec, test, reconciliation and JSON options
+  env --help                          Idempotency, preview, logs, exec, test, reconcile and JSON
   worktree list|add|remove            Run a branch of a Docker project beside it, for a parallel agent
   exec <project> -- <command>         Run a command in the app container of a Docker project
   proxy sync                          Give every project a http://<project>.localhost name (profile proxy)

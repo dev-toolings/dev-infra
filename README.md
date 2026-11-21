@@ -31,7 +31,8 @@ dev container, with its own database, network and port. See
 
 `devhub env create PROJECT --feature NAME` starts a feature environment from a
 versioned recipe. A feature owns its Git worktrees, Compose project and data.
-The CLI, loopback API and panel expose lifecycle actions. See the
+Reuse the same idempotency key to recover the environment ID and state after
+an interrupted create. The CLI, loopback API and panel expose lifecycle actions. See the
 [Ubuntu setup, preview and Escape API guide](docs/feature-environments.md).
 
 The project manager keeps existing repositories where they are. You approve

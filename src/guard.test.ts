@@ -5,6 +5,8 @@ import { join } from "node:path";
 import { gitRun, isTrustedGitOptions } from "./git";
 import type { Executor } from "./contracts";
 import { envFileKeys, guardExecutor } from "./guard";
+import { emptyResources, FeatureDocker, hostExecutor } from "./environments/docker";
+import type { Environment } from "./environments/types";
 
 test("env keys catch every form Compose reads as a control", () => {
   for (const text of ["COMPOSE_FILE=a", "COMPOSE_FILE: a", "  export COMPOSE_FILE : a", 'A="x" COMPOSE_FILE=a', "B='y' C=1 COMPOSE_FILE=a", '1X="a\nB="\nCOMPOSE_FILE=a', '.X="a\nB="\nCOMPOSE_FILE=a', 'X[0]="a\nB="\nCOMPOSE_FILE=a', 'A=\v"\nB="\nCOMPOSE_FILE=a', 'A="\n# x" COMPOSE_FILE=a']) {
@@ -109,4 +111,49 @@ test("guard lets DevHub remove a project network of its own, and only that", asy
   const guarded = guardExecutor(async () => ({ code: 0, stdout: "", stderr: "" }));
   expect((await guarded(["docker", "network", "rm", "devhub-shop--fix-auth-0a1b2c3d"])).code).toBe(0);
   await expect(guarded(["docker", "network", "rm", "devhub-shop"])).rejects.toThrow("not permitted");
+});
+
+test("guard permits only inspected feature networks and volumes without relaxing Docker protections", async () => {
+  const id = `ef-${"a".repeat(32)}`, composeProject = `devhub-${id}`;
+  const volume = `devhub-vol-${"b".repeat(24)}`;
+  const networks = [`devhub-net-${"c".repeat(20)}`, `devhub-ingress-${"d".repeat(20)}`];
+  const networkIds = ["e".repeat(64), "f".repeat(64)];
+  const removals: string[][] = [];
+  let volumeName = volume, owner = id;
+  const run = hostExecutor(guardExecutor(async (argv) => {
+    const [kind, action, ...args] = argv.slice(4);
+    let stdout = "";
+    if (kind === "volume" && action === "ls") stdout = `${volumeName}\n`;
+    if (kind === "volume" && action === "inspect") stdout = `${owner}\t${composeProject}\n`;
+    if (kind === "network" && action === "ls") stdout = networks.join("\n");
+    if (kind === "network" && action === "inspect") stdout = `${networkIds[networks.indexOf(args.at(-1)!)]}\t${id}\t${composeProject}\n`;
+    if (action === "rm") removals.push([kind!, ...args]);
+    return { code: 0, stdout, stderr: "" };
+  }));
+  const docker = new FeatureDocker(run, "/infra");
+  const environment = (name: string): Environment => ({
+    id, composeProject, project: "demo", feature: "checkout", slug: "checkout", host: "local", provider: "docker-compose",
+    desired: "destroyed", observed: "destroying", createdAt: "now", activeAt: "now", idleMinutes: 30,
+    repos: [], resources: emptyResources(), bootstrap: {},
+    configuration: { fingerprint: "fixture", services: [], volumes: [name], networks, images: [], serviceImages: {} },
+  });
+
+  for (const argv of [
+    ["docker", "volume", "rm", volume],
+    ["docker", "network", "rm", networkIds[0]!],
+    ["docker", "volume", "rm", "other-data"],
+    ["docker", "system", "prune", "-f"],
+    ["docker", "compose", "down", "-v"],
+  ]) await expect(run(argv)).rejects.toMatchObject({ code: "unsafe_command" });
+  expect(removals).toEqual([]);
+
+  owner = "another-feature";
+  await expect(docker.inspect(environment(volume))).rejects.toMatchObject({ code: "ownership_conflict" });
+  owner = id;
+  await docker.remove(await docker.inspect(environment(volume)), true);
+  expect(removals).toEqual([["network", ...networkIds], ["volume", volume]]);
+
+  volumeName = "other-data";
+  await expect(docker.remove(await docker.inspect(environment(volumeName)), true)).rejects.toMatchObject({ code: "unsafe_command" });
+  expect(removals.some((args) => args.includes(volumeName))).toBe(false);
 });

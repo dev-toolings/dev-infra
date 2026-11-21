@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { DevHubError, type Executor, type ExecResult } from "../contracts";
+import { DevHubError, type ExecOptions, type Executor, type ExecResult } from "../contracts";
 import type { Environment, EnvironmentResources, Preview, Recipe } from "./types";
 
 export const featureLabel = "com.devhub.feature";
@@ -11,6 +11,15 @@ const localDockerHost = "unix:///var/run/docker.sock";
 const owner = '{{index .Labels "' + featureLabel + '"}}';
 const project = '{{index .Labels "' + projectLabel + '"}}';
 const containerFormat = '{{.Id}}\t{{.Name}}\t{{index .Config.Labels "com.docker.compose.service"}}\t{{.State.Status}}\t{{if .State.Health}}{{.State.Health.Status}}{{end}}\t{{.Image}}\t{{index .Config.Labels "' + featureLabel + '"}}\t{{index .Config.Labels "' + projectLabel + '"}}';
+const inspectedResources = new WeakMap<EnvironmentResources, { network: Set<string>; volume: Set<string> }>();
+const featureRemoval = Symbol("featureRemoval");
+type FeatureExecOptions = ExecOptions & { [featureRemoval]?: EnvironmentResources };
+
+export function allowsVerifiedFeatureRemoval(kind: "network" | "volume", targets: string[], options?: FeatureExecOptions): boolean {
+  const resources = options?.[featureRemoval];
+  const verified = resources && inspectedResources.get(resources)?.[kind];
+  return !!verified && targets.length > 0 && targets.every((target) => verified.has(target));
+}
 
 const lines = (value: string) => value.split(/\r?\n/).filter(Boolean);
 export const emptyResources = (): EnvironmentResources => ({ containers: [], volumes: [], networks: [], images: [] });
@@ -25,8 +34,9 @@ export function hostExecutor(run: Executor): Executor {
 export class FeatureDocker {
   constructor(private readonly run: Executor, private readonly infraDir: string) {}
 
-  private async docker(args: string[], code: string, message: string, timeoutMs = 30_000): Promise<string> {
-    const result = await this.run(["docker", ...args], { timeoutMs, maxOutputBytes: 2_097_152 });
+  private async docker(args: string[], code: string, message: string, timeoutMs = 30_000, removal?: EnvironmentResources): Promise<string> {
+    const options: FeatureExecOptions = { timeoutMs, maxOutputBytes: 2_097_152, [featureRemoval]: removal };
+    const result = await this.run(["docker", ...args], options);
     if (result.code !== 0) throw new DevHubError(message, code, 409);
     return result.stdout;
   }
@@ -79,6 +89,11 @@ export class FeatureDocker {
         result.images.push({ reference, id });
       }
     }
+    // Keep the verified targets tied to this inspection. Remove networks by ID so an identically named replacement is never selected.
+    inspectedResources.set(result, {
+      network: new Set(result.networks.filter(({ id, name }) => /^[a-f0-9]{64}$/.test(id) && /^devhub-(?:net|ingress)-[a-f0-9]{20}$/.test(name)).map(({ id }) => id)),
+      volume: new Set(result.volumes.filter(({ name }) => /^devhub-vol-[a-f0-9]{24}$/.test(name)).map(({ name }) => name)),
+    });
     return result;
   }
 
@@ -115,8 +130,8 @@ export class FeatureDocker {
 
   async remove(resources: EnvironmentResources, purgeData: boolean): Promise<void> {
     if (resources.containers.length) await this.docker(["rm", ...resources.containers.map(({ id }) => id)], "docker_remove", "Could not remove verified feature containers", 120_000);
-    if (resources.networks.length) await this.docker(["network", "rm", ...resources.networks.map(({ id }) => id)], "docker_remove", "Could not remove verified feature networks", 60_000);
-    if (purgeData && resources.volumes.length) await this.docker(["volume", "rm", ...resources.volumes.map(({ name }) => name)], "docker_remove", "Could not purge verified feature volumes", 60_000);
+    if (resources.networks.length) await this.docker(["network", "rm", ...resources.networks.map(({ id }) => id)], "docker_remove", "Could not remove verified feature networks", 60_000, resources);
+    if (purgeData && resources.volumes.length) await this.docker(["volume", "rm", ...resources.volumes.map(({ name }) => name)], "docker_remove", "Could not purge verified feature volumes", 60_000, resources);
   }
 
   async endpoint(env: Environment): Promise<Preview | undefined> {
@@ -173,6 +188,13 @@ export class FeatureDocker {
 
   logs(containerId: string, tail: number): Promise<ExecResult> {
     return this.run(["docker", "logs", "--tail", String(tail), "--timestamps", containerId], { timeoutMs: 15_000, maxOutputBytes: 512_000 });
+  }
+
+  async containerEnvironment(containerId: string): Promise<string[]> {
+    const output = await this.docker(["container", "inspect", "--format", "{{json .Config.Env}}", containerId], "docker_info", "Could not inspect the feature container environment");
+    const variables = JSON.parse(output) ?? [];
+    if (!Array.isArray(variables) || variables.some((value) => typeof value !== "string")) throw new DevHubError("Docker returned an invalid container environment", "docker_info", 409);
+    return variables;
   }
 
   exec(containerId: string, argv: string[], timeoutMs: number, cwd?: string): Promise<ExecResult> {

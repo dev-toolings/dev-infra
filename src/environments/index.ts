@@ -15,6 +15,7 @@ import type { CreateEnvironment, DestroyOptions, Environment, EnvironmentOperati
 const registry = "feature_environments";
 const featureId = /^ef-[a-f0-9]{32}$/;
 const gitId = /^[a-f0-9]{40,64}$/;
+const secretKey = /(?:PASSWORD|PASSWD|TOKEN|SECRET|API_?KEY|PRIVATE_?KEY|CREDENTIAL)/i;
 const sha256 = (data: string | Buffer) => createHash("sha256").update(data).digest("hex");
 const now = () => new Date().toISOString();
 const ordered = (data?: Record<string, string>) => Object.fromEntries(Object.entries(data ?? {}).sort(([a], [b]) => a.localeCompare(b)));
@@ -123,7 +124,7 @@ export class Environments {
         const configuration = JSON.parse(readFileSync(model, "utf8")) as { services: Record<string, { environment?: Record<string, unknown> }> };
         for (const service of Object.values(configuration.services)) {
           for (const [key, stored] of Object.entries(service.environment ?? {})) {
-            if (typeof stored === "string" && stored.length >= 4 && /(?:PASSWORD|PASSWD|TOKEN|SECRET|API_?KEY|PRIVATE_?KEY|CREDENTIAL)/i.test(key)) {
+            if (typeof stored === "string" && stored.length >= 4 && secretKey.test(key)) {
               const secret = stored.replaceAll("$$", "$");
               value = value.replaceAll(secret, "[redacted]");
             }
@@ -132,6 +133,29 @@ export class Environments {
       } catch { /* Structured output still uses the existing logger's rules. */ }
     }
     return value.split(/\r?\n/).map(redactLogLine).join("\n");
+  }
+
+  private async redactContainerOutput(entry: RecordEntry, container: Environment["resources"]["containers"][number], result: ExecResult): Promise<ExecResult> {
+    let { code, stdout, stderr } = result;
+    if (!stdout && !stderr) return result;
+    try {
+      const path = join(this.model(entry), "compose.json");
+      const model = existsSync(path) ? JSON.parse(readFileSync(path, "utf8")) : undefined;
+      // File-backed secrets are absent from the snapshot. Redact them from command output using the running container's values.
+      if (model?.services[container.service]?.env_file?.length) {
+        for (const variable of await this.docker.containerEnvironment(container.id)) {
+          const separator = variable.indexOf("=");
+          const secret = variable.slice(separator + 1);
+          if (separator > 0 && secret.length >= 4 && secretKey.test(variable.slice(0, separator))) {
+            stdout = stdout.replaceAll(secret, "[redacted]");
+            stderr = stderr.replaceAll(secret, "[redacted]");
+          }
+        }
+      }
+    } catch {
+      return { code, stdout: "", stderr: "Container output withheld because its environment could not be verified" };
+    }
+    return { code, stdout: this.redact(entry, stdout), stderr: this.redact(entry, stderr) };
   }
 
   private hasCapacity(id?: string): void {
@@ -210,35 +234,38 @@ export class Environments {
     const feature = input.feature.trim();
     const requestHash = sha256(JSON.stringify({ project: input.project, feature, refs: ordered(input.refs), branches: ordered(input.branches), build: input.build === true }));
     const keyHash = input.idempotencyKey ? sha256(input.idempotencyKey) : undefined;
-    let created = false;
-    const record = await this.lock("allocation", async () => {
+    const findPrevious = () => {
       const previous = keyHash && this.entries().find((entry) => entry.keyHash === keyHash);
-      if (previous) {
-        if (requestHash !== previous.requestHash) fail("The idempotency key was used with different create parameters", "idempotency_conflict");
-        return previous;
-      }
-      this.hasCapacity();
-      const recipe = readRecipe(this.recipeDirectory, input.project);
-      const root = this.worktreeRoot();
-      await this.assertDisk(root);
-      const id = "ef-" + randomUUID().replaceAll("-", "");
-      const started = now();
-      const entry: RecordEntry = {
-        id, composeProject: "devhub-" + id, project: input.project, feature,
-        slug: feature.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 27).replace(/-$/, "") || "feature",
-        provider: "docker-compose", host: hostname(), createdAt: started, activeAt: started, idleMinutes: recipe.idleMinutes,
-        desired: "running", observed: "creating", recipe, keyHash, requestHash, worktreeRoot: root,
-        repos: await this.resolveRepos(id, recipe, root, input), copied: [], resources: emptyResources(), bootstrap: {}, checksPassed: false,
-      };
-      this.save(entry);
-      created = true;
-      return entry;
-    }, 25);
-    if (!created) {
-      return ["creating", "starting"].includes(record.observed) || record.operation?.state === "running"
-        ? publicly(record) : this.status(record.id);
-    }
-    return this.mutate(record.id, "create", (entry) => this.launch(entry, input.build === true));
+      if (previous && requestHash !== previous.requestHash) fail("The idempotency key was used with different create parameters", "idempotency_conflict");
+      return previous || undefined;
+    };
+    const previous = findPrevious();
+    if (previous) return this.status(previous.id);
+
+    const id = "ef-" + randomUUID().replaceAll("-", "");
+    const result = await this.lock(id, async () => {
+      // Publish the allocation only after taking its lock so status can detect a dead owner.
+      const entry = await this.lock("allocation", async () => {
+        const existing = findPrevious();
+        if (existing) return existing;
+        this.hasCapacity();
+        const recipe = readRecipe(this.recipeDirectory, input.project);
+        const root = this.worktreeRoot();
+        await this.assertDisk(root);
+        const started = now();
+        const allocated: RecordEntry = {
+          id, composeProject: "devhub-" + id, project: input.project, feature,
+          slug: feature.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 27).replace(/-$/, "") || "feature",
+          provider: "docker-compose", host: hostname(), createdAt: started, activeAt: started, idleMinutes: recipe.idleMinutes,
+          desired: "running", observed: "creating", recipe, keyHash, requestHash, worktreeRoot: root,
+          repos: await this.resolveRepos(id, recipe, root, input), copied: [], resources: emptyResources(), bootstrap: {}, checksPassed: false,
+        };
+        this.save(allocated);
+        return allocated;
+      }, 25);
+      return entry.id === id ? this.mutateLocked(entry, "create", () => this.launch(entry, input.build === true)) : publicly(entry);
+    });
+    return result.id === id ? result : this.status(result.id);
   }
 
   private async worktree(entry: RecordEntry, repo: EnvironmentRepo): Promise<string | undefined> {
@@ -455,40 +482,45 @@ export class Environments {
     return this.lock(id, async () => {
       const entry = this.entry(id);
       this.markInterrupted(entry);
-      if (entry.desired === "destroyed") {
-        if (action === "start") fail("This environment was destroyed. Create a new environment for further development.", "environment_destroyed");
-        if (action === "stop") return publicly(entry);
-      }
-      const started = now();
-      if (action === "create" || action === "start") {
-        await this.lock("allocation", () => {
-          this.hasCapacity(id);
-          entry.desired = "running";
-          entry.observed = action === "create" ? "creating" : "starting";
-          entry.checksPassed = false;
-          this.save(entry);
-        }, 25);
-      }
-      if (action === "stop") { entry.desired = "stopped"; entry.observed = "stopping"; }
-      entry.operation = { id: randomUUID(), action, state: "running", step: action, startedAt: started, updatedAt: started };
-      entry.activeAt = started;
-      delete entry.observationError;
-      this.save(entry);
-      try {
-        await execute(entry);
-        entry.operation.state = "succeeded";
-      } catch (error) {
-        const detail = inspectError(error);
-        entry.operation.state = "failed";
-        entry.operation.error = { ...detail, message: this.redact(entry, detail.message) };
-        this.recordLog(entry, `${detail.code}: ${detail.message}`);
-        if (["create", "start", "stop"].includes(action) || (action === "destroy" && entry.desired === "destroyed")) entry.observed = "error";
-        try { entry.resources = await this.docker.inspect(entry); } catch { /* keep the last verified inventory */ }
-      }
-      entry.activeAt = entry.operation.updatedAt = now();
-      this.save(entry);
-      return publicly(entry);
+      return this.mutateLocked(entry, action, execute);
     });
+  }
+
+  private async mutateLocked(entry: RecordEntry, action: OperationAction, execute: (entry: RecordEntry) => Promise<void>): Promise<Environment> {
+    if (entry.desired === "destroyed") {
+      if (action === "start") fail("This environment was destroyed. Create a new environment for further development.", "environment_destroyed");
+      if (action === "stop") return publicly(entry);
+    }
+    const started = now();
+    entry.operation = { id: randomUUID(), action, state: "running", step: action, startedAt: started, updatedAt: started };
+    entry.activeAt = started;
+    delete entry.observationError;
+    if (action === "start") {
+      await this.lock("allocation", () => {
+        this.hasCapacity(entry.id);
+        entry.desired = "running";
+        entry.observed = "starting";
+        entry.checksPassed = false;
+        this.save(entry);
+      }, 25);
+    } else {
+      if (action === "stop") { entry.desired = "stopped"; entry.observed = "stopping"; }
+      this.save(entry);
+    }
+    try {
+      await execute(entry);
+      entry.operation.state = "succeeded";
+    } catch (error) {
+      const detail = inspectError(error);
+      entry.operation.state = "failed";
+      entry.operation.error = { ...detail, message: this.redact(entry, detail.message) };
+      this.recordLog(entry, `${detail.code}: ${detail.message}`);
+      if (["create", "start", "stop"].includes(action) || (action === "destroy" && entry.desired === "destroyed")) entry.observed = "error";
+      try { entry.resources = await this.docker.inspect(entry); } catch { /* keep the last verified inventory */ }
+    }
+    entry.activeAt = entry.operation.updatedAt = now();
+    this.save(entry);
+    return publicly(entry);
   }
 
   start(id: string, build = false, retryStep?: string): Promise<Environment> {
@@ -562,15 +594,19 @@ export class Environments {
     return true;
   }
 
-  private async container(entry: RecordEntry, service: string, refresh = true): Promise<string> {
+  private async container(entry: RecordEntry, service: string, refresh = true) {
     if (refresh) entry.resources = await this.docker.inspect(entry);
     const matches = entry.resources.containers.filter((item) => item.service === service && item.state === "running");
     if (matches.length !== 1) fail("The selected service must have exactly one running container", "service_unavailable");
-    return matches[0]!.id;
+    return matches[0]!;
   }
   private async runStep(entry: RecordEntry, step: Step, log = true): Promise<void> {
-    const result = await this.docker.exec(await this.container(entry, step.service, log), step.argv, (step.timeoutSeconds ?? 60) * 1000, step.cwd);
-    if (log || result.code !== 0) this.recordLog(entry, [step.id, result.stdout, result.stderr].join("\n"));
+    const container = await this.container(entry, step.service, log);
+    const result = await this.docker.exec(container.id, step.argv, (step.timeoutSeconds ?? 60) * 1000, step.cwd);
+    if (log || result.code !== 0) {
+      const output = await this.redactContainerOutput(entry, container, result);
+      this.recordLog(entry, [step.id, output.stdout, output.stderr].join("\n"));
+    }
     if (result.code !== 0) fail(`Step ${step.id} exited with code ${result.code}. Consult the operation log.`, result.code === 124 || result.code === 137 ? "step_timeout" : "step_failed");
   }
   async logs(id: string, service?: string, tail = 100): Promise<{ service: string; stdout: string; stderr: string }[]> {
@@ -585,7 +621,8 @@ export class Environments {
     const result = await Promise.all(containers.map(async (item) => {
       const log = await this.docker.logs(item.id, tail);
       if (log.code !== 0) fail("Could not read feature container logs", "logs_unavailable");
-      return { service: item.service, stdout: this.redact(entry, log.stdout), stderr: this.redact(entry, log.stderr) };
+      const { stdout, stderr } = await this.redactContainerOutput(entry, item, log);
+      return { service: item.service, stdout, stderr };
     }));
     return service ? result : [...operations, ...result];
   }
@@ -595,8 +632,9 @@ export class Environments {
         !Number.isSafeInteger(timeout) || timeout < 1 || timeout > 600_000) fail("Invalid command or timeout", "invalid_command", 400);
     let result: ExecResult | undefined;
     const final = await this.mutate(id, "exec", async (entry) => {
-      const raw = await this.docker.exec(await this.container(entry, service), argv, timeout);
-      result = { code: raw.code, stdout: this.redact(entry, raw.stdout), stderr: this.redact(entry, raw.stderr) };
+      const container = await this.container(entry, service);
+      const raw = await this.docker.exec(container.id, argv, timeout);
+      result = await this.redactContainerOutput(entry, container, raw);
       if (raw.code !== 0) fail(`Command exited with code ${raw.code}`, "command_failed");
     });
     if (result) return result;
@@ -627,18 +665,18 @@ export class Environments {
           try {
             entry.observationError = await this.observe(entry);
             const idle = nowMs - Date.parse(entry.activeAt) >= entry.idleMinutes * 60_000;
+            const retryStop = entry.desired === "stopped" && entry.operation?.action === "stop" &&
+              (entry.operation.state === "failed" || entry.operation.state === "interrupted");
             if (entry.desired === "destroyed" && entry.observed === "degraded" && entry.operation?.state === "interrupted") {
               await this.stopEntry(entry);
               await this.docker.remove(entry.resources, false);
               entry.resources = await this.docker.inspect(entry);
               entry.observed = "destroyed";
-            } else if (entry.desired === "stopped" && entry.observed === "degraded" && entry.operation?.state === "interrupted") {
-              await this.stopEntry(entry);
-            } else if (entry.desired === "running" && idle) {
+            } else if (retryStop || (entry.desired === "running" && idle)) {
               const time = now();
               entry.desired = "stopped";
               entry.observed = "stopping";
-              entry.operation = { id: randomUUID(), action: "stop", state: "running", step: "idle-stop", startedAt: time, updatedAt: time };
+              entry.operation = { id: randomUUID(), action: "stop", state: "running", step: retryStop ? "retry-stop" : "idle-stop", startedAt: time, updatedAt: time };
               this.save(entry);
               await this.stopEntry(entry);
               entry.operation.state = "succeeded";
@@ -666,8 +704,9 @@ export class Environments {
     return results;
   }
   async doctor() {
+    const git = Bun.which("git");
     const commands: [string, string[]][] = [
-      ["git", ["git", "--version"]], ["compose", ["docker", "compose", "version", "--short"]], ["engine", ["docker", "info", "--format", "{{.OSType}}"]],
+      ["compose", ["docker", "compose", "version", "--short"]], ["engine", ["docker", "info", "--format", "{{.OSType}}"]],
       ["flock", ["flock", "--version"]], ["timer", ["systemctl", "--user", "is-active", "devhub-feature-reconcile.timer"]],
     ];
     const checks = await Promise.all(commands.map(async ([name, argv]) => {
@@ -679,7 +718,7 @@ export class Environments {
       } catch { return { name, ok: false, detail: "Unavailable" }; }
     }));
     return {
-      provider: "docker-compose" as const, host: hostname(), checks,
+      provider: "docker-compose" as const, host: hostname(), checks: [{ name: "git", ok: git !== null, detail: git ?? "Unavailable" }, ...checks],
       capacity: { active: setting("DEVHUB_FEATURE_MAX_ACTIVE", 5, 100), builds: setting("DEVHUB_FEATURE_MAX_BUILDS", 2, 32), minFreeMiB: setting("DEVHUB_FEATURE_MIN_FREE_MIB", 2048, 1_048_576) },
       capabilities: { pause: false, snapshots: false, diskQuotas: false, distributed: false, remoteDocker: false },
     };

@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
-import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { parse } from "yaml";
 import { DevHubError, type Executor } from "../contracts";
@@ -15,6 +16,7 @@ type Model = {
   volumes?: Record<string, Record<string, any>>;
   secrets?: Record<string, Record<string, any>>;
   configs?: Record<string, Record<string, any>>;
+  "x-devhub-env-files"?: Record<string, (string | { path: string; required?: boolean; format?: string })[]>;
 };
 
 const fail = (message: string): never => { throw new DevHubError(message, "compose_invalid", 400); };
@@ -126,6 +128,12 @@ function unescapeCompose(value: unknown): unknown {
   return value;
 }
 
+async function composeConfig(run: Executor, args: string[], cwd: string, flags: string[], final = false): Promise<Model> {
+  const result = await run([...args, "config", "--format", "json", ...flags], { cwd, timeoutMs: 30_000, maxOutputBytes: 8 * 1024 * 1024 });
+  if (result.code !== 0) fail(final ? "Final Compose model could not be revalidated" : "Compose configuration could not be normalized");
+  try { return JSON.parse(result.stdout) as Model; } catch { return fail(final ? "Final Compose model is invalid" : "Compose returned an invalid normalized model"); }
+}
+
 function rebaseResources(model: Model, env: Environment, directory: string, secretFiles: string[]): void {
   const roots = repoRoots(env);
   for (const [name, service] of Object.entries(model.services)) {
@@ -220,11 +228,37 @@ export async function renderCompose(run: Executor, recipe: Recipe, env: Environm
   const args = ["docker", "compose", "--project-directory", projectRoot, "--env-file", varsPath, "-p", env.composeProject];
   for (const file of files) args.push("-f", file);
   for (const profile of recipe.compose.profiles) args.push("--profile", profile);
-  args.push("config", "--format", "json", "--no-env-resolution");
-  const rendered = await run(args, { cwd: projectRoot, timeoutMs: 30_000, maxOutputBytes: 8 * 1024 * 1024 });
-  if (rendered.code !== 0) fail("Compose configuration could not be normalized");
-  let model: Model = { services: {} };
-  try { model = JSON.parse(rendered.stdout) as Model; } catch { fail("Compose returned an invalid normalized model"); }
+  // Some Compose releases still resolve service env files when interpolating the model.
+  const raw = await composeConfig(run, args, projectRoot, ["--no-env-resolution", "--no-interpolate", "--no-normalize", "--no-path-resolution", "--no-consistency"]);
+  const envFiles = Object.fromEntries(Object.entries(raw.services ?? {}).filter(([, service]) => service.env_file?.length)
+    .map(([name, service]) => [name, [service.env_file].flat()]));
+  const envFileServices = Object.keys(envFiles);
+  let model: Model;
+  if (envFileServices.length) {
+    // Interpolate the merged references as extension data while resetting the actual env_file field.
+    const temp = mkdtempSync(join(tmpdir(), "devhub-compose-"));
+    try {
+      const override = join(temp, "env-files.yml");
+      const reset = envFileServices.map((name) => `  ${JSON.stringify(name)}:\n    env_file: !reset []`).join("\n");
+      writeFileSync(override, `x-devhub-env-files: !override ${JSON.stringify(envFiles)}\nservices:\n${reset}\n`, { mode: 0o600 });
+      model = await composeConfig(run, [...args, "-f", override], projectRoot, ["--no-env-resolution"]);
+      const references = model["x-devhub-env-files"];
+      delete model["x-devhub-env-files"];
+      for (const name of envFileServices) {
+        const service = model.services[name];
+        if (!service) continue;
+        const entries = references?.[name];
+        if (service.env_file?.length || !Array.isArray(entries) || !entries.length) return fail("Compose could not preserve the service environment file references");
+        service.env_file = entries.map((item) => {
+          const entry = typeof item === "string" ? { path: item } : item;
+          if (!object(entry) || typeof entry.path !== "string" || !entry.path) fail("Compose env_file entries must have a path");
+          return { ...entry, path: resolve(projectRoot, entry.path) };
+        });
+      }
+    } finally { rmSync(temp, { recursive: true, force: true }); }
+  } else {
+    model = await composeConfig(run, args, projectRoot, ["--no-env-resolution"]);
+  }
   const selected = recipe.compose.services.length ? [...recipe.compose.services] : Object.entries(model.services)
     .filter(([, service]) => !Array.isArray(service.profiles) || service.profiles.length === 0 || service.profiles.some((profile: string) => recipe.compose.profiles.includes(profile)))
     .map(([name]) => name);
@@ -313,12 +347,11 @@ export async function renderCompose(run: Executor, recipe: Recipe, env: Environm
     }
   }
   const composeFile = join(outDir, "compose.json");
-  writeFileSync(composeFile, `${JSON.stringify(escapeCompose(model), null, 2)}\n`, { mode: 0o600 });
-  const finalArgs = ["docker", "compose", "--project-directory", outDir, "--env-file", "/dev/null", "-p", env.composeProject, "-f", composeFile, "config", "--format", "json"];
-  const final = await run(finalArgs, { cwd: outDir, timeoutMs: 30_000, maxOutputBytes: 8 * 1024 * 1024 });
-  if (final.code !== 0) fail("Final Compose model could not be revalidated");
-  let verified: Model = { services: {} };
-  try { verified = JSON.parse(final.stdout) as Model; } catch { fail("Final Compose model is invalid"); }
+  const json = `${JSON.stringify(escapeCompose(model), null, 2)}\n`;
+  writeFileSync(composeFile, json, { mode: 0o600 });
+  // Final validation resolves the env files in memory. The on-disk model keeps only their paths.
+  const finalArgs = ["docker", "compose", "--project-directory", outDir, "--env-file", "/dev/null", "-p", env.composeProject, "-f", composeFile];
+  const verified = await composeConfig(run, finalArgs, outDir, [], true);
   validateModel(verified, Object.keys(model.services), recipe.shared);
   rebaseResources(verified, env, outDir, secretPaths);
   for (const [name, service] of Object.entries(verified.services)) {
@@ -329,8 +362,6 @@ export async function renderCompose(run: Executor, recipe: Recipe, env: Environm
   for (const [key, volume] of Object.entries(verified.volumes ?? {})) if (!volume.external && volume.labels?.[OWNER_LABEL] !== env.id) fail(`Final Compose volume ${key} lost its owner label`);
   const volumeNames = Object.entries(verified.volumes ?? {}).filter(([, value]) => !value.external).map(([key, value]) => String(value.name ?? key));
   const images = Object.entries(serviceImages).filter(([service]) => Boolean(verified.services[service]?.build)).map(([, image]) => image);
-  const json = `${JSON.stringify(escapeCompose(verified), null, 2)}\n`;
-  writeFileSync(composeFile, json, { mode: 0o600 });
   const fingerprint = hash(`${json}\n${recipe.routes.length ? readFileSync(join(outDir, "Caddyfile"), "utf8") : ""}\n${JSON.stringify(pathManifest)}`);
   return { fingerprint, services: Object.keys(verified.services), volumes: volumeNames, networks: networkNames, images, serviceImages };
 }
