@@ -7,7 +7,7 @@ import { gitRun } from "../git";
 import { redactLogLine, redactText } from "../operations/logger";
 import { emptyResources, FeatureDocker, hostExecutor } from "./docker";
 import { featureLock } from "./lock";
-import { inside, listRecipes, readRecipe } from "./recipe";
+import { inside, listRecipes, readRecipe, recipeId } from "./recipe";
 import { renderCompose, verifyComposePaths } from "./compose";
 import { prepareProject, projectRecipe, purgeProjectDatabase } from "./project";
 import { installFeatureTimer } from "./timer";
@@ -108,12 +108,13 @@ export class Environments {
   recipes() { return listRecipes(this.recipeDirectory); }
   /** A recipe file wins; otherwise a project DevHub runs in Docker gets a recipe derived from it. */
   private recipe(name: string): Recipe {
-    try { return readRecipe(this.recipeDirectory, name); } catch (error) {
+    // A project ID can take forms a recipe ID cannot (my_app): only a valid recipe ID is looked up as a file.
+    try { if (recipeId.test(name)) return readRecipe(this.recipeDirectory, name); } catch (error) {
       if (!(error instanceof DevHubError && error.code === "recipe_not_found")) throw error;
-      const project = this.options.catalog.listProjects().find((item) => item.id === name);
-      if (!project) throw error;
-      return projectRecipe(project, this.options.stateDir);
     }
+    const project = this.options.catalog.listProjects().find((item) => item.id === name);
+    if (!project) fail(`No recipe or DevHub project named ${name}`, "recipe_not_found", 404);
+    return projectRecipe(project!, this.options.stateDir);
   }
 
   private worktreeRoot(): string {

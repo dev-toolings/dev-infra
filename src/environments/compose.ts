@@ -118,6 +118,7 @@ function hardenServices(model: Model, recipe: Recipe, roots: string[], egressNet
         if (uid === undefined || gid === undefined) fail("The host user ID is unavailable for a hardened worktree mount");
         service.user = `${uid}:${gid}`;
       } else if (/^(?:0|root)(?::|$)/.test(String(service.user))) fail(`Compose service ${name} runs as root with a writable worktree mount`);
+      else if (![`${uid}`, `${uid}:${gid}`].includes(String(service.user))) fail(`Compose service ${name} writes a worktree as user ${service.user}, not as the host user ${uid}:${gid}`);
     }
     if (egress && recipe.internet.includes(name)) service.networks = { ...(object(service.networks) ? service.networks : {}), [egress]: {} };
   }

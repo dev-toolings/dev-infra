@@ -13,6 +13,9 @@ type Tool = { name: string; description: string; inputSchema: Record<string, unk
 type Request = { jsonrpc: "2.0"; id?: string | number | null; method: string; params?: Record<string, unknown> };
 
 const PROTOCOL = "2025-06-18";
+/** Complete output, secrets redacted: a test run or a long file must reach the agent whole. */
+const commandOutput = (result: { code: number; stdout: string; stderr: string }) =>
+  `exit code ${result.code}\n--- stdout\n${redactOutput(result.stdout) as string}\n--- stderr\n${redactOutput(result.stderr) as string}`;
 const text = (value: unknown) => typeof value === "string" ? value : JSON.stringify(redactOutput(value), null, 2);
 const object = (properties: Record<string, unknown>, required: string[] = []) => ({ type: "object", properties, required, additionalProperties: false });
 const string = (description: string) => ({ type: "string", description });
@@ -58,7 +61,7 @@ export function mcpTools(services: AppServices): Tool[] {
       call: async (args) => {
         const timeout = Math.min(Math.max(arg<number | undefined>(args, "timeoutSeconds", "number", true) ?? 120, 1), 600);
         const result = await features().exec(arg(args, "id", "string"), arg<string | undefined>(args, "service", "string", true) ?? "app", ["sh", "-c", arg(args, "command", "string")], timeout * 1000);
-        return `exit code ${result.code}\n--- stdout\n${redactText(result.stdout, "multiline")}\n--- stderr\n${redactText(result.stderr, "multiline")}`;
+        return commandOutput(result);
       },
     },
     {
@@ -91,7 +94,7 @@ export function mcpTools(services: AppServices): Tool[] {
       call: async (args) => {
         const timeout = Math.min(Math.max(arg<number | undefined>(args, "timeoutSeconds", "number", true) ?? 120, 1), 3600);
         const result = await projects.exec(arg(args, "project", "string"), arg(args, "command", "string"), timeout * 1000);
-        return `exit code ${result.code}\n--- stdout\n${redactText(result.stdout, "multiline")}\n--- stderr\n${redactText(result.stderr, "multiline")}`;
+        return commandOutput(result);
       },
     },
   ];

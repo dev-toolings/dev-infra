@@ -231,6 +231,8 @@ test("hardened isolation refuses a root service writing into a worktree and sour
   root.model.services.api.volumes = [{ type: "bind", source: root.repo, target: "/app" }];
   root.model.services.api.user = "root";
   await expect(renderCompose(root.run, root.recipe, root.env, root.output)).rejects.toThrow("runs as root with a writable worktree mount");
+  root.model.services.api.user = "1001:1001";
+  if (process.getuid!() !== 1001) await expect(renderCompose(root.run, root.recipe, root.env, root.output)).rejects.toThrow("not as the host user");
 
   const source = fixture();
   source.recipe.isolation = "hardened";

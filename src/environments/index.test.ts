@@ -188,3 +188,10 @@ test("create retry reports an interrupted allocation once its environment lock i
     expect(f.environments.list()).toEqual([interrupted]);
   } finally { f.close(); }
 });
+
+test("a project ID that is no valid recipe ID still looks for a DevHub project", async () => {
+  const f = fixture(async () => ({ code: 0, stdout: "", stderr: "" }));
+  try {
+    await expect(f.environments.create({ project: "my_app", feature: "checkout" })).rejects.toThrow("No recipe or DevHub project named my_app");
+  } finally { f.close(); }
+});

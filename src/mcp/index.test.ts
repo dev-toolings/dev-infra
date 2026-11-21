@@ -42,6 +42,14 @@ test("feature_exec runs a shell command in the app service of the feature by def
   expect(JSON.parse(text.split("\n")[2]!)).toEqual({ id: "ef-1", service: "app", argv: ["sh", "-c", "bun test"], timeout: 30_000 });
 });
 
+test("feature_exec returns long output whole, with its secrets redacted", async () => {
+  const long = { ...services, environments: { ...services.environments, exec: async () => ({ code: 0, stdout: `${"x".repeat(20_000)}\nTOKEN=fixture-secret-value\n`, stderr: "" }) } } as unknown as AppServices;
+  const reply = await handleMcp({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "feature_exec", arguments: { id: "ef-1", command: "cat big" } } }, mcpTools(long));
+  const text = (reply!.result as { content: Array<{ text: string }> }).content[0]!.text;
+  expect(text).toContain("x".repeat(20_000));
+  expect(text).not.toContain("fixture-secret-value");
+});
+
 test("a message that is not an object with a string method is an Invalid Request, not a crash", async () => {
   for (const message of [null, 42, "x", [], { jsonrpc: "2.0", id: 3 }]) {
     expect(await handleMcp(message, tools)).toEqual({ jsonrpc: "2.0", id: null, error: { code: -32600, message: "Invalid Request" } });

@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { parse } from "yaml";
 import type { CatalogPort, Executor, Project, SharedServicesPort } from "../contracts";
 import { projectNetwork } from "../services";
-import { featureHost, prepareProject, projectRecipe } from "./project";
+import { featureHost, prepareProject, projectRecipe, purgeProjectDatabase } from "./project";
 import type { Environment, Recipe } from "./types";
 
 const dirs: string[] = [];
@@ -93,4 +93,15 @@ test("a copy cut short is dropped and made again, a foreign database is never ta
   other.setExisting(true);
   await expect(prepareProject(other.options, other.entry, other.source, () => {})).rejects.toThrow("DevHub does not take it over");
   expect(other.commands.some((argv) => argv.some((arg) => arg.includes("pg_dump")))).toBe(false);
+  // The refused name was recorded but never ours: a purge leaves it alone.
+  await purgeProjectDatabase(other.options, other.entry, other.source);
+  expect(other.commands.some((argv) => argv.some((arg) => arg.startsWith("DROP DATABASE")))).toBe(false);
+});
+
+test("a half-written source from an interrupted run is written again", async () => {
+  const f = fixture();
+  mkdirSync(f.source, { recursive: true });
+  writeFileSync(join(f.source, "compose.yml.tmp"), "services:\n  app:\n    bui");
+  await prepareProject(f.options, f.entry, f.source, () => {});
+  expect(parse(readFileSync(join(f.source, "compose.yml"), "utf8")).services.app.env_file).toEqual([join(f.source, "app.env")]);
 });

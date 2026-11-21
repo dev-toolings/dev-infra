@@ -4,7 +4,7 @@ import { DevHubError } from "../contracts";
 import type { Recipe } from "./types";
 
 type Fields = Record<string, unknown>;
-const recipeId = /^[a-z][a-z0-9-]{0,47}$/;
+export const recipeId = /^[a-z][a-z0-9-]{0,47}$/;
 const identifier = /^[a-z][a-z0-9_-]{0,47}$/;
 const serviceName = /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,62}$/;
 const variable = /^[A-Z_][A-Z0-9_]*$/;

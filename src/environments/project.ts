@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { parse, stringify } from "yaml";
 import { DevHubError, type CatalogPort, type Component, type Executor, type Project, type SharedServicesPort } from "../contracts";
@@ -119,8 +119,9 @@ export async function prepareProject(options: Options, entry: Entry, sourceDir: 
       return `${key}=${value}`;
     }).join("\n") + "\n";
     writeFileSync(join(sourceDir, "app.env"), env, { mode: 0o600 });
-    // Written last: its presence means the source is complete.
-    writeFileSync(join(sourceDir, "compose.yml"), stringify(model), { mode: 0o600 });
+    // Renamed into place last: its presence means the source is complete.
+    writeFileSync(join(sourceDir, "compose.yml.tmp"), stringify(model), { mode: 0o600 });
+    renameSync(join(sourceDir, "compose.yml.tmp"), join(sourceDir, "compose.yml"));
   }
   await connectProjectNetwork(run, parent.id, component.compose!.managed!.infra);
   if (!entry.database || entry.bootstrap["database-copy"] === "done") return;
@@ -140,9 +141,12 @@ export async function prepareProject(options: Options, entry: Entry, sourceDir: 
   } finally { save(); }
 }
 
-/** Drops the private database of a feature; the project database is never touched. */
+/**
+ * Drops the private database of a feature; the project database is never touched. A name whose
+ * copy never started belongs to nobody DevHub knows: an existing database there was refused.
+ */
 export async function purgeProjectDatabase(options: Options, entry: Entry, sourceDir: string): Promise<void> {
-  if (!entry.database) return;
+  if (!entry.database || !entry.bootstrap["database-copy"]) return;
   const services = options.services ?? fail("Shared services are unavailable", "provisioning_failed", 503);
   const host = databaseHost(options, entry, sourceDir) ?? fail("No Postgres address found for the feature database");
   await dropDatabase(options.run, host, await services.containerEnv(host, "POSTGRES_USER"), entry.database);

@@ -103,7 +103,7 @@ Version 1 includes `repositories`, `compose`, `routes`, `steps`, `shared`, `reso
 | --- | --- |
 | `shared` (default) | Feature-owned containers, networks and volumes. External networks and volumes listed in `shared` are allowed. |
 | `dedicated` | Same, and `shared` must be empty: the feature reaches no external network or volume. |
-| `hardened` | `dedicated`, plus every service drops all capabilities except those listed for it in `capabilities` (Docker default set only), runs with `no-new-privileges`, runs as the host user when it mounts a worktree writably (a root user there is refused), and sits on internal networks without Internet access. Services listed in `internet` keep a route out. The preview gateway alone joins a network that publishes its loopback port. |
+| `hardened` | `dedicated`, plus every service drops all capabilities except those listed for it in `capabilities` (Docker default set only), runs with `no-new-privileges`, runs as the host user when it mounts a worktree writably (any other user there is refused), and sits on internal networks without Internet access. Services listed in `internet` keep a route out. The preview gateway alone joins a network that publishes its loopback port. |
 
 `hardened` limits mistakes in trusted code. It shares the host kernel and is no boundary for hostile code. Images that need root at startup, such as the official PostgreSQL image, need their capabilities listed, for example `"capabilities": {"postgres": ["CHOWN", "DAC_OVERRIDE", "FOWNER", "SETGID", "SETUID"]}`. Files baked into an image as root with mode 0600 cannot be read by the host user: mount the worktree code instead.
 
