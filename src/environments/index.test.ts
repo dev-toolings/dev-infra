@@ -41,8 +41,9 @@ test.each([
   { name: "keeps DEBUG=1 visible in operation logs and exec output", variable: "DEBUG=1", output: "debug level 1 enabled", expected: "debug level 1 enabled" },
   { name: "withholds streams containing a three-character DB_PASS", variable: "DB_PASS=7zQ", output: "prefix7zQsuffix", expected: "[redacted]" },
   { name: "redacts long env_file values under ordinary names", variable: "DISPLAY_NAME=app.v2", output: "version app.v2, fallback app-v2", expected: "version [redacted], fallback app-v2" },
+  { name: "redacts env_file values overridden by Compose", variable: "DISPLAY_NAME=public-value", fileVariable: '\n# Fixture\nexport DISPLAY_NAME="private-value"', environment: { DISPLAY_NAME: "public-value" }, output: "private-value and public-value", expected: "[redacted] and [redacted]" },
   { name: "redacts long DB_PASS values", variable: "DB_PASS=fixture-db-value", output: "db fixture-db-value", expected: "db [redacted]" },
-])("$name", async ({ variable, output, expected }) => {
+])("$name", async ({ variable, fileVariable = variable, environment, output, expected }) => {
   const fileSecret = "fixture-mounted-value";
   const f = fixture(async (argv) => {
     const [command, action] = argv.slice(4);
@@ -61,9 +62,9 @@ test.each([
     const model = join(f.stateDir, "feature-environments", id);
     mkdirSync(model, { recursive: true });
     const envFile = join(model, "service.env"), secretFile = join(model, "service-secret");
-    writeFileSync(envFile, variable + "\n");
+    writeFileSync(envFile, fileVariable + "\n");
     writeFileSync(secretFile, fileSecret + "\n");
-    writeFileSync(join(model, "compose.json"), JSON.stringify({ services: { api: { env_file: [{ path: envFile }] } } }));
+    writeFileSync(join(model, "compose.json"), JSON.stringify({ services: { api: { env_file: [{ path: envFile }], environment } } }));
     f.entry.recipe.compose.secretFiles.SERVICE_SECRET = secretFile;
     f.entry.recipe.steps.push({ id: "smoke", phase: "test", service: "api", argv: ["show-fixture-values"] });
     f.catalog.putRecord("feature_environments", id, f.entry);
@@ -134,6 +135,44 @@ test("reconcile backs off and reports a permanent idle stop failure after three 
     expect((await f.environments.doctor()).checks).toContainEqual({
       name: "stop:" + id, ok: false, detail: "Automatic stop failed after 3 attempts. Retry stop manually.",
     });
+  } finally { f.close(); }
+});
+
+test("reconcile retries an interrupted third idle stop attempt", async () => {
+  let state = "running", stops = 0;
+  let interrupted: Environment | undefined;
+  const f = fixture(async (argv) => {
+    const [command, action] = argv.slice(4);
+    if (command === "ps") return { code: 0, stdout: "container-1\n", stderr: "" };
+    if (command === "container" && action === "inspect") {
+      return { code: 0, stdout: `container-1\t/api\tapi\t${state}\t\tsha256:image\t${id}\t${composeProject}\n`, stderr: "" };
+    }
+    if (command === "stop") {
+      if (stops === 2 && !interrupted) {
+        interrupted = f.catalog.getRecord<Environment>("feature_environments", id);
+        throw new Error("Simulated interruption before Docker stops the container");
+      }
+      if (++stops < 3) return { code: 1, stdout: "", stderr: "" };
+      state = "exited";
+    }
+    return { code: 0, stdout: "", stderr: "" };
+  }, { configuration: { fingerprint: "fixture", services: ["api"], volumes: [], networks: [], images: [], serviceImages: {} } });
+
+  try {
+    const minute = 60_000;
+    const time = Date.parse(activeAt) + 31 * minute;
+    await f.environments.reconcile(time);
+    await f.environments.reconcile(time + 2 * minute);
+    await f.environments.reconcile(time + 6 * minute);
+    expect(stops).toBe(2);
+    expect(interrupted).toMatchObject({ desired: "stopped", operation: { action: "stop", state: "running" } });
+    // Restore the last durable record before the stop so the catch path's writes are discarded.
+    f.catalog.putRecord("feature_environments", id, interrupted);
+
+    const [retried] = await f.environments.reconcile(time + 6 * minute);
+    expect(stops).toBe(3);
+    expect(retried).toMatchObject({ observed: "stopped", operation: { state: "succeeded" } });
+    expect(retried?.observationError).toBeUndefined();
   } finally { f.close(); }
 });
 

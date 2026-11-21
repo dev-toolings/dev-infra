@@ -29,9 +29,15 @@ type RecordEntry = Environment & {
 type OperationAction = EnvironmentOperation["action"];
 type Step = Recipe["steps"][number];
 type OutputModel = {
-  services: Record<string, { environment?: Record<string, unknown>; env_file?: unknown[] }>;
+  services: Record<string, { environment?: Record<string, unknown>; env_file?: (string | { path: string })[] }>;
   secrets?: Record<string, { file: string }>;
 };
+
+function readOutputFile(file: string): string {
+  const stat = lstatSync(file);
+  if (realpathSync(file) !== file || !stat.isFile() || stat.size > 16 * 1024) throw new Error("Could not verify feature output file");
+  return readFileSync(file, "utf8");
+}
 
 function redactOutput(value: string, secrets: string[]): string {
   if (!value) return value;
@@ -146,9 +152,7 @@ export class Environments {
     ]);
     const secrets: string[] = [];
     for (const file of files) {
-      const stat = lstatSync(file);
-      if (realpathSync(file) !== file || !stat.isFile() || stat.size > 16 * 1024) throw new Error("Could not verify feature secret file");
-      const secret = readFileSync(file, "utf8");
+      const secret = readOutputFile(file);
       secrets.push(secret.trim() || secret);
     }
     for (const service of Object.values(model?.services ?? {})) {
@@ -173,13 +177,24 @@ export class Environments {
       const service = model?.services[container.service];
       if (!service) throw new Error("Could not verify feature service configuration");
       const secrets = this.outputSecrets(entry, model);
-      // Docker has the effective values after Compose resolves env_file entries and overrides.
       if (service.env_file?.length) {
+        const collect = (key: string, value: string) => {
+          if (value.length >= 4 || envFileSecretKey.test(key)) secrets.push(value);
+        };
+        for (const item of service.env_file) {
+          const file = (typeof item === "string" ? item : item.path).replaceAll("$$", "$");
+          for (const line of readOutputFile(file).split(/\r?\n/)) {
+            const match = /^\s*(?:export\s+)?([^\s#=]+)\s*=\s*(.*)$/.exec(line);
+            if (!match) continue;
+            const [, key, raw] = match;
+            collect(key, raw.trim().replace(/^(['"])(.*)\1$/, "$2"));
+          }
+        }
+        // Docker also has the effective values after Compose resolves overrides.
         for (const variable of await this.docker.containerEnvironment(container.id)) {
           const separator = variable.indexOf("=");
           if (separator <= 0) continue;
-          const value = variable.slice(separator + 1);
-          if (value.length >= 4 || envFileSecretKey.test(variable.slice(0, separator))) secrets.push(value);
+          collect(variable.slice(0, separator), variable.slice(separator + 1));
         }
       }
       return { code, stdout: redactOutput(stdout, secrets), stderr: redactOutput(stderr, secrets) };
@@ -709,15 +724,18 @@ export class Environments {
             const retryDue = retryStop && !stopAttention(entry) && reconcileTime >= (entry.stopRetry?.retryAt ?? 0);
             if (retryDue || (entry.desired === "running" && idle)) {
               const time = now();
-              const attempts = (entry.stopRetry?.attempts ?? 0) + 1;
-              // Reserve the attempt before side effects so an interrupted stop also counts.
-              entry.stopRetry = { attempts, retryAt: reconcileTime + stopRetryDelayMs * 2 ** (attempts - 1) };
               entry.desired = "stopped";
               entry.observed = "stopping";
               delete entry.observationError;
               entry.operation = { id: randomUUID(), action: "stop", state: "running", step: retryStop ? "retry-stop" : "idle-stop", startedAt: time, updatedAt: time };
               this.save(entry);
-              await this.stopEntry(entry);
+              try {
+                await this.stopEntry(entry);
+              } catch (error) {
+                const attempts = (entry.stopRetry?.attempts ?? 0) + 1;
+                entry.stopRetry = { attempts, retryAt: (nowMs ?? Date.now()) + stopRetryDelayMs * 2 ** (attempts - 1) };
+                throw error;
+              }
               delete entry.stopRetry;
               entry.operation.state = "succeeded";
               entry.operation.updatedAt = now();
@@ -737,7 +755,6 @@ export class Environments {
             const detail = inspectError(error);
             entry.observationError = stopAttention(entry) ?? detail;
             if (entry.operation?.state === "running") {
-              if (entry.stopRetry) entry.stopRetry.retryAt = (nowMs ?? Date.now()) + stopRetryDelayMs * 2 ** (entry.stopRetry.attempts - 1);
               entry.operation.state = "failed";
               entry.operation.error = detail;
               entry.operation.updatedAt = now();
