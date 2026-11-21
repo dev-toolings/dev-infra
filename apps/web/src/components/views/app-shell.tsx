@@ -1,6 +1,6 @@
 import { locale, setLocale, t } from "../../lib/i18n";
 import type { CSSProperties, ReactNode } from "react";
-import { Box, ChevronsUpDown, FolderKanban, LogOut, Logs, Monitor, Moon, Languages, Palette, ShieldCheck, Sun } from "lucide-react";
+import { Box, ChevronsUpDown, FolderKanban, GitBranch, LogOut, Logs, Monitor, Moon, Languages, Palette, ShieldCheck, Sun } from "lucide-react";
 import { cn } from "../../lib/utils";
 import { plainClick, routePath } from "../../lib/router";
 import { LogoMark } from "../brand/logo";
@@ -30,7 +30,7 @@ import {
   useSidebar,
 } from "../ui/sidebar";
 
-export type AppView = "projects" | "containers" | "logs" | "maintenance";
+export type AppView = "projects" | "environments" | "containers" | "logs" | "maintenance";
 
 export interface AppShellProps {
   activeView: AppView;
@@ -46,6 +46,7 @@ export interface AppShellProps {
 
 const navigation: { id: AppView; label: string; icon: typeof FolderKanban }[] = [
   { id: "projects", label: t("Projects"), icon: FolderKanban },
+  { id: "environments", label: t("Feature environments"), icon: GitBranch },
   { id: "containers", label: t("Containers"), icon: Box },
   { id: "logs", label: t("Logs"), icon: Logs },
   { id: "maintenance", label: t("Maintenance"), icon: ShieldCheck },

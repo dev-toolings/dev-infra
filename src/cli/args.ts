@@ -91,6 +91,14 @@ export type ParsedCommand =
   | ({ command: "worktree"; action: "list" } & JsonOption)
   | ({ command: "worktree"; action: "add"; project: string; branch: string; expire?: number; apply: boolean } & JsonOption)
   | ({ command: "worktree"; action: "remove"; id: string; force: boolean } & JsonOption)
+  | ({ command: "env"; action: "list" | "doctor" | "reconcile" | "recipes" | "timer-install" } & JsonOption)
+  | ({ command: "env"; action: "create"; project: string; feature: string; refs: Record<string, string>; branches: Record<string, string>; build: boolean; idempotencyKey?: string } & JsonOption)
+  | ({ command: "env"; action: "status" | "stop" | "test"; id: string } & JsonOption)
+  | ({ command: "env"; action: "start"; id: string; build?: boolean; retryStep?: string } & JsonOption)
+  | ({ command: "env"; action: "preview"; id: string } & JsonOption)
+  | ({ command: "env"; action: "destroy"; id: string; purgeData: boolean; removeWorktrees: boolean; force: boolean } & JsonOption)
+  | ({ command: "env"; action: "logs"; id: string; service?: string; tail?: number } & JsonOption)
+  | ({ command: "env"; action: "exec"; id: string; service: string; timeout?: number; argv: string[] } & JsonOption)
   | ({ command: "exec"; project: string; timeout?: number; shell: string } & JsonOption)
   | ({ command: "proxy"; action: "sync" } & JsonOption)
   | { command: "mcp" }
@@ -134,6 +142,11 @@ const USAGE = [
   "      [--cursor N] [--follow]",
   "  worktree list | add PROJECT BRANCH [--expire HOURS] [--apply]",
   "      | remove ID [--force]",
+  "  env list | create PROJECT [FEATURE] [--feature FEATURE] [--base REF] [--ref NAME=REF]...",
+  "      [--branch NAME=BRANCH]... [--build] [--idempotency-key KEY]",
+  "      status|start|stop|destroy|logs|exec|test|preview ID",
+  "      start [--build] [--retry-step STEP]",
+  "      reconcile | doctor | recipes | timer-install",
   "  exec PROJECT [--timeout SECONDS] -- COMMAND...",
   "  proxy sync",
   "  mcp      MCP server on stdio, for coding agents",
@@ -193,6 +206,10 @@ const COMMAND_USAGE: Record<string, string> = {
   "project check": "Usage: devhub project check ID [--component ID,...]... [--json]",
   "project status": "Usage: devhub project status ID [--json]",
   "project logs": "Usage: devhub project logs ID [--component ID] [--limit 1..1000] [--cursor N] [--follow] [--json]",
+  env: "Usage: devhub env <list|create|status|start|stop|destroy|logs|exec|test|preview|reconcile|doctor|recipes|timer-install>",
+  "env create": "Usage: devhub env create PROJECT [FEATURE] [--feature FEATURE] [--base REF] [--ref NAME=REF]... [--branch NAME=BRANCH]... [--build] [--idempotency-key KEY] [--json]",
+  "env start": "Usage: devhub env start ID [--build] [--retry-step STEP] [--json]",
+  "env exec": "Usage: devhub env exec ID --service SERVICE [--timeout SECONDS] [--json] -- COMMAND...",
   maintenance: [
     "Usage: devhub maintenance inventory | scan IMAGE_ID | scans [SCAN_ID] | changes",
     "       devhub maintenance preview --project ID --component ID --file REL",
@@ -625,6 +642,63 @@ export function parseCliArgs(argv: string[]): ParsedCommand {
     const parsed = collectOptions(args, { force: { kind: "boolean" } });
     const [id] = exactPositionals(parsed, 1, "a worktree ID");
     return { command, action: "remove", id: id!, force: parsed.flags.has("force"), json: parsed.json };
+  }
+
+  if (command === "env") {
+    if (!rest[0] || isHelpToken(rest[0])) return makeHelp([command]);
+    const [action, ...args] = rest;
+    ensureKnownAction(command, action!, ["list", "create", "status", "start", "stop", "destroy", "logs", "exec", "test", "preview", "reconcile", "doctor", "recipes", "timer-install"]);
+    if (containsHelp(args)) return makeHelp([command, action!]);
+    if (["list", "doctor", "reconcile", "recipes", "timer-install"].includes(action!)) {
+      const parsed = collectOptions(args, {}); noPositionals(parsed);
+      return { command, action: action as "list" | "doctor" | "reconcile" | "recipes" | "timer-install", json: parsed.json };
+    }
+    if (action === "create") {
+      const parsed = collectOptions(args, { feature: { kind: "value" }, base: { kind: "value" }, ref: { kind: "value", repeat: true }, branch: { kind: "value", repeat: true }, build: { kind: "boolean" }, "idempotency-key": { kind: "value" } });
+      if (parsed.positionals.length < 1 || parsed.positionals.length > 2) usageError("Expected a project ID and optional feature name.");
+      const [project, positionalFeature] = parsed.positionals;
+      const optionFeature = stringValue(parsed, "feature");
+      if (positionalFeature !== undefined && optionFeature !== undefined) usageError("Give the feature name once, either positionally or with --feature.");
+      const feature = positionalFeature ?? optionFeature ?? usageError("A feature name is required (use --feature FEATURE).");
+      const pairs = (name: string) => {
+        const values = parsed.values.get(name);
+        const entries = values === undefined ? [] : Array.isArray(values) ? values : [values];
+        const mapped: Array<[string, string]> = [];
+        const seen = new Set<string>();
+        for (const item of entries) {
+          const at = item.indexOf("=");
+          if (at < 1 || at === item.length - 1) usageError(`--${name} takes NAME=VALUE.`);
+          const key = item.slice(0, at);
+          if (seen.has(key)) usageError(`--${name} cannot repeat a name.`);
+          seen.add(key);
+          mapped.push([key, item.slice(at + 1)]);
+        }
+        return Object.fromEntries(mapped);
+      };
+      const refs = pairs("ref"), branches = pairs("branch"), base = stringValue(parsed, "base");
+      if (base !== undefined) {
+        if (Object.hasOwn(refs, "*")) usageError("--base cannot be combined with --ref *=REF.");
+        refs["*"] = base;
+      }
+      return { command, action, project: project!, feature, refs, branches, build: parsed.flags.has("build"), idempotencyKey: stringValue(parsed, "idempotency-key"), json: parsed.json };
+    }
+    if (action === "exec") {
+      const split = args.indexOf("--");
+      if (split < 0 || split === args.length - 1) usageError("Usage: devhub env exec ID --service SERVICE -- COMMAND...");
+      const parsed = collectOptions(args.slice(0, split), { timeout: { kind: "value" }, service: { kind: "value" } });
+      const optionService = stringValue(parsed, "service");
+      const [id, positionalService] = exactPositionals(parsed, optionService === undefined ? 2 : 1, "an environment ID and a single service");
+      const timeoutSeconds = optionalInteger(parsed, "timeout", 1, 600);
+      return { command, action, id: id!, service: (optionService ?? positionalService)!, timeout: timeoutSeconds === undefined ? undefined : timeoutSeconds * 1000, argv: args.slice(split + 1), json: parsed.json };
+    }
+    const parsed = collectOptions(args, action === "destroy" ? { "purge-data": { kind: "boolean" }, "remove-worktrees": { kind: "boolean" }, force: { kind: "boolean" } } : action === "logs" ? { tail: { kind: "value" }, service: { kind: "value" } } : action === "start" ? { build: { kind: "boolean" }, "retry-step": { kind: "value" } } : {});
+    const optionService = action === "logs" ? stringValue(parsed, "service") : undefined;
+    const [id, positionalService] = exactPositionals(parsed, action === "logs" && optionService === undefined && parsed.positionals.length > 1 ? 2 : 1, action === "logs" ? "an environment ID and optional service" : "an environment ID");
+    if (action === "logs") return { command, action, id: id!, service: optionService ?? positionalService, tail: optionalInteger(parsed, "tail", 1, 1000), json: parsed.json };
+    if (action === "destroy") return { command, action, id: id!, purgeData: parsed.flags.has("purge-data"), removeWorktrees: parsed.flags.has("remove-worktrees"), force: parsed.flags.has("force"), json: parsed.json };
+    if (action === "start") return { command, action, id: id!, build: parsed.flags.has("build"), retryStep: stringValue(parsed, "retry-step"), json: parsed.json };
+    if (action === "preview") return { command, action, id: id!, json: parsed.json };
+    return { command, action: action as "status" | "stop" | "test", id: id!, json: parsed.json };
   }
 
   if (command === "exec") {

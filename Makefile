@@ -1,4 +1,4 @@
-.PHONY: help install uninstall up up-async down restart ps logs doctor dev pair db-create db-list test version release
+.PHONY: help install uninstall up up-async down restart ps logs doctor dev pair db-create db-list test feature-env-test version release
 
 DEVHUB := ./bin/devhub
 BUMP ?= patch
@@ -61,6 +61,10 @@ db-list: ## List PostgreSQL databases
 # --- Checks ---
 test: ## Run CLI Bats tests
 	@bats tests/*.bats
+
+feature-env-test: ## Run the isolated feature environment Docker scenario
+	@python3 tests/feature-environments.py
+	@python3 tests/feature-recovery.py
 
 # --- Releases ---
 version: ## Show installed version

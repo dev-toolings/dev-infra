@@ -28,6 +28,12 @@ function write(value: unknown, json: boolean, human?: string): void {
   else stdout.write(`${stable(value)}\n`);
 }
 
+function writeEnvironment(value: unknown, json: boolean, error?: { code: string; message: string }): void {
+  if (json) stdout.write(`${stable({ version: 1, ...(error ? { error } : { data: value }) })}\n`);
+  else if (error) stderr.write(`devhub: ${error.message}\n`);
+  else write(value, false);
+}
+
 function safeError(error: unknown): string {
   if (error instanceof DevHubError) return redactText(error.message);
   if (error instanceof Error) return redactText(error.message.replace(/[\r\n\u0000-\u001f]/g, " ").slice(0, 1000));
@@ -232,6 +238,41 @@ export async function runCli(argv: string[], services: AppServices, options: Cli
       write({ worktree: result.worktree, project: projectSummary(result.project), operation: result.operation, url: result.url, host: result.host }, command.json,
         ok ? `Running: ${result.url}` : `Start failed: ${redactText(result.operation.error ?? "unknown error")}\nLogs: devhub project logs ${result.project.id}`);
       return ok ? 0 : 1;
+    }
+    if (command.command === "env") {
+      const environments = services.environments;
+      if (!environments) { writeEnvironment(undefined, command.json, { code: "environments_unavailable", message: "Feature environments are unavailable" }); return 1; }
+      try {
+        let result: unknown;
+        switch (command.action) {
+          case "list": result = environments.list(); break;
+          case "recipes": result = environments.recipes(); break;
+          case "doctor": result = await environments.doctor(); break;
+          case "reconcile": result = await environments.reconcile(); break;
+          case "timer-install": result = await environments.installTimer(); break;
+          case "create": result = await environments.create({ project: command.project, feature: command.feature, ...(Object.keys(command.refs).length ? { refs: command.refs } : {}), ...(Object.keys(command.branches).length ? { branches: command.branches } : {}), ...(command.idempotencyKey ? { idempotencyKey: command.idempotencyKey } : {}), build: command.build }); break;
+          case "status": result = await environments.status(command.id); break;
+          case "start": result = await environments.start(command.id, command.build, command.retryStep); break;
+          case "stop": result = await environments.stop(command.id); break;
+          case "destroy": result = await environments.destroy(command.id, { purgeData: command.purgeData, removeWorktrees: command.removeWorktrees, force: command.force }); break;
+          case "logs": result = await environments.logs(command.id, command.service, command.tail); break;
+          case "exec": result = await environments.exec(command.id, command.service, command.argv, command.timeout); break;
+          case "test": result = await environments.test(command.id); break;
+          case "preview": result = await environments.preview(command.id); break;
+        }
+        writeEnvironment(result, command.json);
+        if (command.action === "exec" && result && typeof result === "object" && "code" in result && typeof result.code === "number") return result.code;
+        if (result && typeof result === "object" && "operation" in result) {
+          const operation = result.operation;
+          if (operation && typeof operation === "object" && "state" in operation && operation.state === "failed") return 1;
+        }
+        if (result && typeof result === "object" && "observed" in result && result.observed === "error") return 1;
+        return 0;
+      } catch (error) {
+        const message = safeError(error);
+        writeEnvironment(undefined, command.json, { code: error instanceof DevHubError ? error.code : "environment_error", message });
+        return 1;
+      }
     }
     if (command.command === "exec") {
       const result = await services.worktrees.exec(command.project, command.shell, (command.timeout ?? 120) * 1000);

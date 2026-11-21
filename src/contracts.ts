@@ -30,7 +30,7 @@ export interface ContainerInfo {
  projectId?: string; componentId?: string; composeProject?: string;
  ports: string[]; memoryBytes?: number; cpuPercent?: number;
 }
-export interface ExecOptions { cwd?: string; timeoutMs?: number; maxOutputBytes?: number; env?: Record<string,string> }
+export interface ExecOptions { cwd?: string; timeoutMs?: number; maxOutputBytes?: number; env?: Record<string,string>; environment?: "isolated" }
 export interface ExecResult { code: number; stdout: string; stderr: string }
 export type Executor = (argv: string[], options?: ExecOptions) => Promise<ExecResult>;
 export type LogStreamName = "stdout" | "stderr";
@@ -157,7 +157,7 @@ export interface WorktreesPort {
  /** Rewrites the Caddy sites of every project; `reloaded` is false when the proxy profile is not running. */
  syncProxy(): Promise<{ sites: { host: string; upstream: string }[]; reloaded: boolean }>;
 }
-export interface AppServices { catalog: CatalogPort; discovery: DiscoveryPort; operations: OperationsPort; maintenance: MaintenancePort; imports: ImportPort; create: CreatePort; versions: VersionsPort; worktrees: WorktreesPort }
+export interface AppServices { catalog: CatalogPort; discovery: DiscoveryPort; operations: OperationsPort; maintenance: MaintenancePort; imports: ImportPort; create: CreatePort; versions: VersionsPort; worktrees: WorktreesPort; environments?: import("./environments/types").EnvironmentsPort }
 export class DevHubError extends Error {
  constructor(message: string, public readonly code = "invalid", public readonly status = 400) { super(message); this.name = "DevHubError"; }
 }

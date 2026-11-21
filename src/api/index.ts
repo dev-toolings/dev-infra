@@ -100,6 +100,7 @@ function boundedString(value: unknown, max = 512): value is string {
 }
 function id(value: unknown): value is string { return typeof value === "string" && SAFE_ID.test(value); }
 function json(data: unknown, status = 200): Response { return Response.json({ data }, { status }); }
+function environmentJson(data: unknown, status = 200): Response { return Response.json({ version: 1, data }, { status }); }
 function fail(code: string, message: string, status: number): Response { return Response.json({ error: { code, message } }, { status }); }
 function safeFailure(error: unknown): Response {
   if (error instanceof DevHubError) {
@@ -296,6 +297,108 @@ export function createApp(services: AppServices, options: ApiOptions): Hono<ApiE
   });
   app.get(`${PREFIX}/presets`, (c) => json(services.discovery.presets()));
   app.get(`${PREFIX}/stacks`, () => json(services.create.stacks()));
+
+  const versionEnvironmentFailure = async (c: Context<ApiEnv>, next: () => Promise<void>) => {
+    await next();
+    if (c.res.status < 400 || !c.res.headers.get("content-type")?.startsWith("application/json")) return;
+    const payload = await c.res.json() as { error: { code: string; message: string } };
+    const headers = new Headers(c.res.headers);
+    headers.delete("content-length");
+    c.res = Response.json({ version: 1, ...payload }, { status: c.res.status, headers });
+  };
+  app.use(`${PREFIX}/environments`, versionEnvironmentFailure);
+  app.use(`${PREFIX}/environments/*`, versionEnvironmentFailure);
+  const environmentService = () => services.environments;
+  const envBody = async (c: Context<ApiEnv>, keys: string[]) => {
+    const body = await parseBody(c);
+    if (body instanceof Response) return body;
+    if (!exactKeys(body, keys)) return fail("invalid_body", "Invalid feature environment request.", 400);
+    return body;
+  };
+  const envMap = (value: unknown) => value === undefined || (isRecord(value) && Object.keys(value).length <= 64 && Object.entries(value).every(([key, item]) => boundedString(key, 128) && boundedString(item, 512)));
+  app.get(`${PREFIX}/environments`, () => {
+    const env = environmentService();
+    return env ? environmentJson(env.list()) : fail("environments_unavailable", "Feature environments are unavailable.", 503);
+  });
+  app.post(`${PREFIX}/environments`, async (c) => {
+    const env = environmentService();
+    if (!env) return fail("environments_unavailable", "Feature environments are unavailable.", 503);
+    const body = await envBody(c, ["project", "feature", "refs", "branches", "idempotencyKey", "build"]);
+    if (body instanceof Response) return body;
+    const key = c.req.header("idempotency-key") ?? body.idempotencyKey;
+    if (!id(body.project) || !boundedString(body.feature, 128) || !envMap(body.refs) || !envMap(body.branches)
+      || (body.idempotencyKey !== undefined && !boundedString(body.idempotencyKey, 128)) || (body.build !== undefined && typeof body.build !== "boolean")
+      || (key !== undefined && (!boundedString(key, 128) || !/^[A-Za-z0-9._:-]+$/.test(key)))) return fail("invalid_body", "Invalid feature environment request.", 400);
+    if (body.idempotencyKey !== undefined && c.req.header("idempotency-key") && body.idempotencyKey !== c.req.header("idempotency-key")) return fail("invalid_idempotency_key", "Conflicting idempotency keys.", 400);
+    const result = await env.create({ project: body.project, feature: body.feature, ...(body.refs ? { refs: body.refs as Record<string, string> } : {}), ...(body.branches ? { branches: body.branches as Record<string, string> } : {}), ...(key ? { idempotencyKey: key } : {}), build: body.build === true });
+    return environmentJson(result, 201);
+  });
+  app.get(`${PREFIX}/environments/recipes`, () => {
+    const env = environmentService();
+    return env ? environmentJson(env.recipes()) : fail("environments_unavailable", "Feature environments are unavailable.", 503);
+  });
+  app.post(`${PREFIX}/environments/reconcile`, async (c) => {
+    const env = environmentService(); if (!env) return fail("environments_unavailable", "Feature environments are unavailable.", 503);
+    const body = await envBody(c, []); if (body instanceof Response) return body;
+    return environmentJson(await env.reconcile());
+  });
+  app.get(`${PREFIX}/environments/doctor`, async () => {
+    const env = environmentService();
+    return env ? environmentJson(await env.doctor()) : fail("environments_unavailable", "Feature environments are unavailable.", 503);
+  });
+  app.get(`${PREFIX}/environments/:id`, async (c) => {
+    const env = environmentService(), environmentId = c.req.param("id");
+    if (!env) return fail("environments_unavailable", "Feature environments are unavailable.", 503);
+    if (!/^ef-[a-f0-9]{32}$/.test(environmentId)) return fail("invalid_id", "Invalid environment ID.", 400);
+    return environmentJson(await env.status(environmentId));
+  });
+  app.post(`${PREFIX}/environments/:id/start`, async (c) => {
+    const env = environmentService(), environmentId = c.req.param("id");
+    if (!env) return fail("environments_unavailable", "Feature environments are unavailable.", 503);
+    if (!/^ef-[a-f0-9]{32}$/.test(environmentId)) return fail("invalid_id", "Invalid environment ID.", 400);
+    const body = await envBody(c, ["build", "retryStep"]); if (body instanceof Response) return body;
+    if ((body.build !== undefined && typeof body.build !== "boolean") || (body.retryStep !== undefined && !boundedString(body.retryStep, 128))) return fail("invalid_body", "Invalid start options.", 400);
+    return environmentJson(await env.start(environmentId, body.build === true, body.retryStep as string | undefined));
+  });
+  app.post(`${PREFIX}/environments/:id/stop`, async (c) => {
+    const env = environmentService(), environmentId = c.req.param("id");
+    if (!env) return fail("environments_unavailable", "Feature environments are unavailable.", 503);
+    if (!/^ef-[a-f0-9]{32}$/.test(environmentId)) return fail("invalid_id", "Invalid environment ID.", 400);
+    const body = await envBody(c, []); if (body instanceof Response) return body;
+    return environmentJson(await env.stop(environmentId));
+  });
+  app.delete(`${PREFIX}/environments/:id`, async (c) => {
+    const env = environmentService(), environmentId = c.req.param("id");
+    if (!env) return fail("environments_unavailable", "Feature environments are unavailable.", 503);
+    if (!/^ef-[a-f0-9]{32}$/.test(environmentId)) return fail("invalid_id", "Invalid environment ID.", 400);
+    const body = await envBody(c, ["purgeData", "removeWorktrees", "force"]); if (body instanceof Response) return body;
+    if (["purgeData", "removeWorktrees", "force"].some((key) => body[key] !== undefined && typeof body[key] !== "boolean")) return fail("invalid_body", "Destroy options must be booleans.", 400);
+    return environmentJson(await env.destroy(environmentId, { purgeData: body.purgeData === true, removeWorktrees: body.removeWorktrees === true, force: body.force === true }));
+  });
+  app.get(`${PREFIX}/environments/:id/logs`, async (c) => {
+    const env = environmentService(), environmentId = c.req.param("id"), service = c.req.query("service"), tailRaw = c.req.query("tail");
+    if (!env) return fail("environments_unavailable", "Feature environments are unavailable.", 503);
+    if (!/^ef-[a-f0-9]{32}$/.test(environmentId) || (service !== undefined && !boundedString(service, 128))) return fail("invalid_query", "Invalid environment log request.", 400);
+    const tail = tailRaw === undefined ? undefined : Number(tailRaw);
+    if (tail !== undefined && (!/^[0-9]+$/.test(tailRaw!) || !Number.isInteger(tail) || tail < 1 || tail > 1000)) return fail("invalid_query", "tail must be between 1 and 1000.", 400);
+    return environmentJson(await env.logs(environmentId, service, tail));
+  });
+  app.post(`${PREFIX}/environments/:id/exec`, async (c) => {
+    const env = environmentService(), environmentId = c.req.param("id");
+    if (!env) return fail("environments_unavailable", "Feature environments are unavailable.", 503);
+    if (!/^ef-[a-f0-9]{32}$/.test(environmentId)) return fail("invalid_id", "Invalid environment ID.", 400);
+    const body = await envBody(c, ["service", "argv", "timeoutMs"]); if (body instanceof Response) return body;
+    if (!boundedString(body.service, 128) || !Array.isArray(body.argv) || body.argv.length < 1 || body.argv.length > 128 || !body.argv.every((arg) => typeof arg === "string" && arg.length <= 8000 && !arg.includes("\0"))
+      || (body.timeoutMs !== undefined && (!Number.isSafeInteger(body.timeoutMs) || Number(body.timeoutMs) < 1 || Number(body.timeoutMs) > 600_000))) return fail("invalid_body", "Invalid environment command request.", 400);
+    return environmentJson(await env.exec(environmentId, body.service, body.argv as string[], body.timeoutMs as number | undefined));
+  });
+  for (const action of ["test", "preview"] as const) app.post(`${PREFIX}/environments/:id/${action}`, async (c) => {
+    const env = environmentService(), environmentId = c.req.param("id");
+    if (!env) return fail("environments_unavailable", "Feature environments are unavailable.", 503);
+    if (!/^ef-[a-f0-9]{32}$/.test(environmentId)) return fail("invalid_id", "Invalid environment ID.", 400);
+    const body = await envBody(c, []); if (body instanceof Response) return body;
+    return environmentJson(await env[action](environmentId));
+  });
   const dockerCustom = (value: unknown) => {
     if (value === undefined) return true;
     if (!value || typeof value !== "object" || Array.isArray(value) || !exactKeys(value as RecordValue, ["image", "packages", "extensions", "dockerfile", "args", "env"])) return false;

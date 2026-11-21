@@ -1,0 +1,61 @@
+{
+  "version": 1,
+  "repositories": {
+    "frontend": { "path": "/ABSOLUTE/PATH/TO/frontend", "ref": "main" },
+    "api": { "path": "/ABSOLUTE/PATH/TO/api", "ref": "main" },
+    "deployment": { "path": "/ABSOLUTE/PATH/TO/deployment", "ref": "main" }
+  },
+  "compose": {
+    "repository": "deployment",
+    "files": [{ "repository": "deployment", "path": "compose.yml" }],
+    "profiles": [],
+    "services": ["frontend", "api", "postgres"],
+    "vars": {},
+    "secretFiles": {}
+  },
+  "routes": [
+    { "path": "/api", "service": "api", "port": 3001, "healthPath": "/api/health" },
+    { "path": "/", "service": "frontend", "port": 3000 }
+  ],
+  "steps": [
+    {
+      "id": "create-table",
+      "phase": "migrate",
+      "service": "postgres",
+      "argv": ["sh", "-c", "export PGPASSWORD=\"$POSTGRES_PASSWORD\"; until pg_isready -h 127.0.0.1 -U fixture -d fixture; do sleep 1; done; exec psql -h 127.0.0.1 -U fixture -d fixture -v ON_ERROR_STOP=1 -c 'CREATE TABLE IF NOT EXISTS feature_fixture (value text PRIMARY KEY)'"],
+      "timeoutSeconds": 60
+    },
+    {
+      "id": "seed-example",
+      "phase": "seed",
+      "service": "postgres",
+      "argv": ["psql", "-U", "fixture", "-d", "fixture", "-v", "ON_ERROR_STOP=1", "-c", "INSERT INTO feature_fixture VALUES ('example') ON CONFLICT DO NOTHING"],
+      "timeoutSeconds": 20,
+      "retry": "safe"
+    },
+    {
+      "id": "test-database",
+      "phase": "test",
+      "service": "postgres",
+      "argv": ["sh", "-c", "test \"$(psql -U fixture -d fixture -Atc 'SELECT count(*) FROM feature_fixture')\" -eq 1"],
+      "timeoutSeconds": 20
+    },
+    {
+      "id": "api-health",
+      "phase": "check",
+      "service": "api",
+      "argv": ["node", "-e", "fetch('http://127.0.0.1:3001/api/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"],
+      "timeoutSeconds": 20
+    },
+    {
+      "id": "database-ready",
+      "phase": "check",
+      "service": "postgres",
+      "argv": ["pg_isready", "-U", "fixture", "-d", "fixture"],
+      "timeoutSeconds": 20
+    }
+  ],
+  "shared": { "networks": [], "volumes": [] },
+  "resources": { "cpus": 2, "memoryMiB": 2048 },
+  "idleMinutes": 30
+}

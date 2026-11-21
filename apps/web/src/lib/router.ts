@@ -28,6 +28,7 @@ export function parseRoute(pathname: string, search = ""): Route | undefined {
     const state = CONTAINER_STATES.find((item) => item === new URLSearchParams(search).get("state"));
     return { view: "containers", containerState: state ?? DEFAULT_CONTAINER_STATE };
   }
+  if (path === "/environments") return { view: "environments" };
   if (path === "/logs") return { view: "logs" };
   if (path === "/maintenance" || path === "/maintenance/scans") return { view: "maintenance", tab: "scans" };
   if (path === "/maintenance/versions") return { view: "maintenance", tab: "versions" };

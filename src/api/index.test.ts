@@ -19,6 +19,8 @@ function setup(now = () => Date.now()) {
   const operations: Operation[] = [];
   const pendingLogs: { current?: Promise<LogEntry[]> } = {};
   const variants: Array<{ id: string; parent: string; branch: string }> = [];
+  const environmentId = `ef-${"a".repeat(32)}`;
+  const envCalls: unknown[][] = [];
   const services = {
     catalog: {
       listRoots: () => [{ id: "root", path: "/tmp/approved", label: "Approved" }],
@@ -40,11 +42,20 @@ function setup(now = () => Date.now()) {
     },
     create: { plan: async (input: object, draft?: boolean) => ({ ...input, draft }) },
     worktrees: { list: () => variants, get: (id: string) => variants.find((item) => item.id === id), remove: async (id: string, force?: boolean) => { calls.push(["worktree remove", id, force]); return { removed: id }; } },
+    environments: {
+      list: () => [{ id: environmentId, observed: "ready" }], recipes: () => [{ id: "checkout" }],
+      create: async (input: unknown) => { envCalls.push(["create", input]); return { id: environmentId, observed: "error", operation: { state: "failed", step: "test", error: { code: "step_failed", message: "test failed" } } }; },
+      status: async (id: string) => { envCalls.push(["status", id]); return { id, observed: "ready" }; },
+      start: async (...args: unknown[]) => { envCalls.push(["start", ...args]); return { id: environmentId }; }, stop: async (...args: unknown[]) => { envCalls.push(["stop", ...args]); return { id: environmentId }; },
+      destroy: async (...args: unknown[]) => { envCalls.push(["destroy", ...args]); return { id: environmentId }; }, logs: async (...args: unknown[]) => { envCalls.push(["logs", ...args]); return []; },
+      exec: async (...args: unknown[]) => { envCalls.push(["exec", ...args]); return { code: 0, stdout: "ok", stderr: "" }; }, test: async (...args: unknown[]) => { envCalls.push(["test", ...args]); return { id: environmentId }; },
+      preview: async (...args: unknown[]) => { envCalls.push(["preview", ...args]); return { url: "http://127.0.0.1:4180", port: 4180 }; }, reconcile: async () => [], doctor: async () => ({}), installTimer: async () => ({}),
+    },
     maintenance: { scan: async () => { throw new Error("not used"); }, listScans: () => [], getScan: () => { throw new Error("not used"); }, preview: async () => { throw new Error("not used"); }, apply: async () => { throw new Error("not used"); }, validate: async () => { throw new Error("not used"); }, activate: async () => { throw new Error("not used"); }, listChanges: () => [] },
   } as unknown as AppServices;
   const app = createApp(services, { stateDir, pairingCode: code, origins: ["http://127.0.0.1:8040"], hostnames: ["127.0.0.1:8040"], now });
   const request = (path: string, init: RequestInit = {}) => app.request(path, { ...init, headers: { host: "127.0.0.1:8040", ...init.headers as Record<string, string> } });
-  return { app, code, calls, follow, operations, pendingLogs, request, stateDir, variants };
+  return { app, code, calls, follow, operations, pendingLogs, request, stateDir, variants, environmentId, envCalls };
 }
 
 async function paired(context: ReturnType<typeof setup>) {
@@ -94,6 +105,28 @@ describe("local API authentication", () => {
     expect((await response.json()).error.message).toContain("Remove the worktrees of sample first");
   });
 
+  test("creates and reads feature environments through versioned authenticated responses", async () => {
+    const context = setup();
+    const { auth } = await paired(context);
+    const created = await context.request("/api/v1/environments", { method: "POST", headers: auth, body: JSON.stringify({ project: "sample", feature: "checkout", refs: { "*": "main", api: "feature/api" }, branches: { web: "checkout-web" }, build: true, idempotencyKey: "req-1" }) });
+    expect(created.status).toBe(201);
+    expect(await created.json()).toEqual({ version: 1, data: { id: context.environmentId, observed: "error", operation: { state: "failed", step: "test", error: { code: "step_failed", message: "test failed" } } } });
+    expect(context.envCalls).toContainEqual(["create", { project: "sample", feature: "checkout", refs: { "*": "main", api: "feature/api" }, branches: { web: "checkout-web" }, idempotencyKey: "req-1", build: true }]);
+    const status = await context.request(`/api/v1/environments/${context.environmentId}`, { headers: auth });
+    expect(await status.json()).toEqual({ version: 1, data: { id: context.environmentId, observed: "ready" } });
+    const started = await context.request(`/api/v1/environments/${context.environmentId}/start`, { method: "POST", headers: auth, body: JSON.stringify({ build: true, retryStep: "migrate" }) });
+    expect(started.status).toBe(200);
+    expect(context.envCalls).toContainEqual(["start", context.environmentId, true, "migrate"]);
+    const command = await context.request(`/api/v1/environments/${context.environmentId}/exec`, { method: "POST", headers: auth, body: JSON.stringify({ service: "api", argv: ["bun", "test"], timeoutMs: 5000 }) });
+    expect(await command.json()).toEqual({ version: 1, data: { code: 0, stdout: "ok", stderr: "" } });
+    expect(context.envCalls).toContainEqual(["exec", context.environmentId, "api", ["bun", "test"], 5000]);
+    const destroyed = await context.request(`/api/v1/environments/${context.environmentId}`, { method: "DELETE", headers: auth, body: JSON.stringify({ purgeData: true, removeWorktrees: true, force: true }) });
+    expect(destroyed.status).toBe(200);
+    expect(context.envCalls).toContainEqual(["destroy", context.environmentId, { purgeData: true, removeWorktrees: true, force: true }]);
+    const invalid = await context.request("/api/v1/environments", { method: "POST", headers: auth, body: JSON.stringify({ project: "sample", feature: "checkout", refs: ["main"] }) });
+    expect(invalid.status).toBe(400);
+  });
+
   test("requires a session on read and mutation routes, then pairs once and revokes on logout", async () => {
     const context = setup();
     const protectedRoutes: Array<[string, string]> = [
@@ -103,6 +136,7 @@ describe("local API authentication", () => {
       ["/api/v1/projects/sample/logs", "GET"], ["/api/v1/operations/op1", "GET"], ["/api/v1/containers", "GET"], ["/api/v1/scans", "GET"],
       ["/api/v1/scans", "POST"], ["/api/v1/scans/scan1", "GET"], ["/api/v1/remediation", "GET"],
       ["/api/v1/remediation/preview", "POST"], ["/api/v1/remediation/apply", "POST"],
+      ["/api/v1/environments", "GET"], ["/api/v1/environments", "POST"], ["/api/v1/environments/ef-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "GET"],
     ];
     for (const [path, method] of protectedRoutes) {
       const response = await context.request(path, { method, headers: { origin: "http://127.0.0.1:8040", "content-type": "application/json" }, body: method === "GET" ? undefined : "{}" });

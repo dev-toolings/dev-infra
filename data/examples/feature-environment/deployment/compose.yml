@@ -1,0 +1,46 @@
+services:
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+    networks: [feature]
+
+  api:
+    build:
+      context: ../api
+      dockerfile: Dockerfile
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/api/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+    networks: [feature]
+
+  postgres:
+    image: postgres:16-alpine
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_DB: fixture
+      POSTGRES_USER: fixture
+      POSTGRES_PASSWORD: fixture-only
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fixture -d fixture"]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+    networks: [feature]
+
+networks:
+  feature: {}
+
+volumes:
+  postgres-data:
+    name: fixture-postgres-data

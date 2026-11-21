@@ -20,6 +20,7 @@ import {
   AppShell,
   ContainersView,
   CreateProjectView,
+  EnvironmentsView,
   VersionsView,
   LogsView,
   ProjectBreadcrumb,
@@ -36,6 +37,7 @@ const CONTAINERS_REFRESH_MS = 10_000;
 
 const viewCopy: Record<AppView, { title: string; description: string }> = {
   projects: { title: t("Projects"), description: t("Registered projects, their components and current status.") },
+  environments: { title: t("Feature environments"), description: t("Isolated worktrees and services for feature work.") },
   containers: { title: t("Containers"), description: t("Docker containers observed on this machine.") },
   logs: { title: t("Logs"), description: t("Live merged output for one project.") },
   maintenance: { title: t("Maintenance"), description: t("Image scans and reviewed image reference changes.") },
@@ -219,6 +221,8 @@ export function Workspace({ onLogout }: WorkspaceProps) {
           onSelectComponent={openProject}
         />
       ) : null}
+
+      {view === "environments" ? <EnvironmentsView /> : null}
 
       {view === "logs" ? (
         <div className="flex min-w-0 flex-1 flex-col gap-4">

@@ -124,10 +124,44 @@ const id = encodeURIComponent;
 
 export interface SessionState { authenticated: boolean }
 
+export type EnvironmentObserved = "creating" | "starting" | "ready" | "degraded" | "error" | "stopping" | "stopped" | "destroying" | "destroyed";
+export interface EnvironmentRecipeSummary { id: string }
+export interface FeatureEnvironment {
+  id: string;
+  project: string;
+  feature: string;
+  observed: EnvironmentObserved;
+  desired: "running" | "stopped" | "destroyed";
+  observationError?: { code: string; message: string };
+  preview?: { url: string; port: number; domainUrl?: string; tunnel?: { remoteHost: string; remotePort: number } };
+  operation?: { step: string; error?: { code: string; message: string } };
+  configuration?: { services?: string[] };
+  resources?: { containers?: { id: string; name: string; service: string; state: string; health?: string }[] };
+  [key: string]: unknown;
+}
+
+export interface CreateEnvironmentInput {
+  project: string;
+  feature: string;
+  refs?: Record<string, string>;
+  branches?: Record<string, string>;
+  idempotencyKey?: string;
+  build?: boolean;
+}
+
 export const getSession = (signal?: AbortSignal) => request<SessionState>("GET", "/session", { signal });
 export const pair = (code: string, signal?: AbortSignal) =>
   request<SessionState>("POST", "/pair", { body: { code }, signal, ignoreUnauthorized: true });
 export const logout = (signal?: AbortSignal) => request<SessionState>("POST", "/logout", { signal });
+
+export const listEnvironments = (signal?: AbortSignal) => request<FeatureEnvironment[]>("GET", "/environments", { signal });
+export const listEnvironmentRecipes = (signal?: AbortSignal) => request<EnvironmentRecipeSummary[]>("GET", "/environments/recipes", { signal });
+export const getEnvironment = (environmentId: string, signal?: AbortSignal) => request<FeatureEnvironment>("GET", `/environments/${id(environmentId)}`, { signal });
+export const previewEnvironment = (environmentId: string, signal?: AbortSignal) => request<NonNullable<FeatureEnvironment["preview"]>>("POST", `/environments/${id(environmentId)}/preview`, { signal });
+export const createEnvironment = (input: CreateEnvironmentInput, signal?: AbortSignal) => request<FeatureEnvironment>("POST", "/environments", { body: input, signal });
+export const startEnvironment = (environmentId: string, build?: boolean, signal?: AbortSignal) => request<FeatureEnvironment>("POST", `/environments/${id(environmentId)}/start`, { body: build === undefined ? {} : { build }, signal });
+export const stopEnvironment = (environmentId: string, signal?: AbortSignal) => request<FeatureEnvironment>("POST", `/environments/${id(environmentId)}/stop`, { signal });
+export const removeEnvironment = (environmentId: string, signal?: AbortSignal) => request<FeatureEnvironment>("DELETE", `/environments/${id(environmentId)}`, { body: {}, signal });
 
 export const listRoots = (signal?: AbortSignal) => request<Root[]>("GET", "/roots", { signal });
 export const addRoot = (path: string, signal?: AbortSignal) => request<Root>("POST", "/roots", { body: { path }, signal });

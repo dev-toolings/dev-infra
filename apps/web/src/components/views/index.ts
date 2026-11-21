@@ -6,6 +6,7 @@ export { CreateProjectView } from "./create-project";
 export { VersionsView } from "./versions-view";
 export { ContainersView } from "./containers-view";
 export type { ContainersViewProps } from "./containers-view";
+export { EnvironmentsView } from "./environments-view";
 export { LogsView } from "./logs-view";
 export type { LogsViewProps } from "./logs-view";
 export { PairingForm } from "./pairing-form";

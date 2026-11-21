@@ -29,6 +29,11 @@ a project in Docker or native mode and starts it. See
 dev container, with its own database, network and port. See
 [docs/devhub.md](docs/devhub.md#import-a-hono-project).
 
+`devhub env create PROJECT --feature NAME` starts a feature environment from a
+versioned recipe. A feature owns its Git worktrees, Compose project and data.
+The CLI, loopback API and panel expose lifecycle actions. See the
+[Ubuntu setup, preview and Escape API guide](docs/feature-environments.md).
+
 The project manager keeps existing repositories where they are. You approve
 workspace folders, register a project and describe its components. A project can
 combine a Docker backend with a native frontend, or use an existing Compose
@@ -198,6 +203,7 @@ devhub db create myapp  # create a PostgreSQL database + role
 | `devhub project discover\|add\|list\|show\|remove` | Detect and register projects in place |
 | `devhub project start\|stop\|restart\|check\|status\|logs <id>` | Project lifecycle, status and merged logs |
 | `devhub worktree list\|add <project> <branch> [--expire HOURS] [--apply]\|remove <id> [--force]` | Run a branch of a Docker project beside it, with its own port and a copy of its database |
+| `devhub env create\|list\|status\|start\|stop\|destroy` | Feature environments, previews and retained Git and Docker resources |
 | `devhub exec <project> [--timeout S] -- <command>` | Run a command in the app container of a Docker project |
 | `devhub proxy sync` | Write the Caddy sites of every project and reload Caddy |
 | `devhub mcp` | MCP server on stdio for coding agents: projects, worktrees, logs, exec |

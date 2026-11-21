@@ -40,7 +40,12 @@ const MAX_FOLLOW_LINE = 64 * 1024;
 
 function commandEnvironment(options: Parameters<Executor>[1]): Record<string, string> {
   const env: Record<string, string> = {};
-  for (const key of inherited) if (process.env[key] !== undefined) env[key] = process.env[key]!;
+  if (options?.environment === "isolated") {
+    env.PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
+    env.LANG = "C.UTF-8";
+  } else {
+    for (const key of inherited) if (process.env[key] !== undefined) env[key] = process.env[key]!;
+  }
 
   for (const [key, value] of Object.entries(options?.env ?? {})) {
     if (typeof value !== "string" || key.includes("\0") || value.includes("\0")) {

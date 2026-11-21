@@ -6,6 +6,7 @@ import { parseCliArgs } from "./cli/args";
 import { guardExecutor } from "./guard";
 import { SharedServices } from "./services/index";
 import { Worktrees } from "./worktrees/index";
+import { Environments } from "./environments/index";
 import { terminateChildren } from "./runtime/executor";
 import type { AppServices, CatalogPort, CreatePort, DiscoveryPort, ImportPort, RuntimePort, OperationsPort, MaintenancePort, SharedServicesPort, VersionsPort, Executor } from "./contracts";
 
@@ -47,7 +48,8 @@ export function composeServices(modules: ManagerModules, executor: Executor, sta
   const create = new modules.Creator({ catalog, discovery, imports, operations, services: shared, run, infraDir });
   const versions = new modules.Versions({ run, stateDir, infraDir });
   const worktrees = new Worktrees({ catalog, discovery, operations, services: shared, run, stateDir, infraDir });
-  return { catalog, discovery, operations, maintenance, imports, create, versions, worktrees };
+  const environments = new Environments({ catalog, run: executor, stateDir, infraDir });
+  return { catalog, discovery, operations, maintenance, imports, create, versions, worktrees, environments };
 }
 export async function services(stateDir = stateDirectory(), reservedPorts = CONTROLLER_PORTS): Promise<AppServices> {
   const [catalogModule, discoveryModule, runtimeModule, operationsModule, securityModule, importsModule, createModule, versionsModule] = await Promise.all(["catalog", "discovery", "runtime", "operations", "security", "imports", "create", "versions"].map(moduleAt));
@@ -169,7 +171,13 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
   if (argv[0] !== "serve" && argv[0] !== "pair") {
     let parsed: ReturnType<typeof parseCliArgs>;
     try { parsed = parseCliArgs(argv); }
-    catch (error) { process.stderr.write(`devhub: ${error instanceof Error ? error.message : "Invalid command"}\n`); return 2; }
+    catch (error) {
+      const message = error instanceof Error ? error.message : "Invalid command";
+      if (argv[0] === "env" && argv.slice(0, argv.includes("--") ? argv.indexOf("--") : undefined).includes("--json")) {
+        process.stdout.write(JSON.stringify({ version: 1, error: { code: "invalid_arguments", message } }) + "\n");
+      } else process.stderr.write(`devhub: ${message}\n`);
+      return 2;
+    }
     if (parsed.command === "help") { process.stdout.write(`${parsed.text}\n`); return 0; }
   }
   const serveOptions = argv[0] === "serve" ? parseServeOptions(argv.slice(1)) : undefined;

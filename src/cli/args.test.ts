@@ -239,3 +239,19 @@ test("worktree, exec, proxy and mcp commands parse", () => {
   expect(parseCliArgs(["proxy", "sync"])).toEqual({ command: "proxy", action: "sync", json: false });
   expect(parseCliArgs(["mcp"])).toEqual({ command: "mcp" });
 });
+
+test("environment CLI parses feature refs, attached branches, and bounded operations", () => {
+  expect(parseCliArgs(["env", "exec", "ef-demo", "--service", "api", "--json", "--", "printenv", "--quiet"])).toEqual({ command: "env", action: "exec", id: "ef-demo", service: "api", timeout: undefined, argv: ["printenv", "--quiet"], json: true });
+  expect(parseCliArgs(["env", "logs", "ef-demo", "--service", "api", "--tail", "25"])).toEqual({ command: "env", action: "logs", id: "ef-demo", service: "api", tail: 25, json: false });
+  expect(parseCliArgs(["env", "create", "shop", "checkout", "--base", "main", "--ref", "api=refs/heads/api", "--branch", "web=feature/web", "--build", "--idempotency-key", "retry-1", "--json"])).toEqual({
+    command: "env", action: "create", project: "shop", feature: "checkout", refs: { "*": "main", api: "refs/heads/api" }, branches: { web: "feature/web" }, build: true, idempotencyKey: "retry-1", json: true,
+  });
+  expect(parseCliArgs(["env", "exec", "ef-123", "api", "--timeout", "15", "--", "bun", "test", "--run"])).toEqual({ command: "env", action: "exec", id: "ef-123", service: "api", timeout: 15_000, argv: ["bun", "test", "--run"], json: false });
+  expect(parseCliArgs(["env", "destroy", "ef-123", "--purge-data", "--remove-worktrees", "--force"])).toMatchObject({ action: "destroy", purgeData: true, removeWorktrees: true, force: true });
+  expect(parseCliArgs(["env", "logs", "ef-123", "api", "--tail", "200"])).toMatchObject({ action: "logs", id: "ef-123", service: "api", tail: 200 });
+  expect(parseCliArgs(["env", "start", "ef-123", "--build", "--retry-step", "migrate"])).toMatchObject({ action: "start", id: "ef-123", build: true, retryStep: "migrate" });
+  expect(parseCliArgs(["env", "timer-install"])).toEqual({ command: "env", action: "timer-install", json: false });
+  expect(parseCliArgs(["env", "create", "shop", "--feature", "checkout"])).toMatchObject({ project: "shop", feature: "checkout" });
+  expect(() => parseCliArgs(["env", "exec", "ef-123", "api", "--timeout", "0", "--", "echo", "x"])).toThrow("between 1 and 600");
+  expect(() => parseCliArgs(["env", "create", "shop", "checkout", "--ref", "invalid"])).toThrow("NAME=VALUE");
+});

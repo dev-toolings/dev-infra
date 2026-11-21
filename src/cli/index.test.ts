@@ -20,6 +20,7 @@ function fixture() {
   const roots = new Map<string, { id: string; path: string; label: string }>();
   const projects = new Map<string, Project>([[project.id, structuredClone(project)]]);
   const plan = { id: "plan-1", project: { id: "new", name: "New", root: "/tmp/new", components: [component] }, files: [], warnings: [], createdAt: "2026-01-01T00:00:00.000Z" };
+  const environment = { id: `ef-${"a".repeat(32)}`, project: "shop", feature: "checkout", observed: "error", operation: { state: "failed", step: "test", error: { code: "test_failed", message: "test did not pass" } } };
   let operationState: "succeeded" | "failed" = "succeeded";
   let scanState: "succeeded" | "failed" = "succeeded";
   const services = {
@@ -46,6 +47,12 @@ function fixture() {
       inventory: async () => [], submit: () => { throw new Error("unused"); }, getOperation: () => { throw new Error("unused"); }, listOperations: () => [],
     },
     worktrees: { list: () => [], get: () => undefined },
+    environments: {
+      list: () => [environment], recipes: () => [{ id: "checkout" }], create: async () => environment, status: async () => environment,
+      start: async () => environment, stop: async () => environment, destroy: async () => environment, logs: async () => [],
+      exec: async () => ({ code: 3, stdout: "", stderr: "command failed" }), test: async () => environment, preview: async () => ({ url: "http://127.0.0.1:4180" }),
+      reconcile: async () => [environment], doctor: async () => ({ provider: "docker-compose" }), installTimer: async () => ({ installed: true }),
+    },
     maintenance: {
       scan: async (imageId: string) => ({ id: "scan-1", imageId, state: scanState, scannedAt: plan.createdAt, scanner: "fixture", findings: [] }),
       listScans: () => [], getScan: (id: string) => ({ id, imageId: "sha256:local", state: "succeeded" as const, scannedAt: plan.createdAt, scanner: "fixture", findings: [] }), preview: async () => ({ id: "change-1", projectId: "shop", componentId: "web", file: "Dockerfile", sourceHash: "h", original: "FROM old", proposed: "FROM new", replacement: "new", state: "preview" as const, createdAt: plan.createdAt }),
@@ -54,7 +61,7 @@ function fixture() {
       activate: async () => ({ id: "change-1", projectId: "shop", componentId: "web", file: "Dockerfile", sourceHash: "h", original: "FROM old", proposed: "FROM new", replacement: "new", state: "activated" as const, createdAt: plan.createdAt }), listChanges: () => [],
     },
   } as unknown as AppServices;
-  return { services, setOperationState: (value: "succeeded" | "failed") => { operationState = value; }, setScanState: (value: "succeeded" | "failed") => { scanState = value; } };
+  return { services, environment, setOperationState: (value: "succeeded" | "failed") => { operationState = value; }, setScanState: (value: "succeeded" | "failed") => { scanState = value; } };
 }
 
 const options = { stateDir: "/tmp/state", infraDir: "/tmp/devhub", run: async () => ({ code: 0, stdout: "", stderr: "" }) };
@@ -108,6 +115,16 @@ describe("runCli", () => {
     expect(await runCli(["project", "start", "shop"], services, options)).toBe(1);
     setScanState("failed");
     expect(await runCli(["maintenance", "scan", "sha256:bad"], services, options)).toBe(1);
+  });
+
+  it("returns versioned environment data and preserves failed create identity", async () => {
+    capture(); const { services, environment } = fixture();
+    expect(await runCli(["env", "create", "shop", "checkout", "--json"], services, options)).toBe(1);
+    const response = JSON.parse(output);
+    expect(response).toMatchObject({ version: 1, data: { id: environment.id, operation: { state: "failed", error: { code: "test_failed" } } } });
+    output = "";
+    expect(await runCli(["env", "exec", environment.id, "api", "--json", "--", "false"], services, options)).toBe(3);
+    expect(JSON.parse(output)).toMatchObject({ version: 1, data: { code: 3, stderr: "command failed" } });
   });
 
   it("returns a human-readable error and nonzero for invalid commands", async () => {
