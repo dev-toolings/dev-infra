@@ -184,8 +184,6 @@ export const createProject = (planId: string, signal?: AbortSignal) =>
 export const listProjects = (signal?: AbortSignal) => request<PublicProject[]>("GET", "/projects", { signal });
 export const removeProject = (projectId: string, signal?: AbortSignal) =>
   request<{ removed: boolean }>("DELETE", `/projects/${id(projectId)}`, { signal });
-export const removeWorktree = (worktreeId: string, force: boolean, signal?: AbortSignal) =>
-  request<{ removed: string; keptVolume?: string }>("DELETE", `/worktrees/${id(worktreeId)}`, { body: { force }, signal });
 export const getProjectStatus = (projectId: string, signal?: AbortSignal) =>
   request<ProjectStatus>("GET", `/projects/${id(projectId)}/status`, { signal });
 export const listProjectOperations = (projectId: string, signal?: AbortSignal) =>

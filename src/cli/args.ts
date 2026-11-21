@@ -88,9 +88,6 @@ export type ParsedCommand =
       action: "apply" | "validate" | "activate";
       changeId: string;
     } & JsonOption)
-  | ({ command: "worktree"; action: "list" } & JsonOption)
-  | ({ command: "worktree"; action: "add"; project: string; branch: string; expire?: number; apply: boolean } & JsonOption)
-  | ({ command: "worktree"; action: "remove"; id: string; force: boolean } & JsonOption)
   | ({ command: "env"; action: "list" | "doctor" | "reconcile" | "recipes" | "timer-install" } & JsonOption)
   | ({ command: "env"; action: "create"; project: string; feature: string; refs: Record<string, string>; branches: Record<string, string>; build: boolean; idempotencyKey?: string } & JsonOption)
   | ({ command: "env"; action: "status" | "stop" | "test"; id: string } & JsonOption)
@@ -140,8 +137,6 @@ const USAGE = [
   "  project remove ID | status ID | start|stop|restart|check ID",
   "      [--component ID,...]... | logs ID [--component ID] [--limit N]",
   "      [--cursor N] [--follow]",
-  "  worktree list | add PROJECT BRANCH [--expire HOURS] [--apply]",
-  "      | remove ID [--force]",
   "  env list | create PROJECT [FEATURE] [--feature FEATURE] [--base REF] [--ref NAME=REF]...",
   "      [--branch NAME=BRANCH]... [--build] [--idempotency-key KEY]",
   "      status|start|stop|destroy|logs|exec|test|preview ID",
@@ -627,21 +622,6 @@ export function parseCliArgs(argv: string[]): ParsedCommand {
     const services = picked.map(([service]) => service!);
     const versions = Object.fromEntries(picked.filter(([, version]) => version).map(([service, version]) => [service!, version!]));
     return { command: "new", stack: stack!, name: name!, root, mode, options, services, versions, git: !parsed.flags.has("no-git"), apply: parsed.flags.has("apply"), json: parsed.json };
-  }
-
-  if (command === "worktree") {
-    const [action, ...args] = rest;
-    if (!action || isHelpToken(action)) return makeHelp([command]);
-    ensureKnownAction(command, action, ["list", "add", "remove"]);
-    if (action === "list") { const parsed = collectOptions(args, {}); noPositionals(parsed); return { command, action, json: parsed.json }; }
-    if (action === "add") {
-      const parsed = collectOptions(args, { expire: { kind: "value" }, apply: { kind: "boolean" } });
-      const [project, branch] = exactPositionals(parsed, 2, "a project ID and a branch");
-      return { command, action, project: project!, branch: branch!, expire: optionalInteger(parsed, "expire", 1, 2160), apply: parsed.flags.has("apply"), json: parsed.json };
-    }
-    const parsed = collectOptions(args, { force: { kind: "boolean" } });
-    const [id] = exactPositionals(parsed, 1, "a worktree ID");
-    return { command, action: "remove", id: id!, force: parsed.flags.has("force"), json: parsed.json };
   }
 
   if (command === "env") {

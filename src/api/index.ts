@@ -448,26 +448,13 @@ export function createApp(services: AppServices, options: ApiOptions): Hono<ApiE
     if (!exactKeys(body, ["planId"]) || !id(body.planId)) return fail("invalid_body", "A setup plan ID is required.", 400);
     return json(publicProject(await services.discovery.apply(body.planId)), 201);
   });
-  app.get(`${PREFIX}/projects`, (c) => {
-    const variants = new Map(services.worktrees.list().map((item) => [item.id, { parent: item.parent, branch: item.branch }]));
-    return json(services.catalog.listProjects().map((project) => ({ ...publicProject(project), ...(variants.has(project.id) ? { worktree: variants.get(project.id) } : {}) })));
-  });
+  app.get(`${PREFIX}/projects`, () => json(services.catalog.listProjects().map(publicProject)));
   app.delete(`${PREFIX}/projects/:id`, async (c) => {
     const projectId = c.req.param("id"); if (!id(projectId)) return fail("invalid_id", "Invalid project ID.", 400);
     const active = services.operations.listOperations(projectId).some((operation) => operation.state === "queued" || operation.state === "running");
     if (active) return fail("operation_active", "Project has an active operation.", 409);
-    if (services.worktrees.get(projectId)) return fail("worktree", `Remove a worktree with devhub worktree remove ${projectId}: it also drops its database and folder.`, 409);
-    if (services.worktrees.list().some((item) => item.parent === projectId)) return fail("worktree", `Remove the worktrees of ${projectId} first with devhub worktree remove: they need it to clean up.`, 409);
+    if (services.environments?.list().some((item) => item.project === projectId && item.desired !== "destroyed")) return fail("features", `Destroy the features of ${projectId} first: they start from it.`, 409);
     services.catalog.removeProject(projectId); return json({ removed: true });
-  });
-  // Same cleanup as devhub worktree remove: containers, network, folder, then database. The branch stays.
-  app.delete(`${PREFIX}/worktrees/:id`, async (c) => {
-    const worktreeId = c.req.param("id"); if (!id(worktreeId)) return fail("invalid_id", "Invalid worktree ID.", 400);
-    const body = await parseBody(c); if (body instanceof Response) return body;
-    if (!exactKeys(body, ["force"]) || (body.force !== undefined && typeof body.force !== "boolean")) return fail("invalid_body", "force must be a boolean.", 400);
-    const active = services.operations.listOperations(worktreeId).some((operation) => operation.state === "queued" || operation.state === "running");
-    if (active) return fail("operation_active", "Project has an active operation.", 409);
-    return json(await services.worktrees.remove(worktreeId, body.force === true));
   });
   app.get(`${PREFIX}/projects/:id/status`, async (c) => {
     if (!id(c.req.param("id"))) return fail("invalid_id", "Invalid project ID.", 400);

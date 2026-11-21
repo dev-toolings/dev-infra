@@ -144,26 +144,19 @@ export interface VersionReport { checkedAt: string; items: VersionItem[] }
 /** Lifecycle and advisories of every version DevHub pins, from `tools/versionwatch`. */
 export interface VersionsPort { latest(): VersionReport | undefined; check(): Promise<VersionReport> }
 /** A branch of a project checked out next to it, running as a project of its own. */
-export interface Worktree { id: string; parent: string; branch: string; slug: string; path: string; createdAt: string; activeAt: string; expiresAt?: string }
-export interface WorktreePlan { id: string; parent: string; branch: string; slug: string; path: string; url: string; host: string; newBranch: boolean; database?: string; expiresAt?: string }
-export interface WorktreeResult { worktree: Worktree; project: Project; operation: Operation; url: string; host: string }
-export interface WorktreesPort {
- list(): Worktree[]; get(id: string): Worktree | undefined;
- plan(projectId: string, branch: string, expireHours?: number): Promise<WorktreePlan>; add(plan: WorktreePlan): Promise<WorktreeResult>;
- remove(id: string, force?: boolean): Promise<{ removed: string; keptVolume?: string }>;
+export interface ProjectToolsPort {
  /** Runs in the app container of a project DevHub runs in Docker. */
  exec(projectId: string, command: string, timeoutMs?: number): Promise<ExecResult>;
- sweep(now?: number): Promise<{ stopped: string[]; removed: string[] }>;
  /** Rewrites the Caddy sites of every project; `reloaded` is false when the proxy profile is not running. */
  syncProxy(): Promise<{ sites: { host: string; upstream: string }[]; reloaded: boolean }>;
 }
-export interface AppServices { catalog: CatalogPort; discovery: DiscoveryPort; operations: OperationsPort; maintenance: MaintenancePort; imports: ImportPort; create: CreatePort; versions: VersionsPort; worktrees: WorktreesPort; environments?: import("./environments/types").EnvironmentsPort }
+export interface AppServices { catalog: CatalogPort; discovery: DiscoveryPort; operations: OperationsPort; maintenance: MaintenancePort; imports: ImportPort; create: CreatePort; versions: VersionsPort; projects: ProjectToolsPort; environments?: import("./environments/types").EnvironmentsPort }
 export class DevHubError extends Error {
  constructor(message: string, public readonly code = "invalid", public readonly status = 400) { super(message); this.name = "DevHubError"; }
 }
 
 export type PublicComponent = Pick<Component,"id"|"name"|"kind"|"cwd"|"compose"|"dependsOn"|"url"|"health"|"limits">;
-export type PublicProject = Omit<Project,"components"> & { components: PublicComponent[]; /** Set on a worktree: the project it was checked out from. */ worktree?: { parent: string; branch: string } };
+export type PublicProject = Omit<Project,"components"> & { components: PublicComponent[]; };
 
 export interface ApiSuccess<T> { data: T }
 export interface ApiError { error: { code: string; message: string } }

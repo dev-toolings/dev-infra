@@ -1,6 +1,6 @@
 import { t } from "./lib/i18n";
 import * as React from "react";
-import { getProjectStatus, listContainers, listProjectOperations, listProjects, removeProject, removeWorktree } from "./lib/api";
+import { getProjectStatus, listContainers, listProjectOperations, listProjects, removeProject } from "./lib/api";
 import { useAddProject } from "./lib/use-add-project";
 import { useLifecycle } from "./lib/use-lifecycle";
 import { useLifetime } from "./lib/use-lifetime";
@@ -132,16 +132,6 @@ export function Workspace({ onLogout }: WorkspaceProps) {
     projects.reload();
   }
 
-  async function deleteWorktree(worktreeId: string, force: boolean) {
-    try {
-      await removeWorktree(worktreeId, force, lifetime());
-      projects.update((current) => (current ?? []).filter((item) => item.id !== worktreeId));
-    } finally {
-      // A removal that failed midway may already have deleted the folder or the registration.
-      projects.reload();
-    }
-  }
-
   const projectActions = (
     <>
       <Button type="button" variant="outline" onClick={addProject.requestOpen}>{t("Add existing")}</Button>
@@ -206,7 +196,6 @@ export function Workspace({ onLogout }: WorkspaceProps) {
           actions={projectActions}
           onSelect={openProject}
           onRemove={unregisterProject}
-          onRemoveWorktree={deleteWorktree}
         />
       ) : null}
 

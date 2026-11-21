@@ -31,7 +31,7 @@ A project DevHub runs in Docker (created with `devhub new` or `devhub import`) n
 - The feature gets a worktree of the project, started from its current `HEAD` unless `--base` says otherwise. A new project needs a first commit.
 - It runs the project's app container with its own image, dependencies volume and env file, on the `shared` level: it joins the project network to reach the shared services it already uses.
 - Postgres data is copied into a private database and role named after the feature (`dh_ef_...`). `destroy --purge-data` drops them; a plain `destroy` keeps them and lists them as `database`. The project database is never touched. MySQL and MariaDB projects are refused.
-- `REDIS_PREFIX`, `MEILISEARCH_INDEX_PREFIX` and the app URL point to the feature. The app URL becomes `http://<feature>-<id>.<project>.localhost`.
+- `REDIS_PREFIX`, `MEILISEARCH_INDEX_PREFIX` and the app URL point to the feature. The app URL becomes `http://<feature>-<id>.<project>.localhost`, which answers once the proxy runs (`devhub up --with proxy`); the loopback `preview.url` works without it.
 - Each service gets 2 CPUs and 2,048 MiB, and stops after 24 hours without activity.
 
 `python3 tests/feature-project.py` checks this on real Docker: it needs `infra-postgres` running and creates, then removes, a throwaway project.

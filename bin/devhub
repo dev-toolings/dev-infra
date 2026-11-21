@@ -266,7 +266,6 @@ Commands:
   versions                            Check pinned versions for end of life and CVEs (needs Go)
   env create|list|status|start|stop|destroy  Isolated Compose environments per feature
   env --help                          Idempotency, preview, logs, exec, test, reconcile and JSON
-  worktree list|add|remove            Run a branch of a Docker project beside it, for a parallel agent
   exec <project> -- <command>         Run a command in the app container of a Docker project
   proxy sync                          Give every project a http://<project>.localhost name (profile proxy)
   mcp                                 MCP server on stdio for coding agents
@@ -299,7 +298,7 @@ main() {
       command -v bun >/dev/null 2>&1 || { echo "Bun is required for 'env'." >&2; exit 1; }
       exec bun --no-env-file "$DEVHUB_CHECKOUT_DIR/src/main.ts" "$cmd" "$@"
       ;;
-    root|project|import|new|maintenance|security|setup|serve|pair|presets|versions|worktree|exec|proxy|mcp)
+    root|project|import|new|maintenance|security|setup|serve|pair|presets|versions|exec|proxy|mcp)
       command -v bun >/dev/null 2>&1 || { echo "Bun is required for '$cmd'. Install it for your user with: curl -fsSL https://bun.sh/install | bash" >&2; exit 1; }
       exec bun "$DEVHUB_CHECKOUT_DIR/src/main.ts" "$cmd" "$@"
       ;;

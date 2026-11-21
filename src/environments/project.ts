@@ -7,6 +7,7 @@ import { databaseName } from "../imports";
 import { proxyHost } from "../proxy";
 import { managedEntry } from "../runtime/mounts";
 import { connectProjectNetwork, projectNetwork } from "../services";
+import { previewHost } from "./docker";
 import type { Environment, Recipe } from "./types";
 
 type Options = { catalog: CatalogPort; services?: SharedServicesPort; run: Executor; stateDir: string; infraDir: string };
@@ -25,8 +26,9 @@ function managedComponent(project: Project): Component | undefined {
   return project.components.length === 1 && component?.compose?.managed ? component : undefined;
 }
 
-/** The short ID keeps two features with the same name apart. */
-export const featureHost = (env: Pick<Environment, "id" | "slug">, project: string) => proxyHost(`${env.slug}-${env.id.slice(3, 9)}.${project}`);
+/** A feature of a DevHub project answers on <feature>-<id>.<project>.localhost when the proxy profile runs. */
+const projectDomain = (project: string) => proxyHost(project);
+export const featureHost = (env: Pick<Environment, "id" | "slug">, project: string) => previewHost(env, projectDomain(project));
 
 /** A project DevHub runs in Docker becomes a one-repository recipe on the shared isolation level. */
 export function projectRecipe(project: Project, stateDir: string): Recipe {
@@ -44,7 +46,7 @@ export function projectRecipe(project: Project, stateDir: string): Recipe {
     routes: [{ path: "/", service: "app", port, healthPath: "/__devhub_health" }], steps: [],
     shared: { networks: [projectNetwork(project.id, component.compose!.managed!.infra)], volumes: [] },
     isolation: "shared", capabilities: {}, internet: [], resources: { cpus: 2, memoryMiB: 2048 }, idleMinutes: 1440, localFiles: [],
-    generated: { project: project.id },
+    previewDomain: projectDomain(project.id), generated: { project: project.id },
   };
 }
 

@@ -14,19 +14,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `shared`, `dedicated` (no external network or volume) or `hardened` (also no capabilities
   beyond the listed ones, `no-new-privileges`, the host user in writable worktree mounts and no
   Internet access except for the listed services). See `docs/feature-environments.md`.
-- `devhub worktree add PROJECT BRANCH` runs a branch of a Docker project beside it, in
-  `<project>.worktrees/<branch>`, with its own port, env file, Compose project and a copy of
-  its Postgres database. `worktree remove` cleans it up and keeps the branch. An idle worktree
-  is stopped after 24 hours; `--expire HOURS` removes it once that time is over, unless it holds
-  uncommitted changes or ignored files. `worktree add` refuses a database or role that already exists.
+- `devhub env create PROJECT` also takes a project DevHub runs in Docker, without a recipe: the
+  feature gets its own worktree, image and env file and a private copy of the project's
+  Postgres database, dropped by `destroy --purge-data`.
 - `devhub exec PROJECT -- COMMAND` runs a command in the app container of a Docker project.
-- `devhub mcp`: an MCP server on stdio, so coding agents create, run and inspect their worktree.
+- `devhub mcp`: an MCP server on stdio, so coding agents create, run and inspect their feature.
 - The `proxy` profile runs Caddy (`infra-caddy`): every project answers on
-  `http://<project>.localhost`, a worktree on `http://<branch>.<project>.localhost`.
+  `http://<project>.localhost`, a feature on `http://<feature>-<id>.<project>.localhost`.
 - Each project card of the panel has a button to remove the project from DevHub, after a
   confirmation. Its files and services stay in place, as with `project remove`.
-- A worktree card deletes the worktree like `devhub worktree remove`, after a confirmation, and
-  asks again before dropping uncommitted changes or ignored files.
 - The Dockerfile of a new project declares what can change as `ARG`: versions of the image
   (PHP, Node, Python, Bun, FrankenPHP, Composer), Debian release, system packages and PHP
   extensions. The panel edits them beside the Dockerfile, with the container variables.

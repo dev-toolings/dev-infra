@@ -18,7 +18,7 @@ function setup(now = () => Date.now()) {
   const calls: unknown[][] = [];
   const operations: Operation[] = [];
   const pendingLogs: { current?: Promise<LogEntry[]> } = {};
-  const variants: Array<{ id: string; parent: string; branch: string }> = [];
+  const variants: Array<{ id: string; project: string; desired: string }> = [];
   const environmentId = `ef-${"a".repeat(32)}`;
   const envCalls: unknown[][] = [];
   const services = {
@@ -41,9 +41,8 @@ function setup(now = () => Date.now()) {
       followContainer: (id: string, since: string | undefined, onLine: (line: ContainerLogLine) => void) => follow.start(id, since, onLine),
     },
     create: { plan: async (input: object, draft?: boolean) => ({ ...input, draft }) },
-    worktrees: { list: () => variants, get: (id: string) => variants.find((item) => item.id === id), remove: async (id: string, force?: boolean) => { calls.push(["worktree remove", id, force]); return { removed: id }; } },
     environments: {
-      list: () => [{ id: environmentId, observed: "ready" }], recipes: () => [{ id: "checkout" }],
+      list: () => [{ id: environmentId, observed: "ready" }, ...variants], recipes: () => [{ id: "checkout" }],
       create: async (input: unknown) => { envCalls.push(["create", input]); return { id: environmentId, observed: "error", operation: { state: "failed", step: "test", error: { code: "step_failed", message: "test failed" } } }; },
       status: async (id: string) => { envCalls.push(["status", id]); return { id, observed: "ready" }; },
       start: async (...args: unknown[]) => { envCalls.push(["start", ...args]); return { id: environmentId }; }, stop: async (...args: unknown[]) => { envCalls.push(["stop", ...args]); return { id: environmentId }; },
@@ -76,33 +75,13 @@ describe("local API authentication", () => {
     expect((await response.json()).data).toEqual({ removed: true });
   });
 
-  test("marks a worktree with its parent and refuses to only unregister it", async () => {
+  test("refuses to unregister a project that still has features", async () => {
     const context = setup();
     const { auth } = await paired(context);
-    context.variants.push({ id: "sample", parent: "shop", branch: "fix/auth" });
-    expect((await (await context.request("/api/v1/projects", { headers: auth })).json()).data[0].worktree).toEqual({ parent: "shop", branch: "fix/auth" });
+    context.variants.push({ id: "ef-feature", project: "sample", desired: "running" });
     const response = await context.request("/api/v1/projects/sample", { method: "DELETE", headers: auth, body: "{}" });
     expect(response.status).toBe(409);
-    expect((await response.json()).error.message).toContain("devhub worktree remove sample");
-  });
-
-  test("removes a worktree with the JSON request the panel sends, forced only on a boolean", async () => {
-    const context = setup();
-    const { auth } = await paired(context);
-    expect((await context.request("/api/v1/worktrees/shop--fix", { method: "DELETE", headers: auth, body: JSON.stringify({ force: "yes" }) })).status).toBe(400);
-    const response = await context.request("/api/v1/worktrees/shop--fix", { method: "DELETE", headers: auth, body: JSON.stringify({ force: true }) });
-    expect(response.status).toBe(200);
-    expect((await response.json()).data).toEqual({ removed: "shop--fix" });
-    expect(context.calls).toContainEqual(["worktree remove", "shop--fix", true]);
-  });
-
-  test("refuses to unregister a project that still has worktrees", async () => {
-    const context = setup();
-    const { auth } = await paired(context);
-    context.variants.push({ id: "sample--fix", parent: "sample", branch: "fix" });
-    const response = await context.request("/api/v1/projects/sample", { method: "DELETE", headers: auth, body: "{}" });
-    expect(response.status).toBe(409);
-    expect((await response.json()).error.message).toContain("Remove the worktrees of sample first");
+    expect((await response.json()).error.message).toContain("Destroy the features of sample first");
   });
 
   test("creates and reads feature environments through versioned authenticated responses", async () => {

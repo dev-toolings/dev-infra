@@ -74,6 +74,8 @@ def main():
         feature = command("create", name, "--feature", "checkout")
         assert feature["observed"] == "ready" and feature["bootstrap"] == {"database-copy": "done"}, feature
         database = feature["database"]
+        assert feature["preview"]["domainUrl"] == f"http://checkout-{feature['id'][3:11]}.{name}.localhost", feature["preview"]
+        assert (REPO / "data/caddy/sites" / (feature["id"] + ".caddy")).exists()
         assert database == "dh_" + feature["id"].replace("-", "_")
         status, body = wait_http(feature["preview"]["url"] + "/health")
         assert status == 200 and json.loads(body)["checks"]["database"] is True
@@ -96,6 +98,7 @@ def main():
         assert kept["observed"] == "destroyed" and kept["database"] == database and worktree.exists()
         purged = command("destroy", feature["id"], "--purge-data", "--remove-worktrees", "--force")
         assert "database" not in purged and not worktree.exists()
+        assert not (REPO / "data/caddy/sites" / (feature["id"] + ".caddy")).exists()
         assert sql("postgres", f"SELECT count(*) FROM pg_database WHERE datname = '{database}'") == "0"
         assert sql("postgres", f"SELECT count(*) FROM pg_roles WHERE rolname = '{database}'") == "0"
         assert sql(f"dh_{name}", "SELECT string_agg(v, ',') FROM marker") == "project"

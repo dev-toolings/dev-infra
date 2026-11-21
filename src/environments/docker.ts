@@ -22,6 +22,8 @@ export function allowsVerifiedFeatureRemoval(kind: "network" | "volume", targets
 }
 
 const lines = (value: string) => value.split(/\r?\n/).filter(Boolean);
+/** The domain alias of a feature preview; the ID part keeps two features with the same name apart. */
+export const previewHost = (env: Pick<Environment, "id" | "slug">, domain: string) => `${env.slug}-${env.id.slice(3, 11)}.${domain}`;
 export const emptyResources = (): EnvironmentResources => ({ containers: [], volumes: [], networks: [], images: [] });
 
 /** Docker operations execute against the local Ubuntu Engine, even when the caller has another context selected. */
@@ -159,7 +161,7 @@ export class FeatureDocker {
 
   async syncDomain(env: Environment, recipe: Recipe, directory: string, preview?: Preview): Promise<string | undefined> {
     if (!recipe.previewDomain) return undefined;
-    const host = `${env.slug}-${env.id.slice(3)}.${recipe.previewDomain}`;
+    const host = previewHost(env, recipe.previewDomain);
     const file = join(this.infraDir, "data", "caddy", "sites", env.id + ".caddy");
     const pending = join(directory, "proxy-reload-pending");
     if (!preview && !existsSync(file) && !existsSync(pending)) return undefined;
@@ -167,7 +169,8 @@ export class FeatureDocker {
     if (!Number.isInteger(composePort) || composePort < 1 || composePort > 65535) throw new DevHubError("Invalid feature proxy port", "proxy_unavailable", 409);
     const mounts = await this.run(["docker", "inspect", "--format", '{{.State.Status}}\t{{range .Mounts}}{{if eq .Destination "/etc/caddy"}}{{.Source}}{{end}}{{end}}', "infra-caddy"], { timeoutMs: 5000 });
     const expected = "running\t" + join(this.infraDir, "data", "caddy");
-    if (preview && (mounts.code !== 0 || mounts.stdout.trim() !== expected)) throw new DevHubError("Start the DevHub proxy profile on this Ubuntu host before enabling domain aliases", "proxy_unavailable", 409);
+    // The .localhost alias of a DevHub project feature is optional, like the project's own: Caddy reads it when the proxy starts.
+    if (preview && !recipe.generated && (mounts.code !== 0 || mounts.stdout.trim() !== expected)) throw new DevHubError("Start the DevHub proxy profile on this Ubuntu host before enabling domain aliases", "proxy_unavailable", 409);
     if (preview) {
       const next = `http://${host} {\n\tbind 127.0.0.1\n\treverse_proxy 127.0.0.1:${preview.port}\n}\n`;
       if (existsSync(file) && readFileSync(file, "utf8") === next && !existsSync(pending)) return `http://${host}${composePort === 80 ? "" : ":" + composePort}`;

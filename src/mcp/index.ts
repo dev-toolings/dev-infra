@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { DevHubError, type Action, type AppServices } from "../contracts";
+import type { Environment } from "../environments/types";
 import { redactOutput, redactText } from "../operations/logger";
 
 /**
@@ -23,28 +24,49 @@ function arg<T>(args: Record<string, unknown>, name: string, type: "string" | "n
 }
 
 export function mcpTools(services: AppServices): Tool[] {
-  const { catalog, operations, worktrees } = services;
+  const { catalog, operations, projects } = services;
+  const features = () => services.environments ?? (() => { throw new DevHubError("Feature environments are unavailable", "environments_unavailable", 503); })();
+  /** What an agent needs to work in a feature: where its code is and where it answers. */
+  const feature = (env: Environment) => ({
+    id: env.id, project: env.project, feature: env.feature, observed: env.observed, operation: env.operation,
+    url: env.preview?.domainUrl ?? env.preview?.url, worktrees: env.repos.map(({ name, path, branch }) => ({ name, path, branch })),
+    ...(env.database ? { database: env.database } : {}),
+  });
   return [
     {
-      name: "projects_list", description: "List the DevHub projects, with their URL and, for a worktree, its parent and branch.", inputSchema: object({}),
-      call: async () => {
-        const variants = new Map(worktrees.list().map((item) => [item.id, item]));
-        return catalog.listProjects().map((project) => ({ id: project.id, name: project.name, root: project.root, url: project.components.find((item) => item.url)?.url, worktree: variants.get(project.id) }));
-      },
+      name: "projects_list", description: "List the DevHub projects with their URL, and the feature environments with their worktrees and preview URL.", inputSchema: object({}),
+      call: async () => ({
+        projects: catalog.listProjects().map((project) => ({ id: project.id, name: project.name, root: project.root, url: project.components.find((item) => item.url)?.url })),
+        features: (services.environments?.list() ?? []).filter((env) => env.desired !== "destroyed").map(feature),
+      }),
     },
     {
-      name: "worktree_add", description: "Check out a branch next to a project DevHub runs in Docker and start it with its own port and a copy of its database. The branch is created from HEAD when missing.",
-      inputSchema: object({ project: string("ID of the parent project"), branch: string("Git branch"), expireHours: { type: "number", description: "Remove the worktree after this many hours, unless it has uncommitted changes or ignored files" } }, ["project", "branch"]),
+      name: "feature_create", description: "Create and start a feature environment: a worktree on a new branch of a DevHub project (or every repository of a recipe), its own containers, a private copy of its Postgres database and a preview URL. Edit the code in the returned worktree path.",
+      inputSchema: object({ project: string("ID of a DevHub project, or of a recipe"), feature: string("Name of the feature"), base: string("Git ref to start from, default the current HEAD"), idempotencyKey: string("Send the same key to retry a create safely") }, ["project", "feature"]),
       call: async (args) => {
-        const plan = await worktrees.plan(arg(args, "project", "string"), arg(args, "branch", "string"), arg(args, "expireHours", "number", true));
-        const result = await worktrees.add(plan);
-        return { id: result.project.id, path: result.worktree.path, url: result.url, host: `http://${result.host}`, operation: result.operation.state, error: result.operation.error };
+        const base = arg<string | undefined>(args, "base", "string", true), key = arg<string | undefined>(args, "idempotencyKey", "string", true);
+        return feature(await features().create({ project: arg(args, "project", "string"), feature: arg(args, "feature", "string"), ...(base ? { refs: { "*": base } } : {}), ...(key ? { idempotencyKey: key } : {}) }));
       },
     },
     {
-      name: "worktree_remove", description: "Stop a worktree, drop its database and remove its folder. Its branch and commits are kept. Refuses uncommitted changes and ignored files unless force is true.",
-      inputSchema: object({ id: string("ID of the worktree project"), force: { type: "boolean" } }, ["id"]),
-      call: (args) => worktrees.remove(arg(args, "id", "string"), arg(args, "force", "boolean", true) ?? false),
+      name: "feature_status", description: "State, preview URL and worktrees of a feature environment.", inputSchema: object({ id: string("Feature environment ID") }, ["id"]),
+      call: async (args) => feature(await features().status(arg(args, "id", "string"))),
+    },
+    {
+      name: "feature_exec", description: "Run a shell command in a service container of a feature environment (tests, migrations, linters). Never runs on the host.",
+      inputSchema: object({ id: string("Feature environment ID"), command: string("Shell command, run with sh -c"), service: string("Compose service, default app"), timeoutSeconds: { type: "number", description: "Default 120, at most 600" } }, ["id", "command"]),
+      call: async (args) => {
+        const timeout = Math.min(Math.max(arg<number | undefined>(args, "timeoutSeconds", "number", true) ?? 120, 1), 600);
+        const result = await features().exec(arg(args, "id", "string"), arg<string | undefined>(args, "service", "string", true) ?? "app", ["sh", "-c", arg(args, "command", "string")], timeout * 1000);
+        return `exit code ${result.code}\n--- stdout\n${redactText(result.stdout, "multiline")}\n--- stderr\n${redactText(result.stderr, "multiline")}`;
+      },
+    },
+    {
+      name: "feature_destroy", description: "Remove the containers of a feature environment. Its branch is always kept. purgeData also drops its volumes and database; removeWorktrees also removes its folders, and refuses uncommitted changes and ignored files unless force is true.",
+      inputSchema: object({ id: string("Feature environment ID"), purgeData: { type: "boolean" }, removeWorktrees: { type: "boolean" }, force: { type: "boolean" } }, ["id"]),
+      call: async (args) => feature(await features().destroy(arg(args, "id", "string"), {
+        purgeData: arg(args, "purgeData", "boolean", true) ?? false, removeWorktrees: arg(args, "removeWorktrees", "boolean", true) ?? false, force: arg(args, "force", "boolean", true) ?? false,
+      })),
     },
     {
       name: "project_action", description: "Start, stop or restart a project.",
@@ -68,7 +90,7 @@ export function mcpTools(services: AppServices): Tool[] {
       inputSchema: object({ project: string("Project ID"), command: string("Shell command, run with sh -c in /app"), timeoutSeconds: { type: "number", description: "Default 120, at most 3600" } }, ["project", "command"]),
       call: async (args) => {
         const timeout = Math.min(Math.max(arg<number | undefined>(args, "timeoutSeconds", "number", true) ?? 120, 1), 3600);
-        const result = await worktrees.exec(arg(args, "project", "string"), arg(args, "command", "string"), timeout * 1000);
+        const result = await projects.exec(arg(args, "project", "string"), arg(args, "command", "string"), timeout * 1000);
         return `exit code ${result.code}\n--- stdout\n${redactText(result.stdout, "multiline")}\n--- stderr\n${redactText(result.stderr, "multiline")}`;
       },
     },

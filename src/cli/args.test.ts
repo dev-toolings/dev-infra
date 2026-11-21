@@ -229,9 +229,7 @@ test("new requires a stack, a name and a root, and defaults to Docker with Git",
   expect(() => parseCliArgs(["new", "node", "shop", "--root", "/code", "--mode", "vm"])).toThrow("--mode");
 });
 
-test("worktree, exec, proxy and mcp commands parse", () => {
-  expect(parseCliArgs(["worktree", "add", "shop", "fix/auth", "--expire", "48", "--apply"])).toEqual({ command: "worktree", action: "add", project: "shop", branch: "fix/auth", expire: 48, apply: true, json: false });
-  expect(parseCliArgs(["worktree", "remove", "shop--fix", "--force", "--json"])).toEqual({ command: "worktree", action: "remove", id: "shop--fix", force: true, json: true });
+test("exec, proxy and mcp commands parse", () => {
   expect(parseCliArgs(["exec", "shop", "--timeout", "30", "--", "bun", "test", "--watch"])).toEqual({ command: "exec", project: "shop", timeout: 30, shell: "bun test --watch", json: false });
   expect(parseCliArgs(["exec", "shop", "--", "grep", "a b", "it's"])).toMatchObject({ shell: "grep 'a b' 'it'\\''s'" });
   expect(parseCliArgs(["exec", "shop", "--", "bun test && bun run lint"])).toMatchObject({ shell: "bun test && bun run lint" });

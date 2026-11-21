@@ -203,11 +203,10 @@ devhub db create myapp  # create a PostgreSQL database + role
 | `devhub import <path> [--apply]` | Run a Hono project in an isolated dev container |
 | `devhub project discover\|add\|list\|show\|remove` | Detect and register projects in place |
 | `devhub project start\|stop\|restart\|check\|status\|logs <id>` | Project lifecycle, status and merged logs |
-| `devhub worktree list\|add <project> <branch> [--expire HOURS] [--apply]\|remove <id> [--force]` | Run a branch of a Docker project beside it, with its own port and a copy of its database |
-| `devhub env create\|list\|status\|start\|stop\|destroy` | Feature environments, previews and retained Git and Docker resources |
+| `devhub env create\|list\|status\|start\|stop\|destroy` | Feature environments: from a recipe, or from a DevHub project with a copy of its database |
 | `devhub exec <project> [--timeout S] -- <command>` | Run a command in the app container of a Docker project |
 | `devhub proxy sync` | Write the Caddy sites of every project and reload Caddy |
-| `devhub mcp` | MCP server on stdio for coding agents: projects, worktrees, logs, exec |
+| `devhub mcp` | MCP server on stdio for coding agents: projects, features, logs, exec |
 | `devhub maintenance inventory\|scan\|scans\|changes\|preview\|apply\|validate\|activate` | Docker inventory, image scans and remediation |
 | `devhub serve [--port 8040] [--dev \| --dev-origin URL]` / `devhub pair` | Loopback control panel API and one-time pairing code; `--dev` also starts the Vite panel on 5175 (reused if already running) |
 
