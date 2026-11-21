@@ -118,7 +118,8 @@ function redactSecrets(text: string, layout: TextLayout = "single-line"): string
   safe = safe.replace(URL_USERINFO, (_match, scheme: string) => `${scheme}${REDACTED}@`);
   // The value is optional so a key without `=` is consumed whole: the scan never restarts inside it, which keeps a run of `?` linear.
   safe = safe.replace(/([?&])([^=&#\s]+)(?:=([^&#\s]*))?/g, (match, separator: string, key: string, value: string | undefined) =>
-    value !== undefined && isSensitiveKey(decodedKey(key)) ? `${separator}${key}=${REDACTED}` : match,
+    // `?a?auth=` is the key `a?auth` to one reader and `auth` to another: both must be safe.
+    value !== undefined && [key, ...key.split("?")].some((part) => isSensitiveKey(decodedKey(part))) ? `${separator}${key}=${REDACTED}` : match,
   );
   safe = redactAssignments(safe);
   safe = safe.replace(/\b(?:bearer|basic)\s+[A-Za-z0-9._~+\/-]+=*/gi, (match) => {

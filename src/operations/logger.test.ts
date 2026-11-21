@@ -158,6 +158,7 @@ test("a key that is not sensitive never takes the next credential as its value",
   expect(redactText("msg: api_key=fixture-secret done")).toBe("msg: api_key=[redacted] done");
   expect(redactText("token=abc== next=ok")).toBe("token=[redacted] next=ok");
   expect(redactOutput("https://example.test/?api?key=fixture-secret&page=2")).toBe("https://example.test/?api?key=[redacted]&page=2");
+  for (const key of ["%61uth", "%70ass", "%70wd"]) expect(redactOutput(`https://x/?foo?${key}=fixture-secret`)).toBe(`https://x/?foo?${key}=[redacted]`);
   expect(redactText('{"user":"ada","password":"fixture secret"}')).toBe('{"user":"ada","password":[redacted]}');
 });
 
