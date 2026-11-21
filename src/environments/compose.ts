@@ -41,6 +41,12 @@ function repoRoots(env: Environment): string[] {
   });
 }
 
+/** The worktrees, plus the source DevHub wrote for a feature of one of its projects (build files, env file, entry script). */
+function sourceRoots(env: Environment, directory: string): string[] {
+  const source = join(directory, "source");
+  return [...repoRoots(env), ...(existsSync(source) ? [realpathSync(source)] : [])];
+}
+
 function composeRoot(recipe: Recipe, env: Environment): string {
   const repo = env.repos.find((item) => item.name === recipe.compose.repository && !item.removed);
   if (!repo) fail("Compose source repository is not attached to this environment");
@@ -58,7 +64,8 @@ function validateModel(model: Model, selected: string[], shared: { networks: str
   for (const [name, service] of Object.entries(model.services)) {
     if (service.privileged || service.devices || service.network_mode || [service.pid, service.ipc, service.uts].some((value) => typeof value === "string" && /^(?:host|container:|service:)/.test(value)) || service.volumes_from) fail(`Compose service ${name} requests host access that the environment cannot isolate`);
     const added = service.cap_add?.length && !(kept && service.cap_add.every((cap: string) => (kept[name] ?? []).includes(cap)));
-    const options = service.security_opt?.length && !(kept && service.security_opt.length === 1 && service.security_opt[0] === NO_NEW_PRIVILEGES);
+    // Forbidding new privileges only takes power away: a DevHub project already sets it.
+    const options = service.security_opt?.length && !(service.security_opt.length === 1 && service.security_opt[0] === NO_NEW_PRIVILEGES);
     if (added || options || service.cgroup_parent || service.userns_mode || service.links?.length || service.runtime || service.use_api_socket ||
         service.cgroup === "host" || service.gpus || service.device_cgroup_rules?.length || service.mac_address ||
         service.credential_spec || service.post_start?.length || service.pre_stop?.length || service.deploy?.resources?.reservations?.devices?.length) fail(`Compose service ${name} requests host privileges that the environment cannot isolate`);
@@ -163,7 +170,7 @@ async function composeConfig(run: Executor, args: string[], cwd: string, flags: 
 }
 
 function rebaseResources(model: Model, env: Environment, directory: string, secretFiles: string[]): void {
-  const roots = repoRoots(env);
+  const roots = sourceRoots(env, directory);
   for (const [name, service] of Object.entries(model.services)) {
     if (service.build) {
       const build = typeof service.build === "string" ? { context: service.build } : service.build;
@@ -214,9 +221,11 @@ export async function renderCompose(run: Executor, recipe: Recipe, env: Environm
 }> {
   if (!NAME.test(env.id) || !NAME.test(env.composeProject) || !NAME.test(env.slug)) fail("Environment Compose identity is invalid");
   if (!existsSync(directory)) mkdirSync(directory, { recursive: true, mode: 0o700 });
-  const outDir = realpathSync(directory), projectRoot = composeRoot(recipe, env), roots = repoRoots(env);
+  const outDir = realpathSync(directory), projectRoot = composeRoot(recipe, env), roots = sourceRoots(env, outDir);
   if (recipe.compose.services.some((name) => !SERVICE.test(name)) || !recipe.compose.profiles.every((name) => SERVICE.test(name))) fail("Compose service or profile selection is invalid");
-  const files = recipe.compose.files.map((entry) => {
+  const generated = recipe.generated ? [join(outDir, "source", "compose.yml")] : [];
+  for (const file of generated) if (!lstatSync(file).isFile() || realpathSync(file) !== file) fail("The generated project Compose file is missing");
+  const files = recipe.generated ? generated : recipe.compose.files.map((entry) => {
     const repo = env.repos.find((item) => item.name === entry.repository && !item.removed);
     if (!repo) fail("Compose file repository is not attached to this environment");
     const root = realpathSync(repo!.path), file = safePath(resolve(root, entry.path), [root], "file");
@@ -230,7 +239,7 @@ export async function renderCompose(run: Executor, recipe: Recipe, env: Environm
     try { source = parse(readFileSync(file, "utf8")); } catch { fail("Compose source file could not be parsed safely"); }
     if (!object(source) || "include" in source || !object(source.services)) fail("Compose include is not supported by environment recipes");
     for (const [name, service] of Object.entries((source as Record<string, any>).services)) {
-      const sourceRepo = recipe.compose.files[index]!.repository;
+      const sourceRepo = recipe.compose.files[index]?.repository ?? recipe.compose.repository;
       const previousRepo = declarations.get(name);
       if (previousRepo && previousRepo !== sourceRepo) fail(`Compose service ${name} is declared in more than one repository`);
       declarations.set(name, sourceRepo);

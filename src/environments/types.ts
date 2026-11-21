@@ -29,6 +29,8 @@ export interface Recipe {
   idleMinutes: number;
   localFiles: { repository: string; source: string; target: string }[];
   previewDomain?: string;
+  /** Set by DevHub, never read from a recipe file: the recipe was derived from this DevHub project. */
+  generated?: { project: string };
 }
 
 export interface CreateEnvironment {
@@ -83,6 +85,8 @@ export interface Environment {
   resources: EnvironmentResources;
   preview?: Preview;
   bootstrap: Record<string, "running" | "done" | "failed">;
+  /** Private Postgres database of a feature of a DevHub project, kept until purged. */
+  database?: string;
 }
 
 export interface EnvironmentsPort {

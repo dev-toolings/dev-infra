@@ -7,7 +7,7 @@ import { assertSharedDataUntouched, managedEntry, type ComposeModel } from "./mo
 import { approvedOverride } from "../security/override";
 import { envFileKeys, guardFollower } from "../guard";
 import { followLines } from "./executor";
-import { projectNetwork } from "../services";
+import { connectProjectNetwork } from "../services";
 import { DevHubError, type CatalogPort, type Component, type ContainerInfo, type Executor, type LogEntry, type Project, type RuntimePort, type ComponentStatus, type ContainerLogLine, type FollowHandle, type Follower } from "../contracts";
 
 type Options = { run: Executor; follow?: Follower; stateDir: string; assertAllowedPath: CatalogPort["assertAllowedPath"]; fetch?: (input: string, init?: BunFetchRequestInit) => Promise<Response>; resolveExecutable?: (command: string) => string | null };
@@ -128,18 +128,6 @@ export class Runtime implements RuntimePort {
     if (!items.length || !items.every((x) => { const host = (x.Endpoints as Record<string, unknown> | undefined)?.docker && ((x.Endpoints as Record<string, Record<string, unknown>>).docker.Host); return typeof host === "string" && /^unix:\/\//.test(host) && host.length > 7 && host.slice(7).startsWith("/"); })) throw err("Docker context must use a local Unix socket", "unsafe_runtime", 403);
   }
   private managedFile(project: Project): string { return join(this.stateDir, "imports", project.id, "compose.yml"); }
-  /** A managed project gets its own network: only the shared services it needs join it, so projects cannot reach each other. */
-  private async connectInfra(project: Project, component: Component): Promise<void> {
-    const { managed } = component.compose!;
-    const network = projectNetwork(project.id, managed!.infra);
-    if ((await this.run(["docker", "network", "inspect", network], READ)).code !== 0) {
-      if ((await this.run(["docker", "network", "create", "--label", `devhub.infra=${managed!.infra.join(",")}`, network], TIME)).code !== 0) throw err("Project network creation failed", "runtime_start", 502);
-    }
-    for (const service of managed!.infra) {
-      const result = await this.run(["docker", "network", "connect", network, service], TIME);
-      if (result.code !== 0 && !/already exists/.test(result.stderr)) throw err(`Could not reach ${service}; run devhub up`, "runtime_start", 502);
-    }
-  }
   private composeBase(project: Project, component: Component, cwd: string): string[] {
     const cfg = component.compose; if (!cfg || !cfg.files.length || !cfg.services.length) throw err("Compose component requires files and explicit services");
     slug(cfg.projectName, "Compose project name");
@@ -274,7 +262,7 @@ export class Runtime implements RuntimePort {
       const model = outputJson(config.stdout) as ComposeModel;
       if (!model.services || component.compose!.services.some((s) => !model.services![s])) throw err("Selected service is absent from the Compose model");
       assertSharedDataUntouched(model, component.compose!.services, this.stateDir, component.compose!.managed ? managedEntry(this.stateDir, project.id) : undefined);
-      if (component.compose!.managed) await this.connectInfra(project, component);
+      if (component.compose!.managed) await connectProjectNetwork(this.run, project.id, component.compose!.managed.infra);
       const up = await this.run([...base, "up", "-d", "--no-deps", ...(component.compose!.managed ? ["--build"] : []), ...component.compose!.services], { timeoutMs: 900_000, maxOutputBytes: 8 * 1024 * 1024 });
       if (up.code !== 0) throw err("Compose start failed", "runtime_start", 502);
       return;

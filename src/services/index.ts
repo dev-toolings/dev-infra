@@ -58,6 +58,20 @@ export const projectNetwork = (id: string, infra: string[]) => `devhub-${id}-${c
 
 const fail = (message: string): never => { throw new DevHubError(message, "provisioning_failed", 409); };
 
+/** A managed project gets its own network: only the shared services it needs join it, so projects cannot reach each other. */
+export async function connectProjectNetwork(run: Executor, projectId: string, infra: string[]): Promise<string> {
+  const network = projectNetwork(projectId, infra);
+  const time = { timeoutMs: 30_000, maxOutputBytes: 64_000 };
+  if ((await run(["docker", "network", "inspect", network], time)).code !== 0) {
+    if ((await run(["docker", "network", "create", "--label", `devhub.infra=${infra.join(",")}`, network], time)).code !== 0) throw new DevHubError("Project network creation failed", "runtime_start", 502);
+  }
+  for (const service of infra) {
+    const result = await run(["docker", "network", "connect", network, service], time);
+    if (result.code !== 0 && !/already exists/.test(result.stderr)) throw new DevHubError(`Could not reach ${service}; run devhub up`, "runtime_start", 502);
+  }
+  return network;
+}
+
 type Options = { run: Executor; discovery: DiscoveryPort; stateDir: string; infraDir: string };
 
 /** Runs the shared services: compose.yml owns the default version of each, this class the instances of other versions. */

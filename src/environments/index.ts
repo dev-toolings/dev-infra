@@ -2,13 +2,14 @@ import { chmodSync, constants, copyFileSync, existsSync, lstatSync, mkdirSync, r
 import { homedir, hostname } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
-import { DevHubError, type CatalogPort, type Executor, type ExecResult } from "../contracts";
+import { DevHubError, type CatalogPort, type Executor, type ExecResult, type SharedServicesPort } from "../contracts";
 import { gitRun } from "../git";
 import { redactLogLine, redactText } from "../operations/logger";
 import { emptyResources, FeatureDocker, hostExecutor } from "./docker";
 import { featureLock } from "./lock";
 import { inside, listRecipes, readRecipe } from "./recipe";
 import { renderCompose, verifyComposePaths } from "./compose";
+import { prepareProject, projectRecipe, purgeProjectDatabase } from "./project";
 import { installFeatureTimer } from "./timer";
 import type { CreateEnvironment, DestroyOptions, Environment, EnvironmentOperation, EnvironmentRepo, Observed, Recipe } from "./types";
 
@@ -92,7 +93,7 @@ export class Environments {
   private readonly locks: string;
   private readonly models: string;
 
-  constructor(private readonly options: { catalog: CatalogPort; run: Executor; stateDir: string; infraDir: string }) {
+  constructor(private readonly options: { catalog: CatalogPort; services?: SharedServicesPort; run: Executor; stateDir: string; infraDir: string }) {
     this.run = hostExecutor(options.run);
     this.docker = new FeatureDocker(this.run, options.infraDir);
     this.locks = join(options.stateDir, "feature-locks");
@@ -105,6 +106,15 @@ export class Environments {
     return existsSync(path) ? directory(path) : path;
   }
   recipes() { return listRecipes(this.recipeDirectory); }
+  /** A recipe file wins; otherwise a project DevHub runs in Docker gets a recipe derived from it. */
+  private recipe(name: string): Recipe {
+    try { return readRecipe(this.recipeDirectory, name); } catch (error) {
+      if (!(error instanceof DevHubError && error.code === "recipe_not_found")) throw error;
+      const project = this.options.catalog.listProjects().find((item) => item.id === name);
+      if (!project) throw error;
+      return projectRecipe(project, this.options.stateDir);
+    }
+  }
 
   private worktreeRoot(): string {
     const root = process.env.DEVHUB_WORKTREE_ROOT ?? join(homedir(), ".local", "share", "devhub-feature-worktrees");
@@ -264,7 +274,7 @@ export class Environments {
       const branch = attached || "devhub/" + id + "/" + name;
       const ref = input.refs?.[name] ?? (attached ? "refs/heads/" + attached : input.refs?.["*"] ?? specification.ref);
       if (typeof ref !== "string" || !ref || ref.length > 4096 || /[\0\r\n]/.test(ref)) fail("Invalid Git reference", "invalid_ref", 400);
-      const sha = await this.gitRequired(source, ["rev-parse", "--verify", "--end-of-options", ref + "^{commit}"], `Cannot resolve requested commit for repository ${name}`);
+      const sha = await this.gitRequired(source, ["rev-parse", "--verify", "--end-of-options", ref + "^{commit}"], `Cannot resolve requested commit for repository ${name}. Check the ref, and commit at least once in a new repository.`);
       if (!gitId.test(sha)) fail("Git did not return a commit ID", "git_failed");
       if (attached && sha !== await this.gitRequired(source, ["rev-parse", "--verify", "--end-of-options", "refs/heads/" + attached + "^{commit}"], `Existing branch for ${name} was not found`)) fail("The existing branch and the requested reference resolve to different commits", "branch_conflict");
       repos.push({ name, source, path: join(root, id, name), ref, sha, branch, attach: !!attached, prepared: false });
@@ -273,8 +283,8 @@ export class Environments {
   }
 
   async create(input: CreateEnvironment): Promise<Environment> {
-    if (!/^[a-z][a-z0-9-]{0,47}$/.test(input.project) || typeof input.feature !== "string" ||
-        !input.feature.trim() || input.feature.length > 120 || /[\x00-\x1f]/.test(input.feature)) fail("Give a valid recipe ID and a feature name up to 120 characters", "invalid_feature", 400);
+    if (!/^[a-z0-9][a-z0-9_-]{0,55}$/.test(input.project) || typeof input.feature !== "string" ||
+        !input.feature.trim() || input.feature.length > 120 || /[\x00-\x1f]/.test(input.feature)) fail("Give a valid recipe or project ID and a feature name up to 120 characters", "invalid_feature", 400);
     if (input.idempotencyKey !== undefined && !/^[\x21-\x7e]{1,160}$/.test(input.idempotencyKey)) fail("Invalid idempotency key", "invalid_idempotency_key", 400);
     const feature = input.feature.trim();
     const requestHash = sha256(JSON.stringify({ project: input.project, feature, refs: ordered(input.refs), branches: ordered(input.branches), build: input.build === true }));
@@ -294,7 +304,7 @@ export class Environments {
         const existing = findPrevious();
         if (existing) return existing;
         this.hasCapacity();
-        const recipe = readRecipe(this.recipeDirectory, input.project);
+        const recipe = this.recipe(input.project);
         const root = this.worktreeRoot();
         await this.assertDisk(root);
         const started = now();
@@ -390,6 +400,10 @@ export class Environments {
       }
       entry.copied.push(key);
       this.save(entry);
+    }
+    if (entry.recipe.generated) {
+      this.step(entry, "project-source");
+      await prepareProject(this.options, entry, join(directory(this.model(entry), true), "source"), () => this.save(entry));
     }
   }
 
@@ -610,6 +624,12 @@ export class Environments {
       await this.docker.remove(entry.resources, flags.purgeData === true);
       entry.resources = await this.docker.inspect(entry);
       this.save(entry);
+      if (flags.purgeData && entry.recipe.generated && entry.database) {
+        this.step(entry, "drop-database");
+        await purgeProjectDatabase(this.options, entry, join(this.model(entry), "source"));
+        delete entry.database;
+        this.save(entry);
+      }
       if (flags.removeWorktrees) {
         for (const repo of entry.repos.filter(({ removed }) => !removed)) {
           this.step(entry, "remove-worktree:" + repo.name);
