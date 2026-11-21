@@ -54,7 +54,8 @@ const ANSI_SEQUENCE = /\u001b(?:\[[0-?]*[ -/]*[@-~]|\][^\u0007]*(?:\u0007|\u001b
 // The lookbehinds start a match only at the beginning of a token: without them, a long unbroken token costs quadratic time.
 const EMAIL = /(?<![A-Z0-9._%+-])[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi;
 const URL_USERINFO = /(\b[a-z][a-z0-9+.-]*:\/\/)([^\s/?#@]*@)/gi;
-const CREDENTIAL_ASSIGNMENT = /((?:"[^"]+"|'[^']+'|(?<![A-Za-z0-9_.-])[A-Za-z0-9_.-]+)\s*[:=]\s*)(?:(?:Bearer|Basic)\s+[^\s,;}&]+|"(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*'|[^\s,;}&]+)/gi;
+const ASSIGNMENT_KEY = /(?:"[^"]+"|'[^']+'|(?<![A-Za-z0-9_.-])[A-Za-z0-9_.-]+)\s*[:=]\s*/g;
+const ASSIGNMENT_VALUE = /(?:(?:Bearer|Basic)\s+[^\s,;}&]+|"(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*'|[^\s,;}&]+)/iy;
 const EXACT_SENSITIVE_KEYS = new Set([
   "auth", "request", "pass", "pwd",
 ]);
@@ -92,17 +93,34 @@ function decodedKey(value: string): string {
   }
 }
 
+/**
+ * Replaces the value of each sensitive `key=value` or `key: value`. Only a sensitive key takes its
+ * value: after `status=` the scan goes on, so `status= password=x` and `status=\npassword=x` hide x.
+ */
+function redactAssignments(text: string): string {
+  let safe = "", copied = 0;
+  ASSIGNMENT_KEY.lastIndex = 0;
+  for (let match = ASSIGNMENT_KEY.exec(text); match; match = ASSIGNMENT_KEY.exec(text)) {
+    const key = match[0].replace(/\s*[:=]\s*$/, "").replace(/^["']|["']$/g, "");
+    if (!isSensitiveKey(key)) continue;
+    const start = match.index + match[0].length;
+    ASSIGNMENT_VALUE.lastIndex = start;
+    if (!ASSIGNMENT_VALUE.exec(text)) continue;
+    safe += `${text.slice(copied, start)}${REDACTED}`;
+    copied = ASSIGNMENT_KEY.lastIndex = ASSIGNMENT_VALUE.lastIndex;
+  }
+  return safe + text.slice(copied);
+}
+
 /** Removes terminal controls and credential-shaped values at any length. */
 function redactSecrets(text: string, layout: TextLayout = "single-line"): string {
   let safe = cleanControls(text.replace(/\b(?:set-cookie|cookie)\s*:\s*[^\r\n]*/gi, (header) => `${header.slice(0, header.indexOf(":") + 1)} ${REDACTED}`), layout);
   safe = safe.replace(URL_USERINFO, (_match, scheme: string) => `${scheme}${REDACTED}@`);
-  safe = safe.replace(/([?&])([^=&#\s]+)=([^&#\s]*)/g, (match, separator: string, key: string, value: string) =>
+  // A key never holds `?`: excluding it keeps a long run of question marks linear.
+  safe = safe.replace(/([?&])([^=&#?\s]+)=([^&#\s]*)/g, (match, separator: string, key: string, value: string) =>
     isSensitiveKey(decodedKey(key)) ? `${separator}${key}=${REDACTED}` : match,
   );
-  safe = safe.replace(CREDENTIAL_ASSIGNMENT, (match, prefix: string) => {
-    const key = prefix.replace(/\s*[:=]\s*$/, "").replace(/^["']|["']$/g, "");
-    return isSensitiveKey(key) ? `${prefix}${REDACTED}` : match;
-  });
+  safe = redactAssignments(safe);
   safe = safe.replace(/\b(?:bearer|basic)\s+[A-Za-z0-9._~+\/-]+=*/gi, (match) => {
     const scheme = /^\S+/.exec(match)?.[0] ?? "Bearer";
     return `${scheme} ${REDACTED}`;

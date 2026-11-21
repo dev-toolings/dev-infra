@@ -144,10 +144,20 @@ test("structured command output keeps tabs and lines while removing controls and
   });
 });
 
-test("a long unbroken token is redacted in linear time", () => {
-  const started = performance.now();
-  expect(redactOutput("a".repeat(200_000))).toBe("a".repeat(200_000));
-  expect(performance.now() - started).toBeLessThan(1000);
+test("long unbroken tokens and runs of separators are redacted in linear time", () => {
+  for (const sample of ["a".repeat(200_000), "?".repeat(200_000), "a=".repeat(100_000), "x@".repeat(100_000)]) {
+    const started = performance.now();
+    expect(redactOutput(sample)).toBe(sample);
+    expect(performance.now() - started).toBeLessThan(1000);
+  }
+});
+
+test("a key that is not sensitive never takes the next credential as its value", () => {
+  expect(redactOutput("status=\npassword=fixture-secret\n")).toBe("status=\npassword=[redacted]\n");
+  expect(redactText("status= password=fixture-secret")).toBe("status= password=[redacted]");
+  expect(redactText("msg: api_key=fixture-secret done")).toBe("msg: api_key=[redacted] done");
+  expect(redactText("token=abc== next=ok")).toBe("token=[redacted] next=ok");
+  expect(redactText('{"user":"ada","password":"fixture secret"}')).toBe('{"user":"ada","password":[redacted]}');
 });
 
 test("nested data, errors, cycles, and excessive entries stay bounded", () => {
