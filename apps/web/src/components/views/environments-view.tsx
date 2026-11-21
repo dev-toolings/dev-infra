@@ -36,7 +36,12 @@ function serviceRows(services: string[] = [], containers: NonNullable<FeatureEnv
 }
 
 export function EnvironmentsView() {
-  const environments = useResource(listEnvironments, "environments", { refreshMs: REFRESH_MS });
+  const actionRevision = React.useRef(0);
+  const [actionResults, setActionResults] = React.useState(() => new Map<string, { revision: number; environment: FeatureEnvironment }>());
+  const environments = useResource(async (signal) => {
+    const revision = actionRevision.current;
+    return { revision, items: await listEnvironments(signal) };
+  }, "environments", { refreshMs: REFRESH_MS });
   const recipes = useResource(listEnvironmentRecipes, "environment-recipes");
   const [showCreate, setShowCreate] = React.useState(false);
   const [feature, setFeature] = React.useState("");
@@ -80,7 +85,8 @@ export function EnvironmentsView() {
     try {
       const updated = await (action === "start" ? startEnvironment(environment.id)
         : action === "stop" ? stopEnvironment(environment.id) : removeEnvironment(environment.id));
-      environments.update((current) => (current ?? []).map((item) => item.id === environment.id ? updated : item));
+      const revision = ++actionRevision.current;
+      setActionResults((current) => new Map(current).set(environment.id, { revision, environment: updated }));
       if (action === "remove") {
         setExpandedId(undefined);
         setRemoving(undefined);
@@ -97,6 +103,12 @@ export function EnvironmentsView() {
     }
   }
 
+  const list = environments.data;
+  const items = list && list.items.map((item) => {
+    const result = actionResults.get(item.id);
+    // A poll that began before the action result may still resolve with the old preview.
+    return result && result.revision > list.revision ? result.environment : item;
+  });
   const recipeOptions = [...(recipes.data ?? [])].sort((a, b) => a.id.localeCompare(b.id));
   const removingBusy = removing !== undefined && actionBusy.has(removing.id);
 
@@ -148,13 +160,13 @@ export function EnvironmentsView() {
       {environments.error && !environments.data ? <ErrorState title={t("Environments could not be loaded")} description={environments.error} action={<Button type="button" variant="outline" onClick={environments.reload}><RefreshCw aria-hidden="true" />{t("Try again")}</Button>} /> : null}
       {environments.loading ? <div role="status" aria-busy="true" className="rounded-xl border p-5 text-sm text-muted-foreground">{t("Loading feature environments")}</div> : null}
       {environments.error && environments.data ? <Alert variant="destructive"><AlertTitle>{t("Environments could not be refreshed")}</AlertTitle><AlertDescription>{environments.error}</AlertDescription></Alert> : null}
-      {!environments.loading && !environments.error && environments.data?.length === 0 ? (
+      {!environments.loading && !environments.error && items?.length === 0 ? (
         <EmptyState title={t("No feature environments yet")} description={t("Create an environment to work on a feature in its own branch and services.")} icon={<GitBranch aria-hidden="true" className="size-5" />} action={<Button type="button" onClick={() => setShowCreate(true)}><Plus aria-hidden="true" />{t("New environment")}</Button>} />
       ) : null}
 
-      {environments.data && environments.data.length > 0 ? (
+      {items && items.length > 0 ? (
         <ul className="grid min-w-0 grid-cols-1 gap-3 lg:grid-cols-2 2xl:grid-cols-3">
-          {environments.data.map((environment) => {
+          {items.map((environment) => {
             const status = statusStyle[environment.observed] ?? statusStyle.error;
             const currentEnvironment = environment.id === detail.data?.id ? detail.data : environment;
             const services = serviceRows(currentEnvironment.configuration?.services, currentEnvironment.resources?.containers);

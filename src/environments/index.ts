@@ -16,12 +16,33 @@ const registry = "feature_environments";
 const featureId = /^ef-[a-f0-9]{32}$/;
 const gitId = /^[a-f0-9]{40,64}$/;
 const secretKey = /(?:PASSWORD|PASSWD|TOKEN|SECRET|API_?KEY|PRIVATE_?KEY|CREDENTIAL)/i;
+const envFileSecretKey = /(?:PASS|SECRET|TOKEN|KEY|CREDENTIAL)/i;
+const stopAttemptLimit = 3;
+const stopRetryDelayMs = 120_000;
 const sha256 = (data: string | Buffer) => createHash("sha256").update(data).digest("hex");
 const now = () => new Date().toISOString();
 const ordered = (data?: Record<string, string>) => Object.fromEntries(Object.entries(data ?? {}).sort(([a], [b]) => a.localeCompare(b)));
-type RecordEntry = Environment & { recipe: Recipe; keyHash?: string; requestHash: string; copied: string[]; worktreeRoot: string; checksPassed: boolean };
+type RecordEntry = Environment & {
+  recipe: Recipe; keyHash?: string; requestHash: string; copied: string[]; worktreeRoot: string; checksPassed: boolean;
+  stopRetry?: { attempts: number; retryAt: number };
+};
 type OperationAction = EnvironmentOperation["action"];
 type Step = Recipe["steps"][number];
+type OutputModel = {
+  services: Record<string, { environment?: Record<string, unknown>; env_file?: unknown[] }>;
+  secrets?: Record<string, { file: string }>;
+};
+
+function redactOutput(value: string, secrets: string[]): string {
+  if (!value) return value;
+  const literals = [...new Set(secrets.filter(Boolean))];
+  // A short secret can occur inside ordinary text. Withhold the affected stream on any match.
+  if (literals.some((secret) => secret.length < 4 && value.includes(secret))) return "[redacted]";
+  const escaped = literals.filter((secret) => secret.length >= 4).sort((a, b) => b.length - a.length)
+    .map((secret) => secret.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  if (escaped.length) value = value.replace(new RegExp(escaped.join("|"), "g"), "[redacted]");
+  return value.split(/\r?\n/).map(redactLogLine).join("\n");
+}
 
 function fail(message: string, code: string, status = 409): never { throw new DevHubError(message, code, status); }
 function setting(key: string, fallback: number, maximum: number): number {
@@ -47,8 +68,13 @@ function inspectError(error: unknown): { code: string; message: string } {
   return error instanceof DevHubError ? { code: error.code, message: redactText(error.message) } : { code: "feature_failed", message: "Feature operation failed. Check the operation step and host permissions." };
 }
 function publicly(entry: RecordEntry): Environment {
-  const { recipe, keyHash, requestHash, copied, worktreeRoot, checksPassed, ...environment } = entry;
+  const { recipe, keyHash, requestHash, copied, worktreeRoot, checksPassed, stopRetry, ...environment } = entry;
   return environment;
+}
+function stopAttention(entry: RecordEntry): Environment["observationError"] {
+  if (entry.desired === "stopped" && entry.stopRetry?.attempts === stopAttemptLimit) {
+    return { code: "stop_retry_exhausted", message: `Automatic stop failed after ${stopAttemptLimit} attempts. Retry stop manually.` };
+  }
 }
 function gitPath(directory: string, resolveFrom: string, expected: string): void {
   if (realpathSync(directory) !== expected || !inside(resolveFrom, expected) || expected === resolveFrom) fail("Unverified feature worktree path", "unsafe_path");
@@ -109,53 +135,57 @@ export class Environments {
       writeFileSync(path, previous + `${now()} ${this.redact(entry, log).slice(0, 16_000)}\n`, { mode: 0o600 });
     } catch { /* The durable operation metadata remains available. */ }
   }
-  private redact(entry: RecordEntry, value: string): string {
-    for (const file of Object.values(entry.recipe.compose.secretFiles)) {
-      try {
-        const stat = lstatSync(file);
-        if (!stat.isFile() || stat.size > 16 * 1024) continue;
-        const secret = readFileSync(file, "utf8").trim();
-        if (secret) value = value.replaceAll(secret, "[redacted]");
-      } catch { /* The existing logger still redacts structured secrets. */ }
+  private outputModel(entry: RecordEntry): OutputModel | undefined {
+    const path = join(this.model(entry), "compose.json");
+    return existsSync(path) ? JSON.parse(readFileSync(path, "utf8")) : undefined;
+  }
+  private outputSecrets(entry: RecordEntry, model: OutputModel | undefined): string[] {
+    const files = new Set([
+      ...Object.values(entry.recipe.compose.secretFiles),
+      ...Object.values(model?.secrets ?? {}).map(({ file }) => file.replaceAll("$$", "$")),
+    ]);
+    const secrets: string[] = [];
+    for (const file of files) {
+      const stat = lstatSync(file);
+      if (realpathSync(file) !== file || !stat.isFile() || stat.size > 16 * 1024) throw new Error("Could not verify feature secret file");
+      const secret = readFileSync(file, "utf8");
+      secrets.push(secret.trim() || secret);
     }
-    const model = join(this.model(entry), "compose.json");
-    if (existsSync(model)) {
-      try {
-        const configuration = JSON.parse(readFileSync(model, "utf8")) as { services: Record<string, { environment?: Record<string, unknown> }> };
-        for (const service of Object.values(configuration.services)) {
-          for (const [key, stored] of Object.entries(service.environment ?? {})) {
-            if (typeof stored === "string" && stored.length >= 4 && secretKey.test(key)) {
-              const secret = stored.replaceAll("$$", "$");
-              value = value.replaceAll(secret, "[redacted]");
-            }
-          }
+    for (const service of Object.values(model?.services ?? {})) {
+      for (const [key, stored] of Object.entries(service.environment ?? {})) {
+        if (typeof stored === "string" && secretKey.test(key)) {
+          secrets.push(stored.replaceAll("$$", "$"));
         }
-      } catch { /* Structured output still uses the existing logger's rules. */ }
+      }
     }
-    return value.split(/\r?\n/).map(redactLogLine).join("\n");
+    return secrets;
+  }
+  private redact(entry: RecordEntry, value: string): string {
+    try { return redactOutput(value, this.outputSecrets(entry, this.outputModel(entry))); }
+    catch { return "[redacted]"; }
   }
 
   private async redactContainerOutput(entry: RecordEntry, container: Environment["resources"]["containers"][number], result: ExecResult): Promise<ExecResult> {
-    let { code, stdout, stderr } = result;
+    const { code, stdout, stderr } = result;
     if (!stdout && !stderr) return result;
     try {
-      const path = join(this.model(entry), "compose.json");
-      const model = existsSync(path) ? JSON.parse(readFileSync(path, "utf8")) : undefined;
-      // File-backed secrets are absent from the snapshot. Redact them from command output using the running container's values.
-      if (model?.services[container.service]?.env_file?.length) {
+      const model = this.outputModel(entry);
+      const service = model?.services[container.service];
+      if (!service) throw new Error("Could not verify feature service configuration");
+      const secrets = this.outputSecrets(entry, model);
+      // Docker has the effective values after Compose resolves env_file entries and overrides.
+      if (service.env_file?.length) {
         for (const variable of await this.docker.containerEnvironment(container.id)) {
           const separator = variable.indexOf("=");
-          const secret = variable.slice(separator + 1);
-          if (separator > 0 && secret.length >= 4 && secretKey.test(variable.slice(0, separator))) {
-            stdout = stdout.replaceAll(secret, "[redacted]");
-            stderr = stderr.replaceAll(secret, "[redacted]");
-          }
+          if (separator <= 0) continue;
+          const value = variable.slice(separator + 1);
+          if (value.length >= 4 || envFileSecretKey.test(variable.slice(0, separator))) secrets.push(value);
         }
       }
+      return { code, stdout: redactOutput(stdout, secrets), stderr: redactOutput(stderr, secrets) };
     } catch {
-      return { code, stdout: "", stderr: "Container output withheld because its environment could not be verified" };
+      return { code, stdout: "", stderr: "Container output withheld because its secrets could not be verified" };
     }
-    return { code, stdout: this.redact(entry, stdout), stderr: this.redact(entry, stderr) };
   }
 
   private hasCapacity(id?: string): void {
@@ -428,8 +458,11 @@ export class Environments {
     const active = entry.resources.containers.some(({ state }) => state === "running" || state === "restarting");
     if (entry.desired !== "running") {
       entry.preview = undefined;
-      entry.observed = entry.desired === "destroyed" ? (entry.resources.containers.length || entry.resources.networks.length ? "degraded" : "destroyed") : active ? "degraded" : "stopped";
-      return;
+      const attention = stopAttention(entry);
+      entry.observed = attention ? "error" : entry.desired === "destroyed"
+        ? (entry.resources.containers.length || entry.resources.networks.length ? "degraded" : "destroyed")
+        : active ? "degraded" : "stopped";
+      return attention;
     }
     const preview = await this.docker.endpoint(entry);
     if (preview && entry.preview?.port === preview.port) preview.domainUrl = entry.preview.domainUrl;
@@ -464,7 +497,7 @@ export class Environments {
         try {
           entry.observationError = await this.observe(entry);
         } catch (error) {
-          entry.observationError = inspectError(error);
+          entry.observationError = stopAttention(entry) ?? inspectError(error);
           entry.observed = "error";
           entry.preview = undefined;
         }
@@ -501,10 +534,15 @@ export class Environments {
         entry.desired = "running";
         entry.observed = "starting";
         entry.checksPassed = false;
+        delete entry.stopRetry;
         this.save(entry);
       }, 25);
     } else {
-      if (action === "stop") { entry.desired = "stopped"; entry.observed = "stopping"; }
+      if (action === "stop") {
+        entry.desired = "stopped";
+        entry.observed = "stopping";
+        delete entry.stopRetry;
+      }
       this.save(entry);
     }
     try {
@@ -551,6 +589,7 @@ export class Environments {
       }
       entry.desired = "destroyed";
       entry.observed = "destroying";
+      delete entry.stopRetry;
       await this.stopEntry(entry);
       this.step(entry, "docker-remove");
       await this.docker.remove(entry.resources, flags.purgeData === true);
@@ -655,7 +694,7 @@ export class Environments {
     if (!entry.preview || entry.observed !== "ready") fail("The feature has no ready preview. Check its current status and logs.", "preview_unavailable");
     return entry.preview;
   }
-  async reconcile(nowMs = Date.now()): Promise<Environment[]> {
+  async reconcile(nowMs?: number): Promise<Environment[]> {
     const results: Environment[] = [];
     for (const old of this.entries()) {
       try {
@@ -663,33 +702,44 @@ export class Environments {
           const entry = this.entry(old.id);
           this.markInterrupted(entry);
           try {
-            entry.observationError = await this.observe(entry);
-            const idle = nowMs - Date.parse(entry.activeAt) >= entry.idleMinutes * 60_000;
-            const retryStop = entry.desired === "stopped" && entry.operation?.action === "stop" &&
-              (entry.operation.state === "failed" || entry.operation.state === "interrupted");
-            if (entry.desired === "destroyed" && entry.observed === "degraded" && entry.operation?.state === "interrupted") {
-              await this.stopEntry(entry);
-              await this.docker.remove(entry.resources, false);
-              entry.resources = await this.docker.inspect(entry);
-              entry.observed = "destroyed";
-            } else if (retryStop || (entry.desired === "running" && idle)) {
+            const reconcileTime = nowMs ?? Date.now();
+            const idle = reconcileTime - Date.parse(entry.activeAt) >= entry.idleMinutes * 60_000;
+            const retryStop = entry.desired === "stopped" && (entry.stopRetry || (entry.operation?.action === "stop" &&
+              (entry.operation.state === "failed" || entry.operation.state === "interrupted")));
+            const retryDue = retryStop && !stopAttention(entry) && reconcileTime >= (entry.stopRetry?.retryAt ?? 0);
+            if (retryDue || (entry.desired === "running" && idle)) {
               const time = now();
+              const attempts = (entry.stopRetry?.attempts ?? 0) + 1;
+              // Reserve the attempt before side effects so an interrupted stop also counts.
+              entry.stopRetry = { attempts, retryAt: reconcileTime + stopRetryDelayMs * 2 ** (attempts - 1) };
               entry.desired = "stopped";
               entry.observed = "stopping";
+              delete entry.observationError;
               entry.operation = { id: randomUUID(), action: "stop", state: "running", step: retryStop ? "retry-stop" : "idle-stop", startedAt: time, updatedAt: time };
               this.save(entry);
               await this.stopEntry(entry);
+              delete entry.stopRetry;
               entry.operation.state = "succeeded";
               entry.operation.updatedAt = now();
             } else {
-              await this.syncDomain(entry, entry.observed === "ready" ? entry.preview : undefined);
+              entry.observationError = await this.observe(entry);
+              if (entry.desired === "destroyed" && entry.observed === "degraded" && entry.operation?.state === "interrupted") {
+                await this.stopEntry(entry);
+                await this.docker.remove(entry.resources, false);
+                entry.resources = await this.docker.inspect(entry);
+                entry.observed = "destroyed";
+              } else if (!retryStop) {
+                await this.syncDomain(entry, entry.observed === "ready" ? entry.preview : undefined);
+              }
             }
           } catch (error) {
             entry.observed = "error";
-            entry.observationError = inspectError(error);
+            const detail = inspectError(error);
+            entry.observationError = stopAttention(entry) ?? detail;
             if (entry.operation?.state === "running") {
+              if (entry.stopRetry) entry.stopRetry.retryAt = (nowMs ?? Date.now()) + stopRetryDelayMs * 2 ** (entry.stopRetry.attempts - 1);
               entry.operation.state = "failed";
-              entry.operation.error = entry.observationError;
+              entry.operation.error = detail;
               entry.operation.updatedAt = now();
             }
           }
@@ -717,6 +767,10 @@ export class Environments {
           (name !== "compose" || composeSupported(output)), detail: output };
       } catch { return { name, ok: false, detail: "Unavailable" }; }
     }));
+    for (const entry of this.entries()) {
+      const attention = stopAttention(entry);
+      if (attention) checks.push({ name: "stop:" + entry.id, ok: false, detail: attention.message });
+    }
     return {
       provider: "docker-compose" as const, host: hostname(), checks: [{ name: "git", ok: git !== null, detail: git ?? "Unavailable" }, ...checks],
       capacity: { active: setting("DEVHUB_FEATURE_MAX_ACTIVE", 5, 100), builds: setting("DEVHUB_FEATURE_MAX_BUILDS", 2, 32), minFreeMiB: setting("DEVHUB_FEATURE_MIN_FREE_MIB", 2048, 1_048_576) },
