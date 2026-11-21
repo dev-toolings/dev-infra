@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { parse } from "yaml";
 import type { CatalogPort, Executor, Project } from "../contracts";
 import { projectNetwork } from "../services";
-import { featureHost, prepareProject, projectRecipe, purgeProjectDatabase } from "./project";
+import { composeSeconds, featureHost, prepareProject, projectRecipe, purgeProjectDatabase } from "./project";
 import type { Environment, Recipe } from "./types";
 
 const dirs: string[] = [];
@@ -113,11 +113,21 @@ test("a half-written source from an interrupted run is written again", async () 
   expect(parse(readFileSync(join(f.source, "compose.yml"), "utf8")).services.app.env_file).toEqual([join(f.source, "app.env")]);
 });
 
-test("the app URL keeps the port of a proxy that does not listen on 80", async () => {
+test("the app URL follows the port of the proxy, also when it changes later", async () => {
   const f = fixture();
   process.env.DEVHUB_FEATURE_PROXY_PORT = "8080";
   try {
     await prepareProject(f.options, f.entry, f.source, () => {});
+    expect(readFileSync(join(f.source, "app.env"), "utf8")).toContain(`APP_URL=http://${featureHost(f.entry, "demo")}:8080\n`);
+    process.env.DEVHUB_FEATURE_PROXY_PORT = "8090";
+    await prepareProject(f.options, f.entry, f.source, () => {});
+    expect(readFileSync(join(f.source, "app.env"), "utf8")).toContain(`APP_URL=http://${featureHost(f.entry, "demo")}:8090\n`);
   } finally { delete process.env.DEVHUB_FEATURE_PROXY_PORT; }
-  expect(readFileSync(join(f.source, "app.env"), "utf8")).toContain(`APP_URL=http://${featureHost(f.entry, "demo")}:8080\n`);
+  await prepareProject(f.options, f.entry, f.source, () => {});
+  expect(readFileSync(join(f.source, "app.env"), "utf8")).toContain(`APP_URL=http://${featureHost(f.entry, "demo")}\n`);
+});
+
+test("Compose durations of a health check start period are read in seconds", () => {
+  expect([composeSeconds("300s"), composeSeconds("5m"), composeSeconds("1m30s"), composeSeconds("1h"), composeSeconds("1500ms")]).toEqual([300, 300, 90, 3600, 1.5]);
+  expect([composeSeconds(undefined), composeSeconds("5 minutes"), composeSeconds("10")]).toEqual([0, 0, 0]);
 });

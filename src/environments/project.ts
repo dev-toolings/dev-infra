@@ -31,6 +31,19 @@ function managedComponent(project: Project): Component | undefined {
 /** A feature of a DevHub project answers on <feature>-<id>.<project>.localhost when the proxy profile runs. */
 const projectDomain = (project: string) => proxyHost(project);
 export const featureHost = (env: Pick<Environment, "id" | "slug">, project: string) => previewHost(env, projectDomain(project));
+const featureUrl = (env: Pick<Environment, "id" | "slug">, project: string) => {
+  const port = featureProxyPort();
+  return `http://${featureHost(env, project)}${port === 80 ? "" : `:${port}`}`;
+};
+
+/** A Compose duration such as `300s`, `5m` or `1m30s`, in seconds; 0 when absent or unreadable. */
+export function composeSeconds(value: unknown): number {
+  const text = typeof value === "string" ? value : "";
+  const parts = [...text.matchAll(/(\d+(?:\.\d+)?)(ms|us|ns|h|m|s)/g)];
+  if (!parts.length || parts.map(([part]) => part).join("") !== text) return 0;
+  const unit = { h: 3600, m: 60, s: 1, ms: 1e-3, us: 1e-6, ns: 1e-9 } as const;
+  return parts.reduce((total, [, amount, name]) => total + Number(amount) * unit[name as keyof typeof unit], 0);
+}
 
 /** A project DevHub runs in Docker becomes a one-repository recipe on the shared isolation level. */
 export function projectRecipe(project: Project, stateDir: string): Recipe {
@@ -42,7 +55,7 @@ export function projectRecipe(project: Project, stateDir: string): Recipe {
   const port = Number(String(app.ports?.[0] ?? "").split(":").at(-1));
   if (!Number.isInteger(port) || port < 1 || port > 65535) fail("The project app publishes no port");
   // A first start installs dependencies: wait as long as the app's own health check allows, plus a margin.
-  const startPeriod = Number(/^(\d+)s$/.exec(String(app.healthcheck?.start_period ?? ""))?.[1] ?? 0);
+  const startPeriod = composeSeconds(app.healthcheck?.start_period);
   return {
     version: 1, repositories: { app: { path: project.root, ref: "HEAD" } },
     compose: { repository: "app", files: [], profiles: [], services: ["app"], vars: {}, secretFiles: {} },
@@ -117,8 +130,7 @@ export async function prepareProject(options: Options, entry: Entry, sourceDir: 
 
     const password = randomBytes(24).toString("hex");
     const oldPassword = entry.database ? new Map(envLines(parentEnv)).get("DEVHUB_DB_PASSWORD") ?? fail("The project env file has no DEVHUB_DB_PASSWORD") : "";
-    const port = featureProxyPort();
-    const url = `http://${featureHost(entry, parent.id)}${port === 80 ? "" : `:${port}`}`;
+    const url = featureUrl(entry, parent.id);
     const env = envLines(parentEnv).map(([key, value]) => {
       if (entry.database && key === "DEVHUB_DB_PASSWORD") return `${key}=${password}`;
       if (entry.database && /^postgres(?:ql)?:\/\//.test(value) && value.includes(`/${parentDb}`)) value = value.replaceAll(oldPassword, password).replace(new RegExp(`\\b${parentDb}\\b`, "g"), entry.database);
@@ -132,6 +144,13 @@ export async function prepareProject(options: Options, entry: Entry, sourceDir: 
     // Renamed into place last: its presence means the source is complete.
     writeFileSync(join(sourceDir, "compose.yml.tmp"), stringify(model), { mode: 0o600 });
     renameSync(join(sourceDir, "compose.yml.tmp"), join(sourceDir, "compose.yml"));
+  }
+  // The proxy port can change after the source was written: links and redirects follow it.
+  const envFile = join(sourceDir, "app.env"), written = readFileSync(envFile, "utf8");
+  const current = written.replace(new RegExp(`http://${featureHost(entry, parent.id).replaceAll(".", "\\.")}(?::\\d+)?`, "g"), featureUrl(entry, parent.id));
+  if (current !== written) {
+    writeFileSync(`${envFile}.tmp`, current, { mode: 0o600 });
+    renameSync(`${envFile}.tmp`, envFile);
   }
   await connectProjectNetwork(run, parent.id, component.compose!.managed!.infra);
   if (!entry.database || entry.bootstrap["database-copy"] === "done") return;
