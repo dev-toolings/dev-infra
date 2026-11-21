@@ -66,6 +66,7 @@ feature-env-test: ## Run the isolated feature environment Docker scenario
 	@python3 tests/feature-environments.py
 	@python3 tests/feature-recovery.py
 	@python3 tests/feature-project.py
+	@python3 tests/feature-hmr.py
 
 # --- Releases ---
 version: ## Show installed version

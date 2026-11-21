@@ -18,7 +18,11 @@ The runner creates three temporary Git repositories from `data/examples/feature-
 ```bash
 python3 tests/feature-environments.py
 python3 tests/feature-recovery.py
+python3 tests/feature-project.py
+python3 tests/feature-hmr.py
 ```
+
+`feature-hmr.py` starts a real Vite dev server in a `hardened` feature that keeps Internet access for it alone, then checks that a CSS change in the worktree reaches the browser socket through the preview as a hot update. Vite 6 and later accept the HMR socket only with the token of its client script, which a browser loaded from the preview has.
 
 Pass `--five` to create five feature environments concurrently. Use `devhub env timer-install` to enable periodic reconciliation separately.
 
